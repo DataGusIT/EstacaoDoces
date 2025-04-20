@@ -100,11 +100,4 @@ Contribuições são bem-vindas! Sinta-se à vontade para abrir issues ou enviar
 
 ---
 
-## 👨‍💻 Desenvolvido por
 
-**Seu Nome Aqui**  
-Estudante de Gestão da Tecnologia da Informação - FATEC  
-[![LinkedIn](https://img.shields.io/badge/-LinkedIn-blue?style=flat-square&logo=linkedin)](https://www.linkedin.com/in/seu-perfil)  
-[![GitHub](https://img.shields.io/badge/-GitHub-black?style=flat-square&logo=github)](https://github.com/seuusuario)
-
-```
