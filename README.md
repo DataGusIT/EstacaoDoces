@@ -1,4 +1,3 @@
-```markdown
 # 🛒 Sistema de Controle de Estoque para Bomboniere
 
 Este é um sistema completo de controle de estoque desenvolvido com **Python** e **PyQt5**, focado na gestão de produtos, clientes, fornecedores e promoções para pequenas empresas como bombonieres, lojas de conveniência, mercadinhos, entre outros.
