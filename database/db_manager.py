@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 
 class DatabaseManager:
     def __init__(self, db_file='database/estoque.db'):
+        self.db_path = db_file 
+
         # Garantir que o diretório exista
         os.makedirs(os.path.dirname(db_file), exist_ok=True)
         
@@ -24,6 +26,7 @@ class DatabaseManager:
             descricao TEXT,
             quantidade INTEGER DEFAULT 0,
             preco_compra REAL,
+            preco_custo REAL,
             preco_venda REAL,
             data_validade DATE,
             localizacao TEXT,
@@ -74,6 +77,71 @@ class DatabaseManager:
         )
         ''')
         
+        # Tabela de Caixas
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS caixas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data_abertura TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            data_fechamento TIMESTAMP,
+            saldo_inicial REAL NOT NULL,
+            saldo_final_sistema REAL,
+            saldo_final_informado REAL,
+            diferenca REAL,
+            operador TEXT,
+            status TEXT DEFAULT 'Aberto',
+            observacao TEXT
+        )
+        ''')
+        
+        # Tabela de Movimentos de Caixa
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS movimentos_caixa (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            caixa_id INTEGER NOT NULL,
+            data_hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            tipo TEXT NOT NULL, -- 'Entrada' ou 'Saída'
+            descricao TEXT NOT NULL,
+            valor REAL NOT NULL,
+            forma_pagamento TEXT,
+            referencia_id INTEGER, -- ID da venda ou outra entidade
+            tipo_referencia TEXT, -- 'Venda', 'Despesa', etc.
+            operador TEXT,
+            observacao TEXT,
+            FOREIGN KEY (caixa_id) REFERENCES caixas (id)
+        )
+        ''')
+        
+        # Tabela de Vendas
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS vendas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data_hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            cliente_id INTEGER,
+            valor_total REAL NOT NULL,
+            desconto REAL DEFAULT 0,
+            forma_pagamento TEXT,
+            parcelas INTEGER DEFAULT 1,
+            observacao TEXT,
+            status TEXT DEFAULT 'Concluída',
+            operador TEXT,
+            FOREIGN KEY (cliente_id) REFERENCES clientes (id)
+        )
+        ''')
+        
+        # Tabela de Itens de Venda
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS itens_venda (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            venda_id INTEGER NOT NULL,
+            produto_id INTEGER NOT NULL,
+            quantidade INTEGER NOT NULL,
+            preco_unitario REAL NOT NULL,
+            subtotal REAL NOT NULL,
+            FOREIGN KEY (venda_id) REFERENCES vendas (id),
+            FOREIGN KEY (produto_id) REFERENCES produtos (id)
+        )
+        ''')
+
         # Commit das mudanças
         self.conn.commit()
     
@@ -271,6 +339,485 @@ class DatabaseManager:
         ''', (data_hoje, data_hoje))
         
         return self.cursor.fetchall()
+    
+    # Métodos para Caixas
+    def abrir_caixa(self, saldo_inicial, operador, observacao=""):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Verificar se já existe um caixa aberto
+            cursor.execute("SELECT id FROM caixas WHERE status = 'Aberto'")
+            if cursor.fetchone():
+                conn.close()
+                return False
+            
+            # Registrar abertura de caixa
+            cursor.execute("""
+                INSERT INTO caixas (saldo_inicial, operador, observacao)
+                VALUES (?, ?, ?)
+            """, (saldo_inicial, operador, observacao))
+            
+            caixa_id = cursor.lastrowid
+            
+            # Registrar movimento de entrada do saldo inicial
+            if saldo_inicial > 0:
+                cursor.execute("""
+                    INSERT INTO movimentos_caixa 
+                    (caixa_id, tipo, descricao, valor, forma_pagamento, operador)
+                    VALUES (?, 'Entrada', 'Saldo Inicial', ?, 'Dinheiro', ?)
+                """, (caixa_id, saldo_inicial, operador))
+            
+            conn.commit()
+            conn.close()
+            
+            return caixa_id
+        except Exception as e:
+            print(f"Erro ao abrir caixa: {e}")
+            return False
+    
+    def fechar_caixa(self, caixa_id, saldo_final_informado, diferenca, operador, observacao=""):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Calcular saldo final do sistema
+            cursor.execute("""
+                SELECT 
+                    SUM(CASE WHEN tipo = 'Entrada' THEN valor ELSE -valor END) 
+                FROM movimentos_caixa 
+                WHERE caixa_id = ?
+            """, (caixa_id,))
+            
+            saldo_final_sistema = cursor.fetchone()[0] or 0
+            
+            # Atualizar registro do caixa
+            cursor.execute("""
+                UPDATE caixas SET 
+                data_fechamento = CURRENT_TIMESTAMP,
+                saldo_final_sistema = ?,
+                saldo_final_informado = ?,
+                diferenca = ?,
+                status = 'Fechado',
+                observacao = ?
+                WHERE id = ?
+            """, (saldo_final_sistema, saldo_final_informado, diferenca, observacao, caixa_id))
+            
+            conn.commit()
+            conn.close()
+            
+            return True
+        except Exception as e:
+            print(f"Erro ao fechar caixa: {e}")
+            return False
+    
+    def obter_caixa_aberto(self):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT * FROM caixas WHERE status = 'Aberto'
+            """)
+            
+            caixa = cursor.fetchone()
+            conn.close()
+            
+            if caixa:
+                return dict(caixa)
+            else:
+                return None
+        except Exception as e:
+            print(f"Erro ao buscar caixa aberto: {e}")
+            return None
+    
+    def obter_saldo_atual(self, caixa_id):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT 
+                    SUM(CASE WHEN tipo = 'Entrada' THEN valor ELSE -valor END) 
+                FROM movimentos_caixa 
+                WHERE caixa_id = ?
+            """, (caixa_id,))
+            
+            saldo = cursor.fetchone()[0] or 0
+            conn.close()
+            
+            return float(saldo)
+        except Exception as e:
+            print(f"Erro ao obter saldo: {e}")
+            return 0.0
+    
+    def registrar_movimento_caixa(self, caixa_id, tipo, descricao, valor, forma_pagamento="Dinheiro", 
+                                 referencia_id=None, tipo_referencia=None, operador="Sistema", observacao=""):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT INTO movimentos_caixa 
+                (caixa_id, tipo, descricao, valor, forma_pagamento, referencia_id, tipo_referencia, operador, observacao)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (caixa_id, tipo, descricao, valor, forma_pagamento, referencia_id, 
+                 tipo_referencia, operador, observacao))
+            
+            movimento_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+            
+            return movimento_id
+        except Exception as e:
+            print(f"Erro ao registrar movimento: {e}")
+            return False
+    
+    def listar_movimentos_caixa(self, caixa_id):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT id, datetime(data_hora, 'localtime') as data_hora, tipo, descricao, 
+                       valor, forma_pagamento, referencia_id, tipo_referencia
+                FROM movimentos_caixa 
+                WHERE caixa_id = ?
+                ORDER BY data_hora DESC
+            """, (caixa_id,))
+            
+            movimentos = [dict(row) for row in cursor.fetchall()]
+            conn.close()
+            
+            return movimentos
+        except Exception as e:
+            print(f"Erro ao listar movimentos: {e}")
+            return []
+    
+    def listar_movimentos_por_periodo(self, caixa_id, data_inicio, data_fim):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT id, datetime(data_hora, 'localtime') as data_hora, tipo, descricao, 
+                       valor, forma_pagamento, referencia_id, tipo_referencia
+                FROM movimentos_caixa 
+                WHERE caixa_id = ? AND date(data_hora) BETWEEN ? AND ?
+                ORDER BY data_hora DESC
+            """, (caixa_id, data_inicio, data_fim))
+            
+            movimentos = [dict(row) for row in cursor.fetchall()]
+            conn.close()
+            
+            return movimentos
+        except Exception as e:
+            print(f"Erro ao listar movimentos por período: {e}")
+            return []
+    
+    def obter_detalhes_caixa(self, caixa_id):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # Buscar dados do caixa
+            cursor.execute("""
+                SELECT 
+                    id, datetime(data_abertura, 'localtime') as data_abertura,
+                    datetime(data_fechamento, 'localtime') as data_fechamento,
+                    saldo_inicial, saldo_final_sistema, saldo_final_informado,
+                    diferenca, operador, status, observacao
+                FROM caixas 
+                WHERE id = ?
+            """, (caixa_id,))
+            
+            caixa = cursor.fetchone()
+            if not caixa:
+                conn.close()
+                return None
+            
+            detalhes = dict(caixa)
+            
+            # Buscar entradas e saídas
+            cursor.execute("""
+                SELECT tipo, SUM(valor) as total
+                FROM movimentos_caixa
+                WHERE caixa_id = ?
+                GROUP BY tipo
+            """, (caixa_id,))
+            
+            for row in cursor.fetchall():
+                if row['tipo'] == 'Entrada':
+                    detalhes['total_entradas'] = row['total']
+                else:
+                    detalhes['total_saidas'] = row['total']
+            
+            # Garantir valores mesmo que não existam
+            if 'total_entradas' not in detalhes:
+                detalhes['total_entradas'] = 0
+            if 'total_saidas' not in detalhes:
+                detalhes['total_saidas'] = 0
+            
+            # Buscar vendas
+            cursor.execute("""
+                SELECT COUNT(*) as total_vendas, SUM(valor_total) as valor_vendas
+                FROM vendas v
+                JOIN movimentos_caixa m ON v.id = m.referencia_id AND m.tipo_referencia = 'Venda'
+                WHERE m.caixa_id = ?
+            """, (caixa_id,))
+            
+            vendas = cursor.fetchone()
+            if vendas:
+                detalhes['total_vendas'] = vendas['total_vendas'] or 0
+                detalhes['valor_vendas'] = vendas['valor_vendas'] or 0
+            else:
+                detalhes['total_vendas'] = 0
+                detalhes['valor_vendas'] = 0
+            
+            conn.close()
+            return detalhes
+        except Exception as e:
+            print(f"Erro ao obter detalhes do caixa: {e}")
+            return None
+    
+    def gerar_relatorio_periodo(self, data_inicio, data_fim):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # Movimentos de caixa
+            cursor.execute("""
+                SELECT tipo, SUM(valor) as total
+                FROM movimentos_caixa
+                WHERE date(data_hora) BETWEEN ? AND ?
+                GROUP BY tipo
+            """, (data_inicio, data_fim))
+            
+            movimentos_resumo = {'total_entradas': 0, 'total_saidas': 0}
+            
+            for row in cursor.fetchall():
+                if row['tipo'] == 'Entrada':
+                    movimentos_resumo['total_entradas'] = row['total']
+                else:
+                    movimentos_resumo['total_saidas'] = row['total']
+            
+            # Vendas
+            cursor.execute("""
+                SELECT COUNT(*) as qtd, SUM(valor_total) as total, SUM(desconto) as descontos
+                FROM vendas
+                WHERE date(data_hora) BETWEEN ? AND ?
+            """, (data_inicio, data_fim))
+            
+            vendas_resumo = cursor.fetchone()
+            
+            # Formas de pagamento
+            cursor.execute("""
+                SELECT forma_pagamento, SUM(valor_total) as total
+                FROM vendas
+                WHERE date(data_hora) BETWEEN ? AND ?
+                GROUP BY forma_pagamento
+            """, (data_inicio, data_fim))
+            
+            pagamentos = {}
+            for row in cursor.fetchall():
+                pagamentos[row['forma_pagamento']] = row['total']
+            
+            # Produtos mais vendidos
+            cursor.execute("""
+                SELECT p.id, p.nome, SUM(i.quantidade) as quantidade, SUM(i.subtotal) as valor_total
+                FROM itens_venda i
+                JOIN produtos p ON i.produto_id = p.id
+                JOIN vendas v ON i.venda_id = v.id
+                WHERE date(v.data_hora) BETWEEN ? AND ?
+                GROUP BY p.id, p.nome
+                ORDER BY quantidade DESC
+            """, (data_inicio, data_fim))
+            
+            produtos = [dict(row) for row in cursor.fetchall()]
+            
+            # Lista de movimentos
+            cursor.execute("""
+                SELECT id, datetime(data_hora, 'localtime') as data_hora, tipo, descricao, 
+                       valor, forma_pagamento, referencia_id, tipo_referencia
+                FROM movimentos_caixa 
+                WHERE date(data_hora) BETWEEN ? AND ?
+                ORDER BY data_hora DESC
+            """, (data_inicio, data_fim))
+            
+            movimentos = [dict(row) for row in cursor.fetchall()]
+            
+            # Lista de vendas
+            cursor.execute("""
+                SELECT v.id, datetime(v.data_hora, 'localtime') as data_hora, 
+                       COALESCE(c.nome, 'Cliente Não Identificado') as cliente,
+                       v.valor_total, v.desconto, v.forma_pagamento
+                FROM vendas v
+                LEFT JOIN clientes c ON v.cliente_id = c.id
+                WHERE date(v.data_hora) BETWEEN ? AND ?
+                ORDER BY v.data_hora DESC
+            """, (data_inicio, data_fim))
+            
+            vendas = [dict(row) for row in cursor.fetchall()]
+            
+            conn.close()
+            
+            # Montar resultado
+            resultado = {
+                'total_entradas': movimentos_resumo['total_entradas'],
+                'total_saidas': movimentos_resumo['total_saidas'],
+                'saldo_periodo': movimentos_resumo['total_entradas'] - movimentos_resumo['total_saidas'],
+                'qtd_vendas': vendas_resumo['qtd'] or 0,
+                'valor_vendas': vendas_resumo['total'] or 0,
+                'valor_medio_venda': (vendas_resumo['total'] / vendas_resumo['qtd']) if vendas_resumo['qtd'] else 0,
+                'total_descontos': vendas_resumo['descontos'] or 0,
+                'pagamentos': pagamentos,
+                'produtos_mais_vendidos': produtos,
+                'movimentos': movimentos,
+                'vendas': vendas
+            }
+            
+            return resultado
+        except Exception as e:
+            print(f"Erro ao gerar relatório: {e}")
+            return None
+    
+    def registrar_venda(self, cliente_id, valor_total, desconto=0, forma_pagamento="Dinheiro", 
+                       parcelas=1, observacao="", status="Concluída", operador="Sistema"):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT INTO vendas 
+                (cliente_id, valor_total, desconto, forma_pagamento, parcelas, observacao, status, operador)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (cliente_id, valor_total, desconto, forma_pagamento, parcelas, 
+                 observacao, status, operador))
+            
+            venda_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+            
+            return venda_id
+        except Exception as e:
+            print(f"Erro ao registrar venda: {e}")
+            return False
+    
+    def registrar_item_venda(self, venda_id, produto_id, quantidade, preco_unitario, subtotal):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Registrar item
+            cursor.execute("""
+                INSERT INTO itens_venda 
+                (venda_id, produto_id, quantidade, preco_unitario, subtotal)
+                VALUES (?, ?, ?, ?, ?)
+            """, (venda_id, produto_id, quantidade, preco_unitario, subtotal))
+            
+            # Atualizar estoque
+            cursor.execute("""
+                UPDATE produtos 
+                SET quantidade = quantidade - ?
+                WHERE id = ?
+            """, (quantidade, produto_id))
+            
+            conn.commit()
+            conn.close()
+            
+            return True
+        except Exception as e:
+            print(f"Erro ao registrar item de venda: {e}")
+            return False
+    
+    def obter_dados_dashboard(self, data_inicio, data_fim):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # Faturamento e número de vendas
+            cursor.execute("""
+                SELECT COUNT(*) as num_vendas, SUM(valor_total) as faturamento
+                FROM vendas
+                WHERE date(data_hora) BETWEEN ? AND ?
+            """, (data_inicio, data_fim))
+            
+            vendas_resumo = cursor.fetchone()
+            
+            # Lucro (com base na diferença entre preço de venda e custo)
+            cursor.execute("""
+                SELECT SUM((i.preco_unitario - p.preco_custo) * i.quantidade) as lucro
+                FROM itens_venda i
+                JOIN produtos p ON i.produto_id = p.id
+                JOIN vendas v ON i.venda_id = v.id
+                WHERE date(v.data_hora) BETWEEN ? AND ? AND p.preco_custo IS NOT NULL
+            """, (data_inicio, data_fim))
+            
+            lucro = cursor.fetchone()['lucro'] or 0
+            
+            # Produtos mais vendidos
+            cursor.execute("""
+                SELECT p.nome, SUM(i.quantidade) as quantidade, SUM(i.subtotal) as valor_total
+                FROM itens_venda i
+                JOIN produtos p ON i.produto_id = p.id
+                JOIN vendas v ON i.venda_id = v.id
+                WHERE date(v.data_hora) BETWEEN ? AND ?
+                GROUP BY p.id, p.nome
+                ORDER BY quantidade DESC
+                LIMIT 10
+            """, (data_inicio, data_fim))
+            
+            produtos = [dict(row) for row in cursor.fetchall()]
+            
+            # Formas de pagamento
+            cursor.execute("""
+                SELECT forma_pagamento as forma, SUM(valor_total) as valor_total
+                FROM vendas
+                WHERE date(data_hora) BETWEEN ? AND ?
+                GROUP BY forma_pagamento
+                ORDER BY valor_total DESC
+            """, (data_inicio, data_fim))
+            
+            pagamentos = [dict(row) for row in cursor.fetchall()]
+            
+            # Melhores clientes
+            cursor.execute("""
+                SELECT 
+                    COALESCE(c.nome, 'Cliente Não Identificado') as nome,
+                    COUNT(*) as compras,
+                    SUM(v.valor_total) as valor_total
+                FROM vendas v
+                LEFT JOIN clientes c ON v.cliente_id = c.id
+                WHERE date(v.data_hora) BETWEEN ? AND ?
+                GROUP BY v.cliente_id
+                ORDER BY valor_total DESC
+                LIMIT 10
+            """, (data_inicio, data_fim))
+            
+            clientes = [dict(row) for row in cursor.fetchall()]
+            
+            conn.close()
+            
+            # Montar resultado
+            resultado = {
+                'faturamento': vendas_resumo['faturamento'] or 0,
+                'num_vendas': vendas_resumo['num_vendas'] or 0,
+                'lucro': lucro,
+                'produtos': produtos,
+                'pagamentos': pagamentos,
+                'clientes': clientes
+            }
+
+            return resultado
+        except Exception as e:
+            print(f"Erro ao obter dados para dashboard: {e}")
+            return None
     
     def fechar(self):
         self.conn.close()

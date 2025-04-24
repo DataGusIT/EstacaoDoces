@@ -9,6 +9,8 @@ from ui.estoque_window import EstoqueWindow
 from ui.fornecedor_window import FornecedorWindow
 from ui.promocoes_window import PromocoesWindow
 from ui.clientes_window import ClientesWindow
+from ui.caixa_window import CaixaWindow
+from ui.dashboard_window import DashboardWindow
 
 class MainWindow(QMainWindow):
     def __init__(self, db, settings):
@@ -61,6 +63,8 @@ class MainWindow(QMainWindow):
         self.btn_fornecedor = QPushButton("Cadastro de Fornecedores")
         self.btn_promocoes = QPushButton("Cadastro de Promoções")
         self.btn_clientes = QPushButton("Cadastro de Clientes")
+        self.btn_caixa = QPushButton("Controle de Caixa")
+        self.btn_dashboard = QPushButton("Dashboard")
         
         # Estilizar botões
         for btn in [self.btn_estoque, self.btn_fornecedor, self.btn_promocoes, self.btn_clientes]:
@@ -72,6 +76,8 @@ class MainWindow(QMainWindow):
         menu_layout.addWidget(self.btn_fornecedor)
         menu_layout.addWidget(self.btn_promocoes)
         menu_layout.addWidget(self.btn_clientes)
+        menu_layout.addWidget(self.btn_caixa)
+        menu_layout.addWidget(self.btn_dashboard)
         menu_layout.addStretch()
         
         # Créditos no final do menu
@@ -87,17 +93,23 @@ class MainWindow(QMainWindow):
         self.fornecedor_page = FornecedorWindow(self.db)
         self.promocoes_page = PromocoesWindow(self.db)
         self.clientes_page = ClientesWindow(self.db)
+        self.caixa_page = CaixaWindow(self.db)
+        self.dashboard_page = DashboardWindow(self.db)
         
         self.stack.addWidget(self.estoque_page)
         self.stack.addWidget(self.fornecedor_page)
         self.stack.addWidget(self.promocoes_page)
         self.stack.addWidget(self.clientes_page)
+        self.stack.addWidget(self.caixa_page)
+        self.stack.addWidget(self.dashboard_page)
         
         # Conectar sinais dos botões
         self.btn_estoque.clicked.connect(lambda: self.switch_page(0))
         self.btn_fornecedor.clicked.connect(lambda: self.switch_page(1))
         self.btn_promocoes.clicked.connect(lambda: self.switch_page(2))
         self.btn_clientes.clicked.connect(lambda: self.switch_page(3))
+        self.btn_caixa.clicked.connect(lambda: self.switch_page(4))
+        self.btn_dashboard.clicked.connect(lambda: self.switch_page(5))
         
         # Adicionar elementos ao layout principal
         main_layout.addWidget(self.menu_widget)
@@ -160,12 +172,12 @@ class MainWindow(QMainWindow):
         
         # Atualizar título da janela com base na página
         titles = ["Controle de Estoque", "Cadastro de Fornecedores", 
-                 "Cadastro de Promoções", "Cadastro de Clientes"]
+                 "Cadastro de Promoções", "Cadastro de Clientes", "Controle de Caixa", "Dashboard"]
         
         self.setWindowTitle(f"Sistema de Estoque - {titles[index]}")
         
         # Destacar botão ativo
-        buttons = [self.btn_estoque, self.btn_fornecedor, self.btn_promocoes, self.btn_clientes]
+        buttons = [self.btn_estoque, self.btn_fornecedor, self.btn_promocoes, self.btn_clientes, self.btn_caixa, self.btn_dashboard]
         
         for i, btn in enumerate(buttons):
             if i == index:
@@ -193,6 +205,10 @@ class MainWindow(QMainWindow):
             self.promocoes_page.carregar_dados()
         elif current_index == 3:
             self.clientes_page.carregar_dados()
+        elif current_index == 4:
+            self.caixa_page.carregar_dados()
+        elif current_index == 5:
+            self.dashboard_page.carregar_dados()
         
         self.statusBar.showMessage("Dados atualizados com sucesso!", 3000)
     
