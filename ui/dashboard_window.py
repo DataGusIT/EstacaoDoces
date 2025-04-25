@@ -12,6 +12,7 @@ class DashboardWindow(QWidget):
         super().__init__()
         self.db = db
         self.initUI()
+        self.periodo_alterado(0)  # Inicializa com o período padrão (Hoje)
         self.carregar_dados()
     
     def initUI(self):
@@ -31,13 +32,13 @@ class DashboardWindow(QWidget):
         frame_filtros_layout.addWidget(QLabel("De:"))
         self.dt_inicio = QDateEdit(QDate.currentDate())
         self.dt_inicio.setCalendarPopup(True)
-        self.dt_inicio.setEnabled(False)
+        self.dt_inicio.dateChanged.connect(self.data_alterada)
         frame_filtros_layout.addWidget(self.dt_inicio)
         
         frame_filtros_layout.addWidget(QLabel("Até:"))
         self.dt_fim = QDateEdit(QDate.currentDate())
         self.dt_fim.setCalendarPopup(True)
-        self.dt_fim.setEnabled(False)
+        self.dt_fim.dateChanged.connect(self.data_alterada)
         frame_filtros_layout.addWidget(self.dt_fim)
         
         self.btn_atualizar = QPushButton("Atualizar")
@@ -166,12 +167,33 @@ class DashboardWindow(QWidget):
         
         return card
     
+    def data_alterada(self):
+        # Quando o usuário altera manualmente uma data, muda para o modo personalizado
+        if self.dt_inicio.isEnabled() and self.dt_fim.isEnabled():
+            # Verificar se data início é maior que data fim
+            if self.dt_inicio.date() > self.dt_fim.date():
+                # Ajustar data fim para ser igual data início
+                self.dt_fim.setDate(self.dt_inicio.date())
+        
+        # Se estivermos em modo não personalizado, mudar para personalizado
+        if self.cb_periodo.currentText() != "Personalizado":
+            self.cb_periodo.blockSignals(True)
+            self.cb_periodo.setCurrentText("Personalizado")
+            self.cb_periodo.blockSignals(False)
+    
     def periodo_alterado(self, index):
         periodo = self.cb_periodo.currentText()
         hoje = QDate.currentDate()
         
+        # Bloquear sinais para evitar recursão
+        self.dt_inicio.blockSignals(True)
+        self.dt_fim.blockSignals(True)
+        
         if periodo == "Hoje":
             self.dt_inicio.setDate(hoje)
+            self.dt_fim.setDate(hoje)
+        elif periodo == "Última Semana":
+            self.dt_inicio.setDate(hoje.addDays(-7))
             self.dt_fim.setDate(hoje)
         elif periodo == "Último Mês":
             self.dt_inicio.setDate(hoje.addMonths(-1))
@@ -184,59 +206,88 @@ class DashboardWindow(QWidget):
         personalizado = periodo == "Personalizado"
         self.dt_inicio.setEnabled(personalizado)
         self.dt_fim.setEnabled(personalizado)
+        
+        # Desbloquear sinais
+        self.dt_inicio.blockSignals(False)
+        self.dt_fim.blockSignals(False)
+        
+        # Carregar dados com o novo período, exceto quando for personalizado
+        # porque aí o usuário precisa selecionar as datas primeiro
+        if not personalizado:
+            self.carregar_dados()
     
     def carregar_dados(self):
         data_inicio = self.dt_inicio.date().toString("yyyy-MM-dd")
         data_fim = self.dt_fim.date().toString("yyyy-MM-dd")
         
-        # Buscar dados no banco
-        dados = self.db.obter_dados_dashboard(data_inicio, data_fim)
+        try:
+            # Buscar dados no banco
+            dados = self.db.obter_dados_dashboard(data_inicio, data_fim)
+            
+            if not dados:
+                self.mostrar_sem_dados()
+                return
+            
+            # Atualizar indicadores principais
+            self.lbl_faturamento.setText(f"R$ {dados['faturamento']:.2f}")
+            self.lbl_lucro.setText(f"R$ {dados['lucro']:.2f}")
+            self.lbl_num_vendas.setText(str(dados['num_vendas']))
+            
+            ticket_medio = dados['faturamento'] / dados['num_vendas'] if dados['num_vendas'] > 0 else 0
+            self.lbl_ticket_medio.setText(f"R$ {ticket_medio:.2f}")
+            
+            # Atualizar tabela de produtos
+            self.tabela_produtos.setRowCount(0)
+            
+            for i, produto in enumerate(dados['produtos']):
+                self.tabela_produtos.insertRow(i)
+                
+                self.tabela_produtos.setItem(i, 0, QTableWidgetItem(produto['nome']))
+                self.tabela_produtos.setItem(i, 1, QTableWidgetItem(str(produto['quantidade'])))
+                self.tabela_produtos.setItem(i, 2, QTableWidgetItem(f"R$ {produto['valor_total']:.2f}"))
+                
+                participacao = (produto['valor_total'] / dados['faturamento'] * 100) if dados['faturamento'] > 0 else 0
+                self.tabela_produtos.setItem(i, 3, QTableWidgetItem(f"{participacao:.2f}%"))
+            
+            # Atualizar tabela de formas de pagamento
+            self.tabela_pagamentos.setRowCount(0)
+            
+            for i, pagamento in enumerate(dados['pagamentos']):
+                self.tabela_pagamentos.insertRow(i)
+                
+                self.tabela_pagamentos.setItem(i, 0, QTableWidgetItem(pagamento['forma']))
+                self.tabela_pagamentos.setItem(i, 1, QTableWidgetItem(f"R$ {pagamento['valor_total']:.2f}"))
+                
+                participacao = (pagamento['valor_total'] / dados['faturamento'] * 100) if dados['faturamento'] > 0 else 0
+                self.tabela_pagamentos.setItem(i, 2, QTableWidgetItem(f"{participacao:.2f}%"))
+            
+            # Atualizar tabela de clientes
+            self.tabela_clientes.setRowCount(0)
+            
+            for i, cliente in enumerate(dados['clientes']):
+                self.tabela_clientes.insertRow(i)
+                
+                self.tabela_clientes.setItem(i, 0, QTableWidgetItem(cliente['nome']))
+                self.tabela_clientes.setItem(i, 1, QTableWidgetItem(str(cliente['compras'])))
+                self.tabela_clientes.setItem(i, 2, QTableWidgetItem(f"R$ {cliente['valor_total']:.2f}"))
+                
+                ticket = cliente['valor_total'] / cliente['compras'] if cliente['compras'] > 0 else 0
+                self.tabela_clientes.setItem(i, 3, QTableWidgetItem(f"R$ {ticket:.2f}"))
         
-        if not dados:
-            return
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Erro ao carregar dados: {str(e)}")
+    
+    def mostrar_sem_dados(self):
+        # Limpar indicadores
+        self.lbl_faturamento.setText("R$ 0,00")
+        self.lbl_lucro.setText("R$ 0,00")
+        self.lbl_num_vendas.setText("0")
+        self.lbl_ticket_medio.setText("R$ 0,00")
         
-        # Atualizar indicadores principais
-        self.lbl_faturamento.setText(f"R$ {dados['faturamento']:.2f}")
-        self.lbl_lucro.setText(f"R$ {dados['lucro']:.2f}")
-        self.lbl_num_vendas.setText(str(dados['num_vendas']))
-        
-        ticket_medio = dados['faturamento'] / dados['num_vendas'] if dados['num_vendas'] > 0 else 0
-        self.lbl_ticket_medio.setText(f"R$ {ticket_medio:.2f}")
-        
-        # Atualizar tabela de produtos
+        # Limpar tabelas
         self.tabela_produtos.setRowCount(0)
-        
-        for i, produto in enumerate(dados['produtos']):
-            self.tabela_produtos.insertRow(i)
-            
-            self.tabela_produtos.setItem(i, 0, QTableWidgetItem(produto['nome']))
-            self.tabela_produtos.setItem(i, 1, QTableWidgetItem(str(produto['quantidade'])))
-            self.tabela_produtos.setItem(i, 2, QTableWidgetItem(f"R$ {produto['valor_total']:.2f}"))
-            
-            participacao = (produto['valor_total'] / dados['faturamento'] * 100) if dados['faturamento'] > 0 else 0
-            self.tabela_produtos.setItem(i, 3, QTableWidgetItem(f"{participacao:.2f}%"))
-        
-        # Atualizar tabela de formas de pagamento
         self.tabela_pagamentos.setRowCount(0)
-        
-        for i, pagamento in enumerate(dados['pagamentos']):
-            self.tabela_pagamentos.insertRow(i)
-            
-            self.tabela_pagamentos.setItem(i, 0, QTableWidgetItem(pagamento['forma']))
-            self.tabela_pagamentos.setItem(i, 1, QTableWidgetItem(f"R$ {pagamento['valor_total']:.2f}"))
-            
-            participacao = (pagamento['valor_total'] / dados['faturamento'] * 100) if dados['faturamento'] > 0 else 0
-            self.tabela_pagamentos.setItem(i, 2, QTableWidgetItem(f"{participacao:.2f}%"))
-        
-        # Atualizar tabela de clientes
         self.tabela_clientes.setRowCount(0)
         
-        for i, cliente in enumerate(dados['clientes']):
-            self.tabela_clientes.insertRow(i)
-            
-            self.tabela_clientes.setItem(i, 0, QTableWidgetItem(cliente['nome']))
-            self.tabela_clientes.setItem(i, 1, QTableWidgetItem(str(cliente['compras'])))
-            self.tabela_clientes.setItem(i, 2, QTableWidgetItem(f"R$ {cliente['valor_total']:.2f}"))
-            
-            ticket = cliente['valor_total'] / cliente['compras'] if cliente['compras'] > 0 else 0
-            self.tabela_clientes.setItem(i, 3, QTableWidgetItem(f"R$ {ticket:.2f}"))
+        # Mostrar mensagem para o usuário
+        QMessageBox.information(self, "Informação", "Não foram encontrados dados para o período selecionado.")
