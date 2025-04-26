@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QPushButton, 
                             QLabel, QStackedWidget, QHBoxLayout, QFrame,
                             QAction, QMenu, QToolBar, QDialog, QFormLayout,
-                            QComboBox, QSpinBox, QMessageBox, QStatusBar)
+                            QComboBox, QSpinBox, QMessageBox, QStatusBar, QSizePolicy)
 from PyQt5.QtGui import QFont, QIcon, QPixmap
 from PyQt5.QtCore import Qt, QDate, QSize
 # Adicionar esta linha se ainda não existir:
@@ -28,11 +28,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Sistema de Estoque")
         self.setGeometry(100, 100, 1200, 700)
         
-        # Menu superior
+        # Menu superior (agora contendo também as ações da toolbar)
         self.criar_menu()
         
-        # Toolbar
-        self.criar_toolbar()
+        # Remover a criação da toolbar separada, pois agora está integrada ao menu
+        # self.criar_toolbar()  # Esta linha deve ser comentada ou removida
         
         # Status bar com estilo moderno
         self.statusBar = QStatusBar()
@@ -228,6 +228,49 @@ class MainWindow(QMainWindow):
         sobre_action.triggered.connect(self.mostrar_sobre)
         # sobre_action.setIcon(QIcon("resources/icons/info.png"))
         ajuda_menu.addAction(sobre_action)
+        
+        # Adicionar ações da toolbar diretamente ao menubar (move as ações para a mesma linha)
+        toolbar_widget = QWidget()
+        toolbar_layout = QHBoxLayout(toolbar_widget)
+        toolbar_layout.setContentsMargins(0, 0, 10, 0)
+        toolbar_layout.setSpacing(5)
+        
+        refresh_action = QAction('Atualizar', self)
+        # refresh_action.setIcon(QIcon("resources/icons/refresh.png"))
+        refresh_action.triggered.connect(self.atualizar_dados)
+        
+        search_action = QAction('Pesquisar', self)
+        # search_action.setIcon(QIcon("resources/icons/search.png"))
+        
+        export_action = QAction('Exportar', self)
+        # export_action.setIcon(QIcon("resources/icons/export.png"))
+        
+        # Criar botões para a toolbar que ficará no menubar
+        refresh_button = QPushButton("Atualizar")
+        refresh_button.setObjectName("toolbarButton")
+        refresh_button.clicked.connect(self.atualizar_dados)
+        refresh_button.setCursor(Qt.PointingHandCursor)
+        
+        search_button = QPushButton("Pesquisar")
+        search_button.setObjectName("toolbarButton")
+        search_button.setCursor(Qt.PointingHandCursor)
+        
+        export_button = QPushButton("Exportar")
+        export_button.setObjectName("toolbarButton")
+        export_button.setCursor(Qt.PointingHandCursor)
+        
+        # Adicionar botões ao layout
+        toolbar_layout.addWidget(refresh_button)
+        toolbar_layout.addWidget(search_button)
+        toolbar_layout.addWidget(export_button)
+        
+        # Adicionar um widget de espaçamento que vai crescer e empurrar os botões para a direita
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        toolbar_layout.addWidget(spacer)
+        
+        # Adicionar o widget com os botões ao menubar
+        menubar.setCornerWidget(toolbar_widget)
     
     def criar_toolbar(self):
         """Cria a barra de ferramentas."""
@@ -327,6 +370,20 @@ class MainWindow(QMainWindow):
                 }
                 #creditos {
                     color: #888;
+                }
+                #toolbarButton {
+                background-color: #2d2d2d;
+                color: #d0d0d0;
+                border: none;
+                border-radius: 3px;
+                padding: 3px 10px;
+                margin: 2px;
+                }
+                #toolbarButton:hover {
+                    background-color: #383838;
+                }
+                #toolbarButton:pressed {
+                    background-color: #454545;
                 }
                 QMenuBar {
                     background-color: #1e1e1e;
@@ -441,6 +498,20 @@ class MainWindow(QMainWindow):
                 }
                 #creditos {
                     color: #adb5bd;
+                }
+                #toolbarButton {
+                background-color: #e9ecef;
+                color: #212529;
+                border: none;
+                border-radius: 3px;
+                padding: 3px 10px;
+                margin: 2px;
+                }
+                #toolbarButton:hover {
+                    background-color: #dee2e6;
+                }
+                #toolbarButton:pressed {
+                    background-color: #ced4da;
                 }
                 QMenuBar {
                     background-color: #f8f9fa;
