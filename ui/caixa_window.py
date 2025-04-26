@@ -18,6 +18,7 @@ class CaixaWindow(QWidget):
         self.verificar_caixa_aberto()
         self.carregar_clientes()
         self.carregar_produtos()
+
     
     def initUI(self):
         # Layout principal
@@ -83,21 +84,38 @@ class CaixaWindow(QWidget):
         self.cb_cliente = QComboBox()
         self.cb_cliente.setMinimumWidth(200)
         frame_info_layout.addWidget(self.cb_cliente, 0, 1)
-        
+
+        # Layout horizontal para os botões de cliente
+        btn_container = QWidget()
+        btn_layout = QHBoxLayout(btn_container)
+        btn_layout.setContentsMargins(0, 0, 0, 0)
+
         # Adicionar cliente
         btn_add_cliente = QPushButton("+")
         btn_add_cliente.setMaximumWidth(30)
         btn_add_cliente.clicked.connect(self.adicionar_novo_cliente)
-        frame_info_layout.addWidget(btn_add_cliente, 0, 2)
-        
+        btn_layout.addWidget(btn_add_cliente)
+
+        # Botão de atualizar cliente
+        self.btn_atualizar_cliente = QPushButton("Atualizar")
+        self.btn_atualizar_cliente.clicked.connect(self.carregar_clientes)
+        btn_layout.addWidget(self.btn_atualizar_cliente)
+
+        frame_info_layout.addWidget(btn_container, 0, 2)
+
         # Busca de produtos
         frame_info_layout.addWidget(QLabel("Produto:"), 1, 0)
         self.cb_produto = QComboBox()
         self.cb_produto.setMinimumWidth(200)
         self.cb_produto.setEditable(True)
         self.cb_produto.setInsertPolicy(QComboBox.NoInsert)
-        frame_info_layout.addWidget(self.cb_produto, 1, 1, 1, 2)
-        
+        frame_info_layout.addWidget(self.cb_produto, 1, 1)
+
+        # Botão de atualizar produto
+        self.btn_atualizar_produto = QPushButton("Atualizar")
+        self.btn_atualizar_produto.clicked.connect(self.carregar_produtos)
+        frame_info_layout.addWidget(self.btn_atualizar_produto, 1, 2)
+                
         # Quantidade
         frame_info_layout.addWidget(QLabel("Quantidade:"), 0, 3)
         self.spin_quantidade = QSpinBox()
