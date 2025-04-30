@@ -6,11 +6,32 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLab
 from PyQt5.QtCore import Qt, QDate, QDateTime
 from PyQt5.QtGui import QIcon, QColor, QFont
 import datetime
+import sys
+import random  # Para dados de exemplo
+
+# Importações para os gráficos
+import matplotlib
+matplotlib.use('Qt5Agg')
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
+import numpy as np
+
+
+# Classe para o canvas do matplotlib
+class MplCanvas(FigureCanvas):
+    def __init__(self, width=5, height=4, dpi=100):
+        self.fig = Figure(figsize=(width, height), dpi=dpi)
+        self.axes = self.fig.add_subplot(111)
+        super(MplCanvas, self).__init__(self.fig)
+        self.fig.tight_layout()
+
 
 class DashboardWindow(QWidget):
     def __init__(self, db):
         super().__init__()
         self.db = db
+        self.chartCanvases = {}  # Dicionário para guardar referências aos gráficos
         self.initUI()
         self.periodo_alterado(0)  # Inicializa com o período padrão (Hoje)
         self.carregar_dados()
@@ -59,19 +80,19 @@ class DashboardWindow(QWidget):
         grid_cards = QGridLayout()
         
         # Faturamento
-        card_faturamento = self.criar_card("Faturamento", "R$ 0,00", "green")
+        card_faturamento = self.criar_card("Faturamento", "R$ 0,00", "#28a745")  # verde
         grid_cards.addWidget(card_faturamento, 0, 0)
         
         # Lucro
-        card_lucro = self.criar_card("Lucro", "R$ 0,00", "blue")
+        card_lucro = self.criar_card("Lucro", "R$ 0,00", "#007bff")  # azul
         grid_cards.addWidget(card_lucro, 0, 1)
         
         # Nº de Vendas
-        card_vendas = self.criar_card("Nº de Vendas", "0", "purple")
+        card_vendas = self.criar_card("Nº de Vendas", "0", "#6f42c1")  # roxo
         grid_cards.addWidget(card_vendas, 1, 0)
         
         # Ticket Médio
-        card_ticket = self.criar_card("Ticket Médio", "R$ 0,00", "orange")
+        card_ticket = self.criar_card("Ticket Médio", "R$ 0,00", "#fd7e14")  # laranja
         grid_cards.addWidget(card_ticket, 1, 1)
         
         indicadores_layout.addLayout(grid_cards)
@@ -86,10 +107,17 @@ class DashboardWindow(QWidget):
         frame_grafico = QFrame()
         frame_grafico.setFrameShape(QFrame.StyledPanel)
         frame_grafico.setStyleSheet("background-color: white;")
-        frame_grafico.setMinimumHeight(200)
+        frame_grafico.setMinimumHeight(250)
         
         grafico_layout = QVBoxLayout(frame_grafico)
-        grafico_layout.addWidget(QLabel("Gráfico de Vendas por Dia"))
+        titulo_grafico = QLabel("Vendas por Dia")
+        titulo_grafico.setStyleSheet("font-weight: bold; font-size: 14px;")
+        grafico_layout.addWidget(titulo_grafico)
+        
+        # Adicionar o canvas do matplotlib para o gráfico de vendas
+        self.chart_vendas = MplCanvas(width=5, height=2.5, dpi=100)
+        grafico_layout.addWidget(self.chart_vendas)
+        self.chartCanvases['vendas_diarias'] = self.chart_vendas
         
         indicadores_layout.addWidget(frame_grafico)
         
@@ -107,36 +135,117 @@ class DashboardWindow(QWidget):
         tab_produtos = QWidget()
         tab_produtos_layout = QVBoxLayout(tab_produtos)
         
+        # Layout dividido para tabela e gráfico
+        produtos_splitter = QSplitter(Qt.Vertical)
+        
+        # Frame para a tabela
+        frame_tabela_produtos = QFrame()
+        layout_tabela_produtos = QVBoxLayout(frame_tabela_produtos)
+        
         self.tabela_produtos = QTableWidget()
         self.tabela_produtos.setColumnCount(4)
         self.tabela_produtos.setHorizontalHeaderLabels(['Produto', 'Qtde Vendida', 'Valor Total', '% Participação'])
         self.tabela_produtos.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        tab_produtos_layout.addWidget(self.tabela_produtos)
+        layout_tabela_produtos.addWidget(self.tabela_produtos)
         
+        produtos_splitter.addWidget(frame_tabela_produtos)
+        
+        # Frame para o gráfico de produtos
+        frame_grafico_produtos = QFrame()
+        frame_grafico_produtos.setMinimumHeight(250)
+        frame_grafico_produtos.setFrameShape(QFrame.StyledPanel)
+        frame_grafico_produtos.setStyleSheet("background-color: white;")
+        
+        layout_grafico_produtos = QVBoxLayout(frame_grafico_produtos)
+        titulo_produtos = QLabel("Top 5 Produtos por Valor")
+        titulo_produtos.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout_grafico_produtos.addWidget(titulo_produtos)
+        
+        self.chart_produtos = MplCanvas(width=5, height=2.5, dpi=100)
+        layout_grafico_produtos.addWidget(self.chart_produtos)
+        self.chartCanvases['produtos'] = self.chart_produtos
+        
+        produtos_splitter.addWidget(frame_grafico_produtos)
+        
+        tab_produtos_layout.addWidget(produtos_splitter)
         tabs.addTab(tab_produtos, "Produtos Mais Vendidos")
         
         # Tab de Formas de Pagamento
         tab_pagamentos = QWidget()
         tab_pagamentos_layout = QVBoxLayout(tab_pagamentos)
         
+        # Layout dividido para tabela e gráfico
+        pagamentos_splitter = QSplitter(Qt.Vertical)
+        
+        # Frame para a tabela
+        frame_tabela_pagamentos = QFrame()
+        layout_tabela_pagamentos = QVBoxLayout(frame_tabela_pagamentos)
+        
         self.tabela_pagamentos = QTableWidget()
         self.tabela_pagamentos.setColumnCount(3)
         self.tabela_pagamentos.setHorizontalHeaderLabels(['Forma de Pagamento', 'Valor Total', '% Participação'])
         self.tabela_pagamentos.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        tab_pagamentos_layout.addWidget(self.tabela_pagamentos)
+        layout_tabela_pagamentos.addWidget(self.tabela_pagamentos)
         
+        pagamentos_splitter.addWidget(frame_tabela_pagamentos)
+        
+        # Frame para o gráfico de pagamentos
+        frame_grafico_pagamentos = QFrame()
+        frame_grafico_pagamentos.setMinimumHeight(250)
+        frame_grafico_pagamentos.setFrameShape(QFrame.StyledPanel)
+        frame_grafico_pagamentos.setStyleSheet("background-color: white;")
+        
+        layout_grafico_pagamentos = QVBoxLayout(frame_grafico_pagamentos)
+        titulo_pagamentos = QLabel("Distribuição por Forma de Pagamento")
+        titulo_pagamentos.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout_grafico_pagamentos.addWidget(titulo_pagamentos)
+        
+        self.chart_pagamentos = MplCanvas(width=5, height=2.5, dpi=100)
+        layout_grafico_pagamentos.addWidget(self.chart_pagamentos)
+        self.chartCanvases['pagamentos'] = self.chart_pagamentos
+        
+        pagamentos_splitter.addWidget(frame_grafico_pagamentos)
+        
+        tab_pagamentos_layout.addWidget(pagamentos_splitter)
         tabs.addTab(tab_pagamentos, "Formas de Pagamento")
         
         # Tab de Clientes
         tab_clientes = QWidget()
         tab_clientes_layout = QVBoxLayout(tab_clientes)
         
+        # Layout dividido para tabela e gráfico
+        clientes_splitter = QSplitter(Qt.Vertical)
+        
+        # Frame para a tabela
+        frame_tabela_clientes = QFrame()
+        layout_tabela_clientes = QVBoxLayout(frame_tabela_clientes)
+        
         self.tabela_clientes = QTableWidget()
         self.tabela_clientes.setColumnCount(4)
         self.tabela_clientes.setHorizontalHeaderLabels(['Cliente', 'Qtde Compras', 'Valor Total', 'Ticket Médio'])
         self.tabela_clientes.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        tab_clientes_layout.addWidget(self.tabela_clientes)
+        layout_tabela_clientes.addWidget(self.tabela_clientes)
         
+        clientes_splitter.addWidget(frame_tabela_clientes)
+        
+        # Frame para o gráfico de clientes
+        frame_grafico_clientes = QFrame()
+        frame_grafico_clientes.setMinimumHeight(250)
+        frame_grafico_clientes.setFrameShape(QFrame.StyledPanel)
+        frame_grafico_clientes.setStyleSheet("background-color: white;")
+        
+        layout_grafico_clientes = QVBoxLayout(frame_grafico_clientes)
+        titulo_clientes = QLabel("Top 5 Clientes por Valor")
+        titulo_clientes.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout_grafico_clientes.addWidget(titulo_clientes)
+        
+        self.chart_clientes = MplCanvas(width=5, height=2.5, dpi=100)
+        layout_grafico_clientes.addWidget(self.chart_clientes)
+        self.chartCanvases['clientes'] = self.chart_clientes
+        
+        clientes_splitter.addWidget(frame_grafico_clientes)
+        
+        tab_clientes_layout.addWidget(clientes_splitter)
         tabs.addTab(tab_clientes, "Melhores Clientes")
         
         detalhes_layout.addWidget(tabs)
@@ -152,7 +261,7 @@ class DashboardWindow(QWidget):
         card = QFrame()
         card.setFrameShape(QFrame.StyledPanel)
         card.setMinimumHeight(100)
-        card.setStyleSheet(f"background-color: {cor}; color: white; border-radius: 5px;")
+        card.setStyleSheet(f"background-color: {cor}; color: white; border-radius: 8px;")
         
         layout_card = QVBoxLayout(card)
         
@@ -249,6 +358,9 @@ class DashboardWindow(QWidget):
                 participacao = (produto['valor_total'] / dados['faturamento'] * 100) if dados['faturamento'] > 0 else 0
                 self.tabela_produtos.setItem(i, 3, QTableWidgetItem(f"{participacao:.2f}%"))
             
+            # Atualizar gráfico de produtos (top 5)
+            self.atualizar_grafico_produtos(dados['produtos'][:5] if len(dados['produtos']) > 5 else dados['produtos'])
+            
             # Atualizar tabela de formas de pagamento
             self.tabela_pagamentos.setRowCount(0)
             
@@ -260,6 +372,9 @@ class DashboardWindow(QWidget):
                 
                 participacao = (pagamento['valor_total'] / dados['faturamento'] * 100) if dados['faturamento'] > 0 else 0
                 self.tabela_pagamentos.setItem(i, 2, QTableWidgetItem(f"{participacao:.2f}%"))
+            
+            # Atualizar gráfico de formas de pagamento
+            self.atualizar_grafico_pagamentos(dados['pagamentos'])
             
             # Atualizar tabela de clientes
             self.tabela_clientes.setRowCount(0)
@@ -273,9 +388,171 @@ class DashboardWindow(QWidget):
                 
                 ticket = cliente['valor_total'] / cliente['compras'] if cliente['compras'] > 0 else 0
                 self.tabela_clientes.setItem(i, 3, QTableWidgetItem(f"R$ {ticket:.2f}"))
+            
+            # Atualizar gráfico de clientes (top 5)
+            self.atualizar_grafico_clientes(dados['clientes'][:5] if len(dados['clientes']) > 5 else dados['clientes'])
+            
+            # Atualizar gráfico de vendas por dia
+            self.atualizar_grafico_vendas_diarias(dados['vendas_diarias'] if 'vendas_diarias' in dados else [])
         
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"Erro ao carregar dados: {str(e)}")
+    
+    def atualizar_grafico_vendas_diarias(self, vendas_diarias):
+        """Atualiza o gráfico de linha de vendas diárias"""
+        # Se não temos dados de vendas diárias, tente criar alguns de exemplo
+        # baseados na data inicial e final selecionadas
+        if not vendas_diarias:
+            data_inicio = self.dt_inicio.date()
+            data_fim = self.dt_fim.date()
+            
+            # Cria datas entre início e fim
+            datas = []
+            data_atual = data_inicio
+            while data_atual <= data_fim:
+                datas.append(data_atual.toString("yyyy-MM-dd"))
+                data_atual = data_atual.addDays(1)
+            
+            # Gera valores aleatórios para exemplo
+            valores = [random.uniform(100, 5000) for _ in range(len(datas))]
+            
+            vendas_diarias = [{'data': data, 'valor': valor} for data, valor in zip(datas, valores)]
+        
+        # Limpa o gráfico
+        self.chart_vendas.axes.clear()
+        
+        # Extrai datas e valores
+        datas = [item['data'] for item in vendas_diarias]
+        valores = [item['valor'] for item in vendas_diarias]
+        
+        # Cria o gráfico de linha
+        self.chart_vendas.axes.plot(datas, valores, marker='o', linestyle='-', color='#007bff')
+        
+        # Formata o gráfico
+        self.chart_vendas.axes.set_ylabel('Valor (R$)')
+        self.chart_vendas.axes.grid(True, linestyle='--', alpha=0.7)
+        
+        # Rotaciona as datas para melhor visualização
+        if len(datas) > 3:
+            self.chart_vendas.axes.tick_params(axis='x', rotation=45)
+        
+        # Ajusta o layout
+        self.chart_vendas.fig.tight_layout()
+        
+        # Redesenha o canvas
+        self.chart_vendas.draw()
+    
+    def atualizar_grafico_produtos(self, produtos):
+        """Atualiza o gráfico de barras dos produtos mais vendidos"""
+        # Limpa o gráfico
+        self.chart_produtos.axes.clear()
+        
+        if not produtos:
+            self.chart_produtos.draw()
+            return
+        
+        # Extrai nomes e valores
+        nomes = [item['nome'] for item in produtos]
+        valores = [item['valor_total'] for item in produtos]
+        
+        # Cria o gráfico de barras horizontais
+        bars = self.chart_produtos.axes.barh(nomes, valores, color='#28a745')
+        
+        # Adiciona os valores no final das barras
+        for bar in bars:
+            width = bar.get_width()
+            self.chart_produtos.axes.text(width * 1.01, bar.get_y() + bar.get_height()/2, 
+                     f'R$ {width:.2f}', ha='left', va='center')
+        
+        # Formata o gráfico
+        self.chart_produtos.axes.set_xlabel('Valor Total (R$)')
+        self.chart_produtos.axes.grid(True, axis='x', linestyle='--', alpha=0.7)
+        
+        # Ajusta o layout
+        self.chart_produtos.fig.tight_layout()
+        
+        # Redesenha o canvas
+        self.chart_produtos.draw()
+    
+    def atualizar_grafico_pagamentos(self, pagamentos):
+        """Atualiza o gráfico de pizza das formas de pagamento"""
+        # Limpa o gráfico
+        self.chart_pagamentos.axes.clear()
+        
+        if not pagamentos:
+            self.chart_pagamentos.draw()
+            return
+        
+        # Extrai labels e valores
+        labels = [item['forma'] for item in pagamentos]
+        valores = [item['valor_total'] for item in pagamentos]
+        
+        # Cores para o gráfico
+        colors = ['#007bff', '#28a745', '#fd7e14', '#dc3545', '#6f42c1', '#17a2b8']
+        
+        # Cria o gráfico de pizza
+        wedges, texts, autotexts = self.chart_pagamentos.axes.pie(
+            valores, 
+            labels=None,  # Não colocamos labels direto no gráfico para evitar sobreposição
+            autopct='%1.1f%%',
+            startangle=90,
+            colors=colors[:len(pagamentos)]
+        )
+        
+        # Adiciona a legenda
+        self.chart_pagamentos.axes.legend(
+            wedges, 
+            [f"{label} (R$ {valor:.2f})" for label, valor in zip(labels, valores)], 
+            loc="center left", 
+            bbox_to_anchor=(1, 0, 0.5, 1)
+        )
+        
+        # Define o título
+        self.chart_pagamentos.axes.set_title("Distribuição por Forma de Pagamento")
+        
+        # Iguala os aspectos para ter um círculo perfeito
+        self.chart_pagamentos.axes.set_aspect('equal')
+        
+        # Ajusta o layout
+        self.chart_pagamentos.fig.tight_layout()
+        
+        # Redesenha o canvas
+        self.chart_pagamentos.draw()
+    
+    def atualizar_grafico_clientes(self, clientes):
+        """Atualiza o gráfico de barras dos melhores clientes"""
+        # Limpa o gráfico
+        self.chart_clientes.axes.clear()
+        
+        if not clientes:
+            self.chart_clientes.draw()
+            return
+        
+        # Extrai nomes e valores
+        nomes = [item['nome'] for item in clientes]
+        valores = [item['valor_total'] for item in clientes]
+        
+        # Cria o gráfico de barras verticais
+        bars = self.chart_clientes.axes.bar(nomes, valores, color='#6f42c1')
+        
+        # Adiciona os valores em cima das barras
+        for bar in bars:
+            height = bar.get_height()
+            self.chart_clientes.axes.text(bar.get_x() + bar.get_width()/2., height,
+                     f'R$ {height:.2f}', ha='center', va='bottom', rotation=0)
+        
+        # Formata o gráfico
+        self.chart_clientes.axes.set_ylabel('Valor Total (R$)')
+        self.chart_clientes.axes.grid(True, axis='y', linestyle='--', alpha=0.7)
+        
+        # Rotaciona os nomes para melhor visualização
+        self.chart_clientes.axes.tick_params(axis='x', rotation=45)
+        
+        # Ajusta o layout
+        self.chart_clientes.fig.tight_layout()
+        
+        # Redesenha o canvas
+        self.chart_clientes.draw()
     
     def mostrar_sem_dados(self):
         # Limpar indicadores
@@ -288,6 +565,11 @@ class DashboardWindow(QWidget):
         self.tabela_produtos.setRowCount(0)
         self.tabela_pagamentos.setRowCount(0)
         self.tabela_clientes.setRowCount(0)
+        
+        # Limpar gráficos
+        for canvas in self.chartCanvases.values():
+            canvas.axes.clear()
+            canvas.draw()
         
         # Mostrar mensagem para o usuário
         QMessageBox.information(self, "Informação", "Não foram encontrados dados para o período selecionado.")
