@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import hashlib
 from datetime import datetime, timedelta
 
 class DatabaseManager:
@@ -142,9 +143,39 @@ class DatabaseManager:
         )
         ''')
 
+       # Tabela de Usuários (nova)
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            login TEXT NOT NULL UNIQUE,
+            senha TEXT NOT NULL,
+            email TEXT UNIQUE,
+            tipo TEXT DEFAULT 'comum', -- 'admin' ou 'comum'
+            ativo INTEGER DEFAULT 1,   -- 0 para inativo, 1 para ativo
+            data_cadastro DATE DEFAULT CURRENT_DATE,
+            ultimo_acesso TIMESTAMP
+        )
+        ''')
+        
+        # Verificar se existe pelo menos um usuário admin
+        self.cursor.execute("SELECT COUNT(*) FROM usuarios WHERE tipo='admin'")
+        count = self.cursor.fetchone()[0]
+        
+        if count == 0:
+            # Criar um usuário admin padrão se não existir nenhum
+            # Senha padrão: admin123 (em produção, use hash adequado)
+            import hashlib
+            senha_hash = hashlib.sha256("admin123".encode()).hexdigest()
+            
+            self.cursor.execute('''
+            INSERT INTO usuarios (nome, login, senha, email, tipo)
+            VALUES (?, ?, ?, ?, ?)
+            ''', ("Administrador", "admin", senha_hash, "admin@sistema.com", "admin"))
+        
         # Commit das mudanças
         self.conn.commit()
-    
+        
     # Métodos para Produtos
     def adicionar_produto(self, nome, descricao, quantidade, preco_compra, preco_venda, 
                           data_validade, localizacao, fornecedor_id):
@@ -340,6 +371,53 @@ class DatabaseManager:
         
         return self.cursor.fetchall()
     
+    # Métodos para Usuários
+    def obter_usuario_por_id(self, usuario_id):
+        """Retorna os dados de um usuário pelo ID"""
+        self.cursor.execute('''
+        SELECT id, nome, login, email, tipo, data_cadastro, ultimo_acesso
+        FROM usuarios WHERE id = ?
+        ''', (usuario_id,))
+        
+        usuario = self.cursor.fetchone()
+        
+        if usuario:
+            return dict(usuario)
+        else:
+            return None
+
+    def autenticar_usuario(self, login, senha):
+        """Verifica se o usuário e senha estão corretos"""
+        senha_hash = hashlib.sha256(senha.encode()).hexdigest()
+        
+        self.cursor.execute('''
+            SELECT * FROM usuarios WHERE login = ? AND senha = ? AND ativo = 1
+        ''', (login, senha))
+        
+        usuario = self.cursor.fetchone()
+        
+        if usuario:
+            # Atualizar o campo de último acesso
+            self.cursor.execute('''
+                UPDATE usuarios SET ultimo_acesso = CURRENT_TIMESTAMP WHERE id = ?
+            ''', (usuario['id'],))
+            self.conn.commit()
+            return dict(usuario)
+        else:
+            return None
+
+    def cadastrar_usuario(self, nome, login, senha, email, tipo):
+        try:
+            self.cursor.execute("""
+                INSERT INTO usuarios (nome, login, senha, email, tipo)
+                VALUES (?, ?, ?, ?, ?)
+            """, (nome, login, senha, email, tipo))
+            self.conn.commit()
+            return True, "Usuário cadastrado com sucesso!"
+        except Exception as e:
+            return False, f"Erro ao cadastrar usuário: {str(e)}"
+
+
     # Métodos para Caixas
     def abrir_caixa(self, saldo_inicial, operador, observacao=""):
         try:

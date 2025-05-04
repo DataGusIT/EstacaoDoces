@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QPushButton,
                             QLabel, QStackedWidget, QHBoxLayout, QFrame,
                             QAction, QMenu, QToolBar, QDialog, QFormLayout,
                             QComboBox, QSpinBox, QMessageBox, QStatusBar, QSizePolicy)
-from PyQt5.QtGui import QFont, QIcon, QPixmap
+from PyQt5.QtGui import QFont, QIcon, QPixmap, QCursor
 from PyQt5.QtCore import Qt, QDate, QSize
 # Adicionar esta linha se ainda não existir:
 from PyQt5.QtWidgets import QApplication
@@ -666,6 +666,153 @@ class MainWindow(QMainWindow):
         """Evento chamado quando a janela é fechada."""
         self.db.fechar()
         event.accept()
+
+    def setup_for_user(self, usuario):
+        """Configura a interface para o usuário logado"""
+        self.usuario = usuario
+        
+        # Adicionar informações do usuário na barra de status
+        self.user_status_label = QLabel(f"Usuário: {usuario['nome']} | Perfil: {usuario['tipo'].capitalize()}")
+        self.user_status_label.setStyleSheet("padding-right: 10px;")
+        self.statusBar.addPermanentWidget(self.user_status_label)
+        
+        # Adicionar botão de usuário ao menu
+        self.add_user_menu()
+        
+        # Ajustar permissões conforme o tipo de usuário
+        self.ajustar_permissoes(usuario['tipo'])
+
+    def add_user_menu(self):
+        """Adiciona o menu do usuário à barra de menu"""
+        # Criar widget para o menu do usuário
+        user_widget = QWidget()
+        user_layout = QHBoxLayout(user_widget)
+        user_layout.setContentsMargins(0, 0, 15, 0)
+        user_layout.setSpacing(5)
+        
+        # Adicionar label com nome de usuário
+        user_label = QLabel(f"Olá, {self.usuario['nome'].split()[0]}")
+        user_label.setStyleSheet("font-weight: bold; color: #34495e;")
+        
+        # Criar botão de menu do usuário
+        user_button = QPushButton("▼")
+        user_button.setObjectName("userButton")
+        user_button.setFixedSize(24, 24)
+        user_button.setCursor(Qt.PointingHandCursor)
+        user_button.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                border-radius: 12px;
+                font-size: 10px;
+                padding: 0;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        
+        # Adicionar ao layout
+        user_layout.addWidget(user_label)
+        user_layout.addWidget(user_button)
+        
+        # Criar menu de usuário
+        user_menu = QMenu(self)
+        user_menu.setStyleSheet("""
+            QMenu {
+                background-color: white;
+                border: 1px solid #dcdde1;
+                padding: 5px;
+            }
+            QMenu::item {
+                padding: 8px 30px 8px 20px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #f5f6fa;
+                color: #2980b9;
+            }
+        """)
+        
+        # Adicionar ações ao menu
+        perfil_action = QAction("Meu Perfil", self)
+        perfil_action.triggered.connect(self.abrir_perfil)
+        
+        senha_action = QAction("Alterar Senha", self)
+        senha_action.triggered.connect(self.alterar_senha)
+        
+        if self.usuario['tipo'] == 'admin':
+            admin_action = QAction("Administração", self)
+            admin_action.triggered.connect(self.abrir_admin)
+            user_menu.addAction(admin_action)
+            user_menu.addSeparator()
+        
+        user_menu.addAction(perfil_action)
+        user_menu.addAction(senha_action)
+        user_menu.addSeparator()
+        
+        logout_action = QAction("Sair", self)
+        logout_action.triggered.connect(self.logout)
+        user_menu.addAction(logout_action)
+        
+        # Conectar botão ao menu
+        user_button.clicked.connect(lambda: user_menu.exec_(QCursor.pos()))
+        
+        # Adicionar à barra de menu
+        corner_widget = self.menuBar().cornerWidget(Qt.TopRightCorner)
+        if corner_widget:
+            corner_layout = corner_widget.layout()
+            corner_layout.insertWidget(0, user_widget)
+        else:
+            self.menuBar().setCornerWidget(user_widget, Qt.TopRightCorner)
+
+    def ajustar_permissoes(self, tipo_usuario):
+        """Ajusta a interface baseado nas permissões do usuário"""
+        if tipo_usuario != 'admin':
+            # Desabilitar funcionalidades de administração
+            # Por exemplo, ocultar o botão de configurações do menu lateral
+            self.btn_config.setVisible(False)
+            
+            # Remover opção de administração do menu
+            admin_menu = self.menuBar().findChild(QMenu, "adminMenu")
+            if admin_menu:
+                self.menuBar().removeAction(admin_menu.menuAction())
+        
+        # Pode adicionar mais ajustes dependendo do tipo de usuário
+
+    def abrir_perfil(self):
+        """Abre a janela de perfil do usuário"""
+        from ui.profile_window import ProfileWindow
+        profile_dialog = ProfileWindow(self.db, self.usuario)
+        if profile_dialog.exec_():
+            # Atualizar informações do usuário se necessário
+            self.usuario = self.db.obter_usuario_por_id(self.usuario['id'])
+            self.user_status_label.setText(f"Usuário: {self.usuario['nome']} | Perfil: {self.usuario['tipo'].capitalize()}")
+
+    def alterar_senha(self):
+        """Abre a janela de alteração de senha"""
+        from ui.change_password_window import ChangePasswordWindow
+        password_dialog = ChangePasswordWindow(self.db, self.usuario['id'])
+        password_dialog.exec_()
+
+    
+
+    def logout(self):
+        """Realiza o logout do usuário"""
+        resposta = QMessageBox.question(self, "Confirmação", 
+                                    "Deseja realmente sair do sistema?",
+                                    QMessageBox.Yes | QMessageBox.No)
+        
+        if resposta == QMessageBox.Yes:
+            # Fechar a janela principal e voltar para o login
+            self.close()
+            from ui.login_window import LoginWindow
+            login_window = LoginWindow(self.db)
+            if login_window.exec_():
+                # Se o login for bem-sucedido, reabrir a aplicação
+                from main import on_login_success
+                on_login_success(login_window.usuario)
 
 
 class ConfigDialog(QDialog):
