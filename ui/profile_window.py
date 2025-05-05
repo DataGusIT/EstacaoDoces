@@ -62,21 +62,30 @@ class CustomLineEdit(QLineEdit):
             }}
         """)
 
-
 class FieldWidget(QWidget):
-    """Widget personalizado para agrupar label e campo de entrada"""
-    def __init__(self, label_text, edit_widget, parent=None):
-        super().__init__(parent)
-        layout = QVBoxLayout(self)
+    def __init__(self, label_text, input_widget):
+        super().__init__()
+
+        layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-        
+        layout.setSpacing(1)  # Pequeno espaço entre label e campo
+
         label = QLabel(label_text)
-        label.setFont(QFont("Segoe UI", 12))
-        label.setStyleSheet("color: #2d3748; font-weight: 500;")
-        
+        label.setStyleSheet("""
+            font-weight: 500;
+            font-size: 12px;
+            color: #333;
+            padding-bottom: 1px;
+        """)
+        label.setFixedHeight(16)  # Altura mínima suficiente pra não cortar
+
+        input_widget.setMinimumHeight(32)  # Campo compacto e proporcional
+
         layout.addWidget(label)
-        layout.addWidget(edit_widget)
+        layout.addWidget(input_widget)
+        self.setLayout(layout)
+
+
 
 
 class ProfileWindow(QDialog):

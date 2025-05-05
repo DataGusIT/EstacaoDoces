@@ -84,7 +84,7 @@ class LoginWindow(QDialog):
             QCheckBox::indicator:checked {
                 background-color: #0d6efd;
                 border: 1px solid #0d6efd;
-                image: url('assets/check.png');  # Você precisará de uma imagem de check branco
+                image: url('assets/check.png'); /* Você precisará de uma imagem de check branco */
             }
             #loginContainer {
                 background-color: #1e1e1e;
