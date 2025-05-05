@@ -1,6 +1,6 @@
 import sys
 import os
-from PyQt5.QtWidgets import QApplication, QMessageBox, QSplashScreen, QDialog
+from PyQt5.QtWidgets import QApplication, QMessageBox, QSplashScreen, QDialog, QLabel
 from PyQt5.QtGui import QIcon, QPixmap, QFont
 from PyQt5.QtCore import Qt, QTimer
 
@@ -39,6 +39,36 @@ class SessionManager:
         
         return False
 
+def on_login_success(usuario):
+    """Função para lidar com o login bem-sucedido"""
+    # Salvar informações do usuário logado
+    session.set_usuario(usuario)
+    
+    # Criar e mostrar a janela principal
+    window = MainWindow(db, settings)
+    window.session = session  # Passar o gerenciador de sessão
+    window.usuario = usuario  # Passar as informações do usuário
+    window.setup_for_user(usuario)  # Configurar interface para o usuário
+    window.show()
+    
+    # Verificar produtos vencidos ou prestes a vencer ao iniciar
+    produtos_vencidos = db.verificar_produtos_vencidos()
+    produtos_vencendo = db.verificar_produtos_vencendo(dias=15)
+    
+    if produtos_vencidos:
+        msg = "Os seguintes produtos estão vencidos:\n\n"
+        for produto in produtos_vencidos:
+            msg += f"• {produto['nome']} - Vencimento: {produto['data_validade']}\n"
+        
+        QMessageBox.warning(window, "Produtos Vencidos", msg)
+    
+    if produtos_vencendo:
+        msg = "Os seguintes produtos estão próximos do vencimento:\n\n"
+        for produto in produtos_vencendo:
+            msg += f"• {produto['nome']} - Vencimento: {produto['data_validade']}\n"
+        
+        QMessageBox.information(window, "Produtos Próximos do Vencimento", msg)
+
 if __name__ == "__main__":
     # Iniciar aplicação
     app = QApplication(sys.argv)
@@ -74,38 +104,7 @@ if __name__ == "__main__":
         login_window = LoginWindow(db)
         
         # Conectar o sinal de login bem-sucedido
-        def on_login_success(self, usuario):
-            # Salvar informações do usuário logado
-            session.set_usuario(self, usuario)
-            
-            # Criar e mostrar a janela principal
-            window = MainWindow(db, settings)
-            window.session = session  # Passar o gerenciador de sessão
-            window.user_info = usuario  # Passar as informações do usuário
-            window.setup_for_user(usuario)  # Configurar interface para o usuário
-            window.show()
-            
-            # Verificar produtos vencidos ou prestes a vencer ao iniciar
-            produtos_vencidos = db.verificar_produtos_vencidos()
-            produtos_vencendo = db.verificar_produtos_vencendo(dias=15)
-            
-            if produtos_vencidos:
-                msg = "Os seguintes produtos estão vencidos:\n\n"
-                for produto in produtos_vencidos:
-                    msg += f"• {produto['nome']} - Vencimento: {produto['data_validade']}\n"
-                
-                QMessageBox.warning(window, "Produtos Vencidos", msg)
-            
-            if produtos_vencendo:
-                msg = "Os seguintes produtos estão próximos do vencimento:\n\n"
-                for produto in produtos_vencendo:
-                    msg += f"• {produto['nome']} - Vencimento: {produto['data_validade']}\n"
-                
-                QMessageBox.information(window, "Produtos Próximos do Vencimento", msg)
-        
-            # Conectar o sinal ao slot
-            # Conectando o sinal de login bem-sucedido
-            self.login_success_signal.connect(on_login_success)
+        login_window.login_success_signal.connect(on_login_success)
         
         # Mostrar janela de login
         if login_window.exec_() != QDialog.Accepted:

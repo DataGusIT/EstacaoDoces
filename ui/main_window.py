@@ -2,8 +2,9 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QPushButton,
                             QLabel, QStackedWidget, QHBoxLayout, QFrame,
                             QAction, QMenu, QToolBar, QDialog, QFormLayout,
                             QComboBox, QSpinBox, QMessageBox, QStatusBar, QSizePolicy)
-from PyQt5.QtGui import QFont, QIcon, QPixmap, QCursor
-from PyQt5.QtCore import Qt, QDate, QSize
+from PyQt5.QtGui import QFont, QIcon, QPixmap, QCursor, QPainter, QColor, QBrush, QPainterPath
+from PyQt5.QtCore import Qt, QDate, QSize, QByteArray
+from PyQt5.QtSvg import QSvgRenderer         # Para renderizar imagens SVG
 # Adicionar esta linha se ainda não existir:
 from PyQt5.QtWidgets import QApplication
 
@@ -688,62 +689,205 @@ class MainWindow(QMainWindow):
         user_widget = QWidget()
         user_layout = QHBoxLayout(user_widget)
         user_layout.setContentsMargins(0, 0, 15, 0)
-        user_layout.setSpacing(5)
+        user_layout.setSpacing(10)
+        
+        # Adicionar avatar do usuário (ícone circular)
+        avatar_label = QLabel()
+        avatar_size = 32
+        avatar_pixmap = QPixmap("assets/avatar.png")  # Você pode criar um ícone padrão
+        
+        if not avatar_pixmap.isNull():
+            # Criar uma versão circular do avatar
+            rounded_avatar = QPixmap(avatar_size, avatar_size)
+            rounded_avatar.fill(Qt.transparent)
+            
+            # Criar um pintor para desenhar a versão circular
+            painter = QPainter(rounded_avatar)
+            painter.setRenderHint(QPainter.Antialiasing)
+            path = QPainterPath()
+            path.addEllipse(0, 0, avatar_size, avatar_size)
+            painter.setClipPath(path)
+            
+            # Redimensionar e desenhar o avatar
+            scaled_pixmap = avatar_pixmap.scaled(avatar_size, avatar_size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            painter.drawPixmap(0, 0, scaled_pixmap)
+            painter.end()
+            
+            avatar_label.setPixmap(rounded_avatar)
+        else:
+            # Se não tiver avatar, usar as iniciais do usuário
+            initials = "".join([name[0].upper() for name in self.usuario['nome'].split() if name])[:2]
+            
+            # Criar um círculo colorido com as iniciais
+            avatar_pixmap = QPixmap(avatar_size, avatar_size)
+            avatar_pixmap.fill(Qt.transparent)
+            
+            painter = QPainter(avatar_pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            
+            # Desenhar o círculo de fundo
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor("#0d6efd"))
+            painter.drawEllipse(0, 0, avatar_size, avatar_size)
+            
+            # Adicionar as iniciais
+            painter.setPen(QColor("#ffffff"))
+            painter.setFont(QFont("Arial", 12, QFont.Bold))
+            painter.drawText(avatar_pixmap.rect(), Qt.AlignCenter, initials)
+            painter.end()
+            
+            avatar_label.setPixmap(avatar_pixmap)
         
         # Adicionar label com nome de usuário
-        user_label = QLabel(f"Olá, {self.usuario['nome'].split()[0]}")
-        user_label.setStyleSheet("font-weight: bold; color: #34495e;")
+        user_label = QLabel(f"{self.usuario['nome'].split()[0]}")
+        user_label.setStyleSheet("""
+            color: #f0f0f0;
+            font-weight: bold;
+            font-size: 11pt;
+        """)
         
-        # Criar botão de menu do usuário
-        user_button = QPushButton("▼")
+        # Criar botão de menu do usuário com ícone de seta para baixo
+        user_button = QPushButton()
         user_button.setObjectName("userButton")
         user_button.setFixedSize(24, 24)
         user_button.setCursor(Qt.PointingHandCursor)
+        
+        # Usar um ícone SVG para melhor escalabilidade
+        chevron_icon = """
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+        """
+        
+        # Definir ícone SVG como stylesheet
         user_button.setStyleSheet("""
             QPushButton {
-                background-color: #3498db;
-                color: white;
+                background-color: transparent;
+                color: #f0f0f0;
                 border: none;
-                border-radius: 12px;
                 font-size: 10px;
                 padding: 0;
+                icon-size: 14px;
             }
             QPushButton:hover {
-                background-color: #2980b9;
+                background-color: #2d2d2d;
+                border-radius: 12px;
             }
         """)
         
+        # Definir ícone SVG para o botão
+        svg_renderer = QSvgRenderer(QByteArray(chevron_icon.encode()))
+        icon_pixmap = QPixmap(24, 24)
+        icon_pixmap.fill(Qt.transparent)
+        painter = QPainter(icon_pixmap)
+        svg_renderer.render(painter)
+        painter.end()
+        
+        user_button.setIcon(QIcon(icon_pixmap))
+        
         # Adicionar ao layout
+        user_layout.addWidget(avatar_label)
         user_layout.addWidget(user_label)
         user_layout.addWidget(user_button)
+        
+        # Criar container para o widget do usuário com estilo
+        user_container = QFrame()
+        user_container.setObjectName("userContainer")
+        user_container.setStyleSheet("""
+            #userContainer {
+                background-color: #1e1e1e;
+                border-radius: 20px;
+                padding: 2px 5px 2px 5px;
+            }
+            #userContainer:hover {
+                background-color: #2d2d2d;
+            }
+        """)
+        
+        # Adicionar o widget do usuário ao container
+        container_layout = QHBoxLayout(user_container)
+        container_layout.setContentsMargins(5, 0, 5, 0)
+        container_layout.addWidget(user_widget)
         
         # Criar menu de usuário
         user_menu = QMenu(self)
         user_menu.setStyleSheet("""
             QMenu {
-                background-color: white;
-                border: 1px solid #dcdde1;
+                background-color: #1e1e1e;
+                color: #f0f0f0;
+                border: 1px solid #333;
+                border-radius: 6px;
                 padding: 5px;
             }
             QMenu::item {
-                padding: 8px 30px 8px 20px;
+                padding: 10px 30px 10px 20px;
                 border-radius: 4px;
+                margin: 2px 5px;
             }
             QMenu::item:selected {
-                background-color: #f5f6fa;
-                color: #2980b9;
+                background-color: #2d2d2d;
+                color: #0d6efd;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #333;
+                margin: 5px 10px;
             }
         """)
         
-        # Adicionar ações ao menu
-        perfil_action = QAction("Meu Perfil", self)
+        # Adicionar ações ao menu com ícones SVG
+        # Ícone SVG para perfil
+        perfil_icon = """
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+            <circle cx="12" cy="7" r="4"></circle>
+        </svg>
+        """
+        
+        # Ícone SVG para senha
+        senha_icon = """
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+        </svg>
+        """
+        
+        # Ícone SVG para admin
+        admin_icon = """
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20h9"></path>
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+        </svg>
+        """
+        
+        # Ícone SVG para logout
+        logout_icon = """
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <polyline points="16 17 21 12 16 7"></polyline>
+            <line x1="21" y1="12" x2="9" y2="12"></line>
+        </svg>
+        """
+        
+        # Função para criar ícone a partir de SVG
+        def create_icon_from_svg(svg_content):
+            svg_renderer = QSvgRenderer(QByteArray(svg_content.encode()))
+            icon_pixmap = QPixmap(16, 16)
+            icon_pixmap.fill(Qt.transparent)
+            painter = QPainter(icon_pixmap)
+            svg_renderer.render(painter)
+            painter.end()
+            return QIcon(icon_pixmap)
+        
+        # Criar ações com ícones
+        perfil_action = QAction(create_icon_from_svg(perfil_icon), "Meu Perfil", self)
         perfil_action.triggered.connect(self.abrir_perfil)
         
-        senha_action = QAction("Alterar Senha", self)
+        senha_action = QAction(create_icon_from_svg(senha_icon), "Alterar Senha", self)
         senha_action.triggered.connect(self.alterar_senha)
         
         if self.usuario['tipo'] == 'admin':
-            admin_action = QAction("Administração", self)
+            admin_action = QAction(create_icon_from_svg(admin_icon), "Administração", self)
             admin_action.triggered.connect(self.abrir_admin)
             user_menu.addAction(admin_action)
             user_menu.addSeparator()
@@ -752,20 +896,23 @@ class MainWindow(QMainWindow):
         user_menu.addAction(senha_action)
         user_menu.addSeparator()
         
-        logout_action = QAction("Sair", self)
+        logout_action = QAction(create_icon_from_svg(logout_icon), "Sair", self)
         logout_action.triggered.connect(self.logout)
         user_menu.addAction(logout_action)
         
         # Conectar botão ao menu
         user_button.clicked.connect(lambda: user_menu.exec_(QCursor.pos()))
         
+        # Conectar o container inteiro para abrir o menu também
+        user_container.mousePressEvent = lambda event: user_menu.exec_(QCursor.pos()) if event.button() == Qt.LeftButton else None
+        
         # Adicionar à barra de menu
         corner_widget = self.menuBar().cornerWidget(Qt.TopRightCorner)
         if corner_widget:
             corner_layout = corner_widget.layout()
-            corner_layout.insertWidget(0, user_widget)
+            corner_layout.insertWidget(0, user_container)
         else:
-            self.menuBar().setCornerWidget(user_widget, Qt.TopRightCorner)
+            self.menuBar().setCornerWidget(user_container, Qt.TopRightCorner)
 
     def ajustar_permissoes(self, tipo_usuario):
         """Ajusta a interface baseado nas permissões do usuário"""
@@ -796,7 +943,6 @@ class MainWindow(QMainWindow):
         password_dialog = ChangePasswordWindow(self.db, self.usuario['id'])
         password_dialog.exec_()
 
-    
 
     def logout(self):
         """Realiza o logout do usuário"""
@@ -805,15 +951,57 @@ class MainWindow(QMainWindow):
                                     QMessageBox.Yes | QMessageBox.No)
         
         if resposta == QMessageBox.Yes:
-            # Fechar a janela principal e voltar para o login
-            self.close()
+            # Importante: reconectar o banco de dados antes de passar para a tela de login
+            if hasattr(self, 'db') and self.db:
+                # Assegurar que a conexão está ativa antes de tentar fazer login novamente
+                self.db.ensure_connection()
+            
+            # Fechar a janela principal sem destruir recursos globais
+            self.hide()  # Em vez de close(), apenas esconda a janela
+            
+            # Criar nova janela de login com a mesma conexão de banco de dados
             from ui.login_window import LoginWindow
+            from PyQt5.QtWidgets import QDialog
+            
             login_window = LoginWindow(self.db)
-            if login_window.exec_():
-                # Se o login for bem-sucedido, reabrir a aplicação
-                from main import on_login_success
-                on_login_success(login_window.usuario)
+            
+            # Conectar o sinal de login bem-sucedido
+            if hasattr(self, 'parent') and self.parent() and hasattr(self.parent(), 'on_login_success'):
+                login_window.login_success_signal.connect(self.parent().on_login_success)
+            
+            # Executar a janela de login
+            result = login_window.exec_()
+            
+            if result == QDialog.Accepted:
+                # Se login bem-sucedido, mostrar a janela principal novamente com novo usuário
+                self.usuario = login_window.usuario
+                # Atualizar a interface para o novo usuário se necessário
+                if hasattr(self, 'setup_user_interface'):
+                    self.setup_user_interface()
+                self.show()
+            else:
+                # Se o login for cancelado, encerrar a aplicação
+                import sys
+                self.close()  # Agora sim fechamos a janela principal
+                sys.exit(0)
 
+    def abrir_admin(self):
+        """Abre a janela de administração do sistema"""
+        try:
+            # Importar a janela de administração
+            from ui.admin_window import AdminWindow
+            
+            # Criar e mostrar a janela de administração
+            admin_window = AdminWindow(self.db, self.usuario)
+            admin_window.exec_()
+            
+            # Opcionalmente, você pode atualizar dados após o fechamento da janela
+            # Por exemplo, se alguns dados foram alterados:
+            # self.carregar_dados()
+            
+        except Exception as e:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Erro", f"Erro ao abrir o painel de administração: {str(e)}")
 
 class ConfigDialog(QDialog):
     def __init__(self, settings):

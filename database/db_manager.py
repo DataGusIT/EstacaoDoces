@@ -17,6 +17,41 @@ class DatabaseManager:
         
         # Inicializar as tabelas
         self.criar_tabelas()
+        
+    def connect_to_database(self):
+        """Conecta ou reconecta ao banco de dados"""
+        try:
+            # Fechar conexão anterior se existir
+            if hasattr(self, 'conn') and self.conn:
+                try:
+                    self.conn.close()
+                except:
+                    pass
+            
+            # Estabelecer nova conexão
+            self.conn = sqlite3.connect(self.db_path)
+            self.conn.row_factory = sqlite3.Row  # Para acessar colunas pelo nome
+            self.cursor = self.conn.cursor()
+            return True
+        except Exception as e:
+            print(f"Erro ao conectar ao banco de dados: {e}")
+            return False
+    
+    def is_connection_active(self):
+        """Verifica se a conexão com o banco de dados está ativa"""
+        try:
+            # Tenta executar uma query simples para verificar a conexão
+            self.cursor.execute("SELECT 1")
+            return True
+        except (sqlite3.ProgrammingError, sqlite3.OperationalError):
+            # Se ocorrer erro, a conexão está fechada
+            return False
+    
+    def ensure_connection(self):
+        """Garante que a conexão está ativa antes de executar operações"""
+        if not self.is_connection_active():
+            return self.connect_to_database()
+        return True
     
     def criar_tabelas(self):
         # Tabela de Produtos
@@ -175,6 +210,8 @@ class DatabaseManager:
         
         # Commit das mudanças
         self.conn.commit()
+    
+   
         
     # Métodos para Produtos
     def adicionar_produto(self, nome, descricao, quantidade, preco_compra, preco_venda, 
@@ -416,6 +453,90 @@ class DatabaseManager:
             return True, "Usuário cadastrado com sucesso!"
         except Exception as e:
             return False, f"Erro ao cadastrar usuário: {str(e)}"
+        
+    def listar_usuarios(self):
+        """Retorna a lista de todos os usuários"""
+        try:
+            self.cursor.execute('''
+                SELECT id, nome, login, email, tipo, ativo, data_cadastro, ultimo_acesso
+                FROM usuarios
+                ORDER BY nome
+            ''')
+            
+            usuarios = self.cursor.fetchall()
+            return [dict(usuario) for usuario in usuarios]
+        except Exception as e:
+            print(f"Erro ao listar usuários: {str(e)}")
+            return []
+
+    def excluir_usuario(self, usuario_id):
+        """Exclui um usuário pelo ID (ou desativa, se preferir não excluir)"""
+        try:
+            # Verificar se não é o último administrador
+            self.cursor.execute("SELECT COUNT(*) FROM usuarios WHERE tipo='admin'")
+            count_admin = self.cursor.fetchone()[0]
+            
+            # Verificar se o usuário a ser excluído é um admin
+            self.cursor.execute("SELECT tipo FROM usuarios WHERE id=?", (usuario_id,))
+            user_tipo = self.cursor.fetchone()
+            
+            if user_tipo and user_tipo['tipo'] == 'admin' and count_admin <= 1:
+                return False, "Não é possível excluir o último administrador do sistema."
+            
+            # Ao invés de excluir, você pode apenas desativar o usuário
+            self.cursor.execute('''
+                UPDATE usuarios SET ativo = 0 WHERE id = ?
+            ''', (usuario_id,))
+            
+            # Se quiser realmente excluir, use:
+            # self.cursor.execute('DELETE FROM usuarios WHERE id = ?', (usuario_id,))
+            
+            self.conn.commit()
+            return True, "Usuário desativado com sucesso."
+        except Exception as e:
+            return False, f"Erro ao excluir usuário: {str(e)}"
+
+    def atualizar_usuario(self, usuario_id, nome, login, email, tipo, ativo=1):
+        """Atualiza os dados de um usuário"""
+        try:
+            # Verificar se não é o último administrador
+            if tipo != 'admin':
+                self.cursor.execute("SELECT tipo FROM usuarios WHERE id=?", (usuario_id,))
+                user_tipo = self.cursor.fetchone()
+                
+                if user_tipo and user_tipo['tipo'] == 'admin':
+                    self.cursor.execute("SELECT COUNT(*) FROM usuarios WHERE tipo='admin'")
+                    count_admin = self.cursor.fetchone()[0]
+                    
+                    if count_admin <= 1:
+                        return False, "Não é possível remover o nível de administrador do último administrador."
+            
+            # Atualizar os dados
+            self.cursor.execute('''
+                UPDATE usuarios 
+                SET nome = ?, login = ?, email = ?, tipo = ?, ativo = ?
+                WHERE id = ?
+            ''', (nome, login, email, tipo, ativo, usuario_id))
+            
+            self.conn.commit()
+            return True, "Usuário atualizado com sucesso."
+        except Exception as e:
+            return False, f"Erro ao atualizar usuário: {str(e)}"
+
+    def alterar_senha_usuario(self, usuario_id, nova_senha):
+        """Altera a senha de um usuário"""
+        try:
+            import hashlib
+            senha_hash = hashlib.sha256(nova_senha.encode()).hexdigest()
+            
+            self.cursor.execute('''
+                UPDATE usuarios SET senha = ? WHERE id = ?
+            ''', (senha_hash, usuario_id))
+            
+            self.conn.commit()
+            return True, "Senha alterada com sucesso."
+        except Exception as e:
+            return False, f"Erro ao alterar senha: {str(e)}"
 
 
     # Métodos para Caixas
