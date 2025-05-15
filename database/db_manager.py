@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import hashlib
 from datetime import datetime, timedelta
 
 class DatabaseManager:
@@ -16,17 +17,54 @@ class DatabaseManager:
         
         # Inicializar as tabelas
         self.criar_tabelas()
+        
+    def connect_to_database(self):
+        """Conecta ou reconecta ao banco de dados"""
+        try:
+            # Fechar conexão anterior se existir
+            if hasattr(self, 'conn') and self.conn:
+                try:
+                    self.conn.close()
+                except:
+                    pass
+            
+            # Estabelecer nova conexão
+            self.conn = sqlite3.connect(self.db_path)
+            self.conn.row_factory = sqlite3.Row  # Para acessar colunas pelo nome
+            self.cursor = self.conn.cursor()
+            return True
+        except Exception as e:
+            print(f"Erro ao conectar ao banco de dados: {e}")
+            return False
+    
+    def is_connection_active(self):
+        """Verifica se a conexão com o banco de dados está ativa"""
+        try:
+            # Tenta executar uma query simples para verificar a conexão
+            self.cursor.execute("SELECT 1")
+            return True
+        except (sqlite3.ProgrammingError, sqlite3.OperationalError):
+            # Se ocorrer erro, a conexão está fechada
+            return False
+    
+    def ensure_connection(self):
+        """Garante que a conexão está ativa antes de executar operações"""
+        if not self.is_connection_active():
+            return self.connect_to_database()
+        return True
     
     def criar_tabelas(self):
-        # Tabela de Produtos
+        # Tabela de Produtos (com novos campos)
         self.cursor.execute('''
         CREATE TABLE IF NOT EXISTS produtos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            codigo_barras TEXT,
             nome TEXT NOT NULL,
             descricao TEXT,
             quantidade INTEGER DEFAULT 0,
+            estoque_minimo INTEGER DEFAULT 0,
             preco_compra REAL,
-            preco_custo REAL,
+            margem_lucro REAL,
             preco_venda REAL,
             data_validade DATE,
             localizacao TEXT,
@@ -142,74 +180,206 @@ class DatabaseManager:
         )
         ''')
 
+       # Tabela de Usuários (nova)
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            login TEXT NOT NULL UNIQUE,
+            senha TEXT NOT NULL,
+            email TEXT UNIQUE,
+            tipo TEXT DEFAULT 'comum', -- 'admin' ou 'comum'
+            ativo INTEGER DEFAULT 1,   -- 0 para inativo, 1 para ativo
+            data_cadastro DATE DEFAULT CURRENT_DATE,
+            ultimo_acesso TIMESTAMP
+        )
+        ''')
+        
+        # Verificar se existe pelo menos um usuário admin
+        self.cursor.execute("SELECT COUNT(*) FROM usuarios WHERE tipo='admin'")
+        count = self.cursor.fetchone()[0]
+        
+        if count == 0:
+            # Criar um usuário admin padrão se não existir nenhum
+            # Senha padrão: admin123 (em produção, use hash adequado)
+            import hashlib
+            senha_hash = hashlib.sha256("admin123".encode()).hexdigest()
+            
+            self.cursor.execute('''
+            INSERT INTO usuarios (nome, login, senha, email, tipo)
+            VALUES (?, ?, ?, ?, ?)
+            ''', ("Administrador", "admin", senha_hash, "admin@sistema.com", "admin"))
+        
         # Commit das mudanças
         self.conn.commit()
     
-    # Métodos para Produtos
-    def adicionar_produto(self, nome, descricao, quantidade, preco_compra, preco_venda, 
-                          data_validade, localizacao, fornecedor_id):
+   
+        
+    # Métodos para Produtos (atualizados)
+    def adicionar_produto(self, codigo_barras, nome, descricao, quantidade, estoque_minimo,
+                        preco_compra, margem_lucro, preco_venda, 
+                        data_validade, localizacao, fornecedor_id):
         self.cursor.execute('''
-        INSERT INTO produtos (nome, descricao, quantidade, preco_compra, preco_venda, 
-                             data_validade, localizacao, fornecedor_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (nome, descricao, quantidade, preco_compra, preco_venda, 
-             data_validade, localizacao, fornecedor_id))
+        INSERT INTO produtos (
+            codigo_barras, nome, descricao, quantidade, estoque_minimo,
+            preco_compra, margem_lucro, preco_venda, 
+            data_validade, localizacao, fornecedor_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            codigo_barras, nome, descricao, quantidade, estoque_minimo,
+            preco_compra, margem_lucro, preco_venda, 
+            data_validade, localizacao, fornecedor_id
+        ))
         self.conn.commit()
         return self.cursor.lastrowid
-    
-    def atualizar_produto(self, id, nome, descricao, quantidade, preco_compra, preco_venda, 
-                         data_validade, localizacao, fornecedor_id):
+
+    def atualizar_produto(self, id, codigo_barras, nome, descricao, quantidade, estoque_minimo,
+                        preco_compra, margem_lucro, preco_venda, 
+                        data_validade, localizacao, fornecedor_id):
         self.cursor.execute('''
         UPDATE produtos
-        SET nome = ?, descricao = ?, quantidade = ?, preco_compra = ?, preco_venda = ?,
+        SET codigo_barras = ?, nome = ?, descricao = ?, quantidade = ?, estoque_minimo = ?,
+            preco_compra = ?, margem_lucro = ?, preco_venda = ?,
             data_validade = ?, localizacao = ?, fornecedor_id = ?
         WHERE id = ?
-        ''', (nome, descricao, quantidade, preco_compra, preco_venda, 
-             data_validade, localizacao, fornecedor_id, id))
+        ''', (
+            codigo_barras, nome, descricao, quantidade, estoque_minimo,
+            preco_compra, margem_lucro, preco_venda,
+            data_validade, localizacao, fornecedor_id, id
+        ))
         self.conn.commit()
         return self.cursor.rowcount > 0
-    
+
     def excluir_produto(self, id):
         self.cursor.execute('DELETE FROM produtos WHERE id = ?', (id,))
         self.conn.commit()
         return self.cursor.rowcount > 0
-    
+
     def obter_produto(self, id):
         self.cursor.execute('SELECT * FROM produtos WHERE id = ?', (id,))
         return self.cursor.fetchone()
-    
+
     def listar_produtos(self, filtro=None):
         query = 'SELECT p.*, f.nome as fornecedor_nome FROM produtos p LEFT JOIN fornecedores f ON p.fornecedor_id = f.id'
         
         if filtro:
-            query += f" WHERE p.nome LIKE '%{filtro}%' OR p.descricao LIKE '%{filtro}%'"
+            query += f" WHERE p.nome LIKE '%{filtro}%' OR p.descricao LIKE '%{filtro}%' OR p.codigo_barras LIKE '%{filtro}%'"
         
         self.cursor.execute(query)
         return self.cursor.fetchall()
-    
+
     def verificar_produtos_vencendo(self, dias=30):
         data_limite = (datetime.now() + timedelta(days=dias)).strftime('%Y-%m-%d')
         data_hoje = datetime.now().strftime('%Y-%m-%d')
         
         self.cursor.execute('''
-        SELECT * FROM produtos 
-        WHERE data_validade <= ? AND data_validade >= ?
-        ORDER BY data_validade
+        SELECT p.*, f.nome as fornecedor_nome 
+        FROM produtos p 
+        LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
+        WHERE p.data_validade <= ? AND p.data_validade >= ?
+        ORDER BY p.data_validade
         ''', (data_limite, data_hoje))
         
         return self.cursor.fetchall()
-    
+
     def verificar_produtos_vencidos(self):
         data_hoje = datetime.now().strftime('%Y-%m-%d')
         
         self.cursor.execute('''
-        SELECT * FROM produtos 
-        WHERE data_validade < ?
-        ORDER BY data_validade
+        SELECT p.*, f.nome as fornecedor_nome 
+        FROM produtos p 
+        LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
+        WHERE p.data_validade < ?
+        ORDER BY p.data_validade
         ''', (data_hoje,))
         
         return self.cursor.fetchall()
-    
+
+    def verificar_produtos_estoque_baixo(self):
+        """Verifica produtos com estoque abaixo do mínimo definido."""
+        self.cursor.execute('''
+        SELECT p.*, f.nome as fornecedor_nome 
+        FROM produtos p 
+        LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
+        WHERE p.quantidade <= p.estoque_minimo AND p.estoque_minimo > 0
+        ORDER BY p.nome
+        ''')
+        
+        return self.cursor.fetchall()
+
+    def filtrar_produtos(self, filtro_estoque, filtro_vencimento):
+        """Filtra produtos por nível de estoque e data de vencimento."""
+        hoje = datetime.now().strftime('%Y-%m-%d')
+        
+        # Base da consulta
+        query = '''
+        SELECT p.*, f.nome as fornecedor_nome 
+        FROM produtos p 
+        LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
+        WHERE 1=1
+        '''
+        
+        params = []
+        
+        # Aplicar filtro de estoque
+        if filtro_estoque == "baixo":
+            query += " AND p.quantidade <= p.estoque_minimo AND p.estoque_minimo > 0"
+        elif filtro_estoque == "medio":
+            query += " AND p.quantidade > p.estoque_minimo AND p.quantidade <= (p.estoque_minimo * 2)"
+        elif filtro_estoque == "alto":
+            query += " AND p.quantidade > (p.estoque_minimo * 2)"
+        
+        # Aplicar filtro de vencimento
+        if filtro_vencimento == "30":
+            data_limite = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
+            query += " AND p.data_validade <= ? AND p.data_validade >= ?"
+            params.extend([data_limite, hoje])
+        elif filtro_vencimento == "15":
+            data_limite = (datetime.now() + timedelta(days=15)).strftime('%Y-%m-%d')
+            query += " AND p.data_validade <= ? AND p.data_validade >= ?"
+            params.extend([data_limite, hoje])
+        elif filtro_vencimento == "vencidos":
+            query += " AND p.data_validade < ?"
+            params.append(hoje)
+        
+        query += " ORDER BY p.nome"
+        
+        self.cursor.execute(query, params)
+        return self.cursor.fetchall()
+
+    # Método para migrar a tabela existente para a nova estrutura
+    def migrar_tabela_produtos(self):
+        """Migra a tabela de produtos para incluir os novos campos."""
+        try:
+            # Verificar se a coluna código de barras já existe
+            self.cursor.execute("PRAGMA table_info(produtos)")
+            colunas = self.cursor.fetchall()
+            colunas_existentes = [coluna[1] for coluna in colunas]
+            
+            # Adicionar novas colunas se necessário
+            if "codigo_barras" not in colunas_existentes:
+                self.cursor.execute("ALTER TABLE produtos ADD COLUMN codigo_barras TEXT")
+            
+            if "estoque_minimo" not in colunas_existentes:
+                self.cursor.execute("ALTER TABLE produtos ADD COLUMN estoque_minimo INTEGER DEFAULT 0")
+            
+            if "margem_lucro" not in colunas_existentes:
+                self.cursor.execute("ALTER TABLE produtos ADD COLUMN margem_lucro REAL DEFAULT 30.0")
+                
+                # Atualizar a margem de lucro baseado nos preços existentes
+                self.cursor.execute('''
+                UPDATE produtos 
+                SET margem_lucro = ((preco_venda / preco_compra) - 1) * 100
+                WHERE preco_compra > 0 AND preco_venda > 0
+                ''')
+            
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"Erro ao migrar tabela de produtos: {str(e)}")
+            return False
+        
     # Métodos para Fornecedores
     def adicionar_fornecedor(self, nome, documento, telefone, email, endereco, contato):
         self.cursor.execute('''
@@ -340,6 +510,137 @@ class DatabaseManager:
         
         return self.cursor.fetchall()
     
+    # Métodos para Usuários
+    def obter_usuario_por_id(self, usuario_id):
+        """Retorna os dados de um usuário pelo ID"""
+        self.cursor.execute('''
+        SELECT id, nome, login, email, tipo, data_cadastro, ultimo_acesso
+        FROM usuarios WHERE id = ?
+        ''', (usuario_id,))
+        
+        usuario = self.cursor.fetchone()
+        
+        if usuario:
+            return dict(usuario)
+        else:
+            return None
+
+    def autenticar_usuario(self, login, senha):
+        """Verifica se o usuário e senha estão corretos"""
+        senha_hash = hashlib.sha256(senha.encode()).hexdigest()
+        
+        self.cursor.execute('''
+            SELECT * FROM usuarios WHERE login = ? AND senha = ? AND ativo = 1
+        ''', (login, senha))
+        
+        usuario = self.cursor.fetchone()
+        
+        if usuario:
+            # Atualizar o campo de último acesso
+            self.cursor.execute('''
+                UPDATE usuarios SET ultimo_acesso = CURRENT_TIMESTAMP WHERE id = ?
+            ''', (usuario['id'],))
+            self.conn.commit()
+            return dict(usuario)
+        else:
+            return None
+
+    def cadastrar_usuario(self, nome, login, senha, email, tipo):
+        try:
+            self.cursor.execute("""
+                INSERT INTO usuarios (nome, login, senha, email, tipo)
+                VALUES (?, ?, ?, ?, ?)
+            """, (nome, login, senha, email, tipo))
+            self.conn.commit()
+            return True, "Usuário cadastrado com sucesso!"
+        except Exception as e:
+            return False, f"Erro ao cadastrar usuário: {str(e)}"
+        
+    def listar_usuarios(self):
+        """Retorna a lista de todos os usuários"""
+        try:
+            self.cursor.execute('''
+                SELECT id, nome, login, email, tipo, ativo, data_cadastro, ultimo_acesso
+                FROM usuarios
+                ORDER BY nome
+            ''')
+            
+            usuarios = self.cursor.fetchall()
+            return [dict(usuario) for usuario in usuarios]
+        except Exception as e:
+            print(f"Erro ao listar usuários: {str(e)}")
+            return []
+
+    def excluir_usuario(self, usuario_id):
+        """Exclui um usuário pelo ID (ou desativa, se preferir não excluir)"""
+        try:
+            # Verificar se não é o último administrador
+            self.cursor.execute("SELECT COUNT(*) FROM usuarios WHERE tipo='admin'")
+            count_admin = self.cursor.fetchone()[0]
+            
+            # Verificar se o usuário a ser excluído é um admin
+            self.cursor.execute("SELECT tipo FROM usuarios WHERE id=?", (usuario_id,))
+            user_tipo = self.cursor.fetchone()
+            
+            if user_tipo and user_tipo['tipo'] == 'admin' and count_admin <= 1:
+                return False, "Não é possível excluir o último administrador do sistema."
+            
+            # Ao invés de excluir, você pode apenas desativar o usuário
+            self.cursor.execute('''
+                UPDATE usuarios SET ativo = 0 WHERE id = ?
+            ''', (usuario_id,))
+            
+            # Se quiser realmente excluir, use:
+            # self.cursor.execute('DELETE FROM usuarios WHERE id = ?', (usuario_id,))
+            
+            self.conn.commit()
+            return True, "Usuário desativado com sucesso."
+        except Exception as e:
+            return False, f"Erro ao excluir usuário: {str(e)}"
+
+    def atualizar_usuario(self, usuario_id, nome, login, email, tipo, ativo=1):
+        """Atualiza os dados de um usuário"""
+        try:
+            # Verificar se não é o último administrador
+            if tipo != 'admin':
+                self.cursor.execute("SELECT tipo FROM usuarios WHERE id=?", (usuario_id,))
+                user_tipo = self.cursor.fetchone()
+                
+                if user_tipo and user_tipo['tipo'] == 'admin':
+                    self.cursor.execute("SELECT COUNT(*) FROM usuarios WHERE tipo='admin'")
+                    count_admin = self.cursor.fetchone()[0]
+                    
+                    if count_admin <= 1:
+                        return False, "Não é possível remover o nível de administrador do último administrador."
+            
+            # Atualizar os dados
+            self.cursor.execute('''
+                UPDATE usuarios 
+                SET nome = ?, login = ?, email = ?, tipo = ?, ativo = ?
+                WHERE id = ?
+            ''', (nome, login, email, tipo, ativo, usuario_id))
+            
+            self.conn.commit()
+            return True, "Usuário atualizado com sucesso."
+        except Exception as e:
+            return False, f"Erro ao atualizar usuário: {str(e)}"
+
+    def alterar_senha_usuario(self, usuario_id, nova_senha):
+        """Altera a senha de um usuário"""
+        try:
+            import hashlib
+            senha_hash = hashlib.sha256(nova_senha.encode()).hexdigest()
+            
+            self.cursor.execute('''
+                UPDATE usuarios SET senha = ? WHERE id = ?
+            ''', (senha_hash, usuario_id))
+            
+            self.conn.commit()
+            return True, "Senha alterada com sucesso."
+        except Exception as e:
+            return False, f"Erro ao alterar senha: {str(e)}"
+
+
     # Métodos para Caixas
     def abrir_caixa(self, saldo_inicial, operador, observacao=""):
         try:
@@ -410,6 +711,17 @@ class DatabaseManager:
         except Exception as e:
             print(f"Erro ao fechar caixa: {e}")
             return False
+    
+    def buscar_produto_por_codigo_barras(self, codigo_barras):
+        query = "SELECT * FROM produtos WHERE codigo_barras = ?"
+        self.cursor.execute(query, (codigo_barras,))
+        produto = self.cursor.fetchone()
+        
+        if produto:
+            # Converter resultado para dicionário
+            colunas = [desc[0] for desc in self.cursor.description]
+            return dict(zip(colunas, produto))
+        return None
     
     def obter_caixa_aberto(self):
         try:
