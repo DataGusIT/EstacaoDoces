@@ -54,15 +54,17 @@ class DatabaseManager:
         return True
     
     def criar_tabelas(self):
-        # Tabela de Produtos
+        # Tabela de Produtos (com novos campos)
         self.cursor.execute('''
         CREATE TABLE IF NOT EXISTS produtos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            codigo_barras TEXT,
             nome TEXT NOT NULL,
             descricao TEXT,
             quantidade INTEGER DEFAULT 0,
+            estoque_minimo INTEGER DEFAULT 0,
             preco_compra REAL,
-            preco_custo REAL,
+            margem_lucro REAL,
             preco_venda REAL,
             data_validade DATE,
             localizacao TEXT,
@@ -213,71 +215,171 @@ class DatabaseManager:
     
    
         
-    # Métodos para Produtos
-    def adicionar_produto(self, nome, descricao, quantidade, preco_compra, preco_venda, 
-                          data_validade, localizacao, fornecedor_id):
+    # Métodos para Produtos (atualizados)
+    def adicionar_produto(self, codigo_barras, nome, descricao, quantidade, estoque_minimo,
+                        preco_compra, margem_lucro, preco_venda, 
+                        data_validade, localizacao, fornecedor_id):
         self.cursor.execute('''
-        INSERT INTO produtos (nome, descricao, quantidade, preco_compra, preco_venda, 
-                             data_validade, localizacao, fornecedor_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (nome, descricao, quantidade, preco_compra, preco_venda, 
-             data_validade, localizacao, fornecedor_id))
+        INSERT INTO produtos (
+            codigo_barras, nome, descricao, quantidade, estoque_minimo,
+            preco_compra, margem_lucro, preco_venda, 
+            data_validade, localizacao, fornecedor_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            codigo_barras, nome, descricao, quantidade, estoque_minimo,
+            preco_compra, margem_lucro, preco_venda, 
+            data_validade, localizacao, fornecedor_id
+        ))
         self.conn.commit()
         return self.cursor.lastrowid
-    
-    def atualizar_produto(self, id, nome, descricao, quantidade, preco_compra, preco_venda, 
-                         data_validade, localizacao, fornecedor_id):
+
+    def atualizar_produto(self, id, codigo_barras, nome, descricao, quantidade, estoque_minimo,
+                        preco_compra, margem_lucro, preco_venda, 
+                        data_validade, localizacao, fornecedor_id):
         self.cursor.execute('''
         UPDATE produtos
-        SET nome = ?, descricao = ?, quantidade = ?, preco_compra = ?, preco_venda = ?,
+        SET codigo_barras = ?, nome = ?, descricao = ?, quantidade = ?, estoque_minimo = ?,
+            preco_compra = ?, margem_lucro = ?, preco_venda = ?,
             data_validade = ?, localizacao = ?, fornecedor_id = ?
         WHERE id = ?
-        ''', (nome, descricao, quantidade, preco_compra, preco_venda, 
-             data_validade, localizacao, fornecedor_id, id))
+        ''', (
+            codigo_barras, nome, descricao, quantidade, estoque_minimo,
+            preco_compra, margem_lucro, preco_venda,
+            data_validade, localizacao, fornecedor_id, id
+        ))
         self.conn.commit()
         return self.cursor.rowcount > 0
-    
+
     def excluir_produto(self, id):
         self.cursor.execute('DELETE FROM produtos WHERE id = ?', (id,))
         self.conn.commit()
         return self.cursor.rowcount > 0
-    
+
     def obter_produto(self, id):
         self.cursor.execute('SELECT * FROM produtos WHERE id = ?', (id,))
         return self.cursor.fetchone()
-    
+
     def listar_produtos(self, filtro=None):
         query = 'SELECT p.*, f.nome as fornecedor_nome FROM produtos p LEFT JOIN fornecedores f ON p.fornecedor_id = f.id'
         
         if filtro:
-            query += f" WHERE p.nome LIKE '%{filtro}%' OR p.descricao LIKE '%{filtro}%'"
+            query += f" WHERE p.nome LIKE '%{filtro}%' OR p.descricao LIKE '%{filtro}%' OR p.codigo_barras LIKE '%{filtro}%'"
         
         self.cursor.execute(query)
         return self.cursor.fetchall()
-    
+
     def verificar_produtos_vencendo(self, dias=30):
         data_limite = (datetime.now() + timedelta(days=dias)).strftime('%Y-%m-%d')
         data_hoje = datetime.now().strftime('%Y-%m-%d')
         
         self.cursor.execute('''
-        SELECT * FROM produtos 
-        WHERE data_validade <= ? AND data_validade >= ?
-        ORDER BY data_validade
+        SELECT p.*, f.nome as fornecedor_nome 
+        FROM produtos p 
+        LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
+        WHERE p.data_validade <= ? AND p.data_validade >= ?
+        ORDER BY p.data_validade
         ''', (data_limite, data_hoje))
         
         return self.cursor.fetchall()
-    
+
     def verificar_produtos_vencidos(self):
         data_hoje = datetime.now().strftime('%Y-%m-%d')
         
         self.cursor.execute('''
-        SELECT * FROM produtos 
-        WHERE data_validade < ?
-        ORDER BY data_validade
+        SELECT p.*, f.nome as fornecedor_nome 
+        FROM produtos p 
+        LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
+        WHERE p.data_validade < ?
+        ORDER BY p.data_validade
         ''', (data_hoje,))
         
         return self.cursor.fetchall()
-    
+
+    def verificar_produtos_estoque_baixo(self):
+        """Verifica produtos com estoque abaixo do mínimo definido."""
+        self.cursor.execute('''
+        SELECT p.*, f.nome as fornecedor_nome 
+        FROM produtos p 
+        LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
+        WHERE p.quantidade <= p.estoque_minimo AND p.estoque_minimo > 0
+        ORDER BY p.nome
+        ''')
+        
+        return self.cursor.fetchall()
+
+    def filtrar_produtos(self, filtro_estoque, filtro_vencimento):
+        """Filtra produtos por nível de estoque e data de vencimento."""
+        hoje = datetime.now().strftime('%Y-%m-%d')
+        
+        # Base da consulta
+        query = '''
+        SELECT p.*, f.nome as fornecedor_nome 
+        FROM produtos p 
+        LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
+        WHERE 1=1
+        '''
+        
+        params = []
+        
+        # Aplicar filtro de estoque
+        if filtro_estoque == "baixo":
+            query += " AND p.quantidade <= p.estoque_minimo AND p.estoque_minimo > 0"
+        elif filtro_estoque == "medio":
+            query += " AND p.quantidade > p.estoque_minimo AND p.quantidade <= (p.estoque_minimo * 2)"
+        elif filtro_estoque == "alto":
+            query += " AND p.quantidade > (p.estoque_minimo * 2)"
+        
+        # Aplicar filtro de vencimento
+        if filtro_vencimento == "30":
+            data_limite = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
+            query += " AND p.data_validade <= ? AND p.data_validade >= ?"
+            params.extend([data_limite, hoje])
+        elif filtro_vencimento == "15":
+            data_limite = (datetime.now() + timedelta(days=15)).strftime('%Y-%m-%d')
+            query += " AND p.data_validade <= ? AND p.data_validade >= ?"
+            params.extend([data_limite, hoje])
+        elif filtro_vencimento == "vencidos":
+            query += " AND p.data_validade < ?"
+            params.append(hoje)
+        
+        query += " ORDER BY p.nome"
+        
+        self.cursor.execute(query, params)
+        return self.cursor.fetchall()
+
+    # Método para migrar a tabela existente para a nova estrutura
+    def migrar_tabela_produtos(self):
+        """Migra a tabela de produtos para incluir os novos campos."""
+        try:
+            # Verificar se a coluna código de barras já existe
+            self.cursor.execute("PRAGMA table_info(produtos)")
+            colunas = self.cursor.fetchall()
+            colunas_existentes = [coluna[1] for coluna in colunas]
+            
+            # Adicionar novas colunas se necessário
+            if "codigo_barras" not in colunas_existentes:
+                self.cursor.execute("ALTER TABLE produtos ADD COLUMN codigo_barras TEXT")
+            
+            if "estoque_minimo" not in colunas_existentes:
+                self.cursor.execute("ALTER TABLE produtos ADD COLUMN estoque_minimo INTEGER DEFAULT 0")
+            
+            if "margem_lucro" not in colunas_existentes:
+                self.cursor.execute("ALTER TABLE produtos ADD COLUMN margem_lucro REAL DEFAULT 30.0")
+                
+                # Atualizar a margem de lucro baseado nos preços existentes
+                self.cursor.execute('''
+                UPDATE produtos 
+                SET margem_lucro = ((preco_venda / preco_compra) - 1) * 100
+                WHERE preco_compra > 0 AND preco_venda > 0
+                ''')
+            
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"Erro ao migrar tabela de produtos: {str(e)}")
+            return False
+        
     # Métodos para Fornecedores
     def adicionar_fornecedor(self, nome, documento, telefone, email, endereco, contato):
         self.cursor.execute('''
@@ -609,6 +711,17 @@ class DatabaseManager:
         except Exception as e:
             print(f"Erro ao fechar caixa: {e}")
             return False
+    
+    def buscar_produto_por_codigo_barras(self, codigo_barras):
+        query = "SELECT * FROM produtos WHERE codigo_barras = ?"
+        self.cursor.execute(query, (codigo_barras,))
+        produto = self.cursor.fetchone()
+        
+        if produto:
+            # Converter resultado para dicionário
+            colunas = [desc[0] for desc in self.cursor.description]
+            return dict(zip(colunas, produto))
+        return None
     
     def obter_caixa_aberto(self):
         try:

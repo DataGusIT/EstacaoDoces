@@ -156,9 +156,9 @@ class AdminWindow(QDialog):
     
     def adicionar_usuario(self):
         """Abre o diálogo para adicionar um novo usuário"""
-        from ui.user_dialog_window import UserDialog
+        from ui.user_dialog_window import UserDialogWindow
         
-        dialog = UserDialog(self.db)
+        dialog = UserDialogWindow(self.db)
         if dialog.exec_():
             # Se usuário foi adicionado, atualizar lista
             self.carregar_usuarios()

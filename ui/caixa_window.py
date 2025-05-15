@@ -18,6 +18,7 @@ class CaixaWindow(QWidget):
         self.verificar_caixa_aberto()
         self.carregar_clientes()
         self.carregar_produtos()
+        self.setup_codigo_barras()
 
     
     def initUI(self):
@@ -73,7 +74,7 @@ class CaixaWindow(QWidget):
     
     def setup_vendas_tab(self):
         layout = QVBoxLayout(self.tab_vendas)
-        
+    
         # Frame superior com informações da venda
         frame_info = QFrame()
         frame_info.setFrameShape(QFrame.StyledPanel)
@@ -103,12 +104,16 @@ class CaixaWindow(QWidget):
 
         frame_info_layout.addWidget(btn_container, 0, 2)
 
-        # Busca de produtos
-        frame_info_layout.addWidget(QLabel("Produto:"), 1, 0)
+        # Campo de produto com código de barras
+        frame_info_layout.addWidget(QLabel("Produto/Código:"), 1, 0)
         self.cb_produto = QComboBox()
         self.cb_produto.setMinimumWidth(200)
         self.cb_produto.setEditable(True)
         self.cb_produto.setInsertPolicy(QComboBox.NoInsert)
+        self.cb_produto.currentIndexChanged.connect(self.produto_selecionado)
+        self.cb_produto.setCurrentText("")  # Inicia com o campo vazio
+        self.cb_produto.lineEdit().returnPressed.connect(self.buscar_produto)
+        self.cb_produto.setPlaceholderText("Digite o nome do produto ou escaneie o código de barras")
         frame_info_layout.addWidget(self.cb_produto, 1, 1)
 
         # Botão de atualizar produto
@@ -172,9 +177,72 @@ class CaixaWindow(QWidget):
         frame_total_layout.addWidget(self.btn_finalizar)
         
         layout.addWidget(frame_total)
+    
+    def buscar_produto(self):
+        """Buscar produto pelo nome ou código de barras"""
+        texto = self.cb_produto.currentText().strip()
+        if not texto:
+            return
         
-        # Conectar sinais
-        self.cb_produto.currentIndexChanged.connect(self.produto_selecionado)
+        # Tenta buscar como código de barras primeiro (com tratamento aprimorado)
+        codigo_barras = texto.strip()  # Garante que não haja espaços extras
+        produto = self.db.buscar_produto_por_codigo_barras(codigo_barras)
+        
+        if produto:
+            # Encontrou o produto, atualizar campos
+            # Encontrar o índice do produto no combobox
+            index = -1
+            for i in range(self.cb_produto.count()):
+                item_data = self.cb_produto.itemData(i)
+                if item_data and item_data['id'] == produto['id']:
+                    index = i
+                    break
+            
+            if index >= 0:
+                self.cb_produto.setCurrentIndex(index)
+                self.spin_quantidade.setValue(1)  # Definir quantidade para 1
+                self.spin_preco.setValue(produto['preco_venda'] if produto['preco_venda'] else 0)
+                
+                # Verificar se está em promoção
+                promocoes = self.db.listar_promocoes_ativas()
+                for promocao in promocoes:
+                    if promocao['produto_id'] == produto['id']:
+                        self.spin_preco.setValue(promocao['preco_promocional'])
+                        break
+                
+                # Adicionar o item automaticamente
+                self.adicionar_item()
+            else:
+                # Se o produto existe no banco mas não no combobox, adicione-o
+                self.cb_produto.addItem(produto['nome'], produto)
+                self.cb_produto.setCurrentIndex(self.cb_produto.count() - 1)
+                self.spin_quantidade.setValue(1)
+                self.spin_preco.setValue(produto['preco_venda'] if produto['preco_venda'] else 0)
+                # Adicionar o item automaticamente
+                self.adicionar_item()
+        else:
+            # Tenta buscar pelo nome do produto
+            produtos = self.db.buscar_produtos_por_nome(texto)
+            if produtos and len(produtos) > 0:
+                # Por enquanto, vamos apenas selecionar o primeiro produto encontrado
+                produto = produtos[0]
+                index = -1
+                for i in range(self.cb_produto.count()):
+                    item_data = self.cb_produto.itemData(i)
+                    if item_data and item_data['id'] == produto['id']:
+                        index = i
+                        break
+                
+                if index >= 0:
+                    self.cb_produto.setCurrentIndex(index)
+                else:
+                    QMessageBox.warning(self, "Erro", "Produto encontrado no banco, mas não está no combobox")
+            else:
+                QMessageBox.warning(self, "Produto não encontrado", f"Nenhum produto com código/nome: {texto}")
+        
+        # Limpar o campo e focar novamente
+        self.cb_produto.setCurrentText("")
+        self.cb_produto.setFocus()
     
     def setup_movimentos_tab(self):
         layout = QVBoxLayout(self.tab_movimentos)
@@ -310,6 +378,10 @@ class CaixaWindow(QWidget):
         # Conectar sinais
         self.cb_periodo.currentIndexChanged.connect(self.periodo_alterado)
     
+    def setup_codigo_barras(self):
+        # Focar no campo de produto ao iniciar, que agora também é usado para código de barras
+        self.cb_produto.setFocus()
+    
     def verificar_caixa_aberto(self):
         self.caixa_atual = self.db.obter_caixa_aberto()
         
@@ -342,25 +414,42 @@ class CaixaWindow(QWidget):
             self.cb_cliente.addItem(cliente['nome'], cliente['id'])
     
     def carregar_produtos(self):
+        # Salvar o texto atual do campo
+        texto_atual = self.cb_produto.currentText()
+        
+        # Limpar o combobox
         self.cb_produto.clear()
         
+        # Adicionar um item vazio como primeiro item
+        self.cb_produto.addItem("", None)
+        
+        # Carregar produtos do banco de dados
         produtos = self.db.listar_produtos()
         for produto in produtos:
-            # Adicionar produto com nome e seu ID
+            # Use o nome do produto como exibição, mas armazene todos os dados do produto
             self.cb_produto.addItem(produto['nome'], produto)
+        
+        # Restaurar o texto que estava sendo digitado
+        self.cb_produto.setCurrentText(texto_atual)
+        
+        # Focar no campo de produto
+        self.cb_produto.setFocus()
     
     def produto_selecionado(self, index):
-        if index > 0:
-            produto = self.cb_produto.itemData(index)
-            if produto:
-                self.spin_preco.setValue(produto['preco_venda'] if produto['preco_venda'] else 0)
-                
-                # Verificar se o produto está em promoção
-                promocoes = self.db.listar_promocoes_ativas()
-                for promocao in promocoes:
-                    if promocao['produto_id'] == produto['id']:
-                        self.spin_preco.setValue(promocao['preco_promocional'])
-                        break
+        if index <= 0:  # Índice 0 é o item vazio
+            self.spin_preco.setValue(0)
+            return
+        
+        produto = self.cb_produto.itemData(index)
+        if produto:
+            self.spin_preco.setValue(produto['preco_venda'] if produto['preco_venda'] else 0)
+            
+            # Verificar se está em promoção
+            promocoes = self.db.listar_promocoes_ativas()
+            for promocao in promocoes:
+                if promocao['produto_id'] == produto['id']:
+                    self.spin_preco.setValue(promocao['preco_promocional'])
+                    break
     
     def adicionar_item(self):
         index = self.cb_produto.currentIndex()
