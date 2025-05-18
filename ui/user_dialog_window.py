@@ -210,3 +210,6 @@ class UserDialogWindow(QDialog):
             self.accept()
         else:
             QMessageBox.critical(self, "Erro", message)
+            
+# Adicionar alias para compatibilidade
+UserDialog = UserDialogWindow

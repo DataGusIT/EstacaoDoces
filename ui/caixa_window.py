@@ -2,9 +2,12 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLab
                             QPushButton, QTableWidget, QTableWidgetItem, QComboBox, QDateEdit,
                             QMessageBox, QDialog, QFormLayout, QTextEdit, QDoubleSpinBox,
                             QSpinBox, QHeaderView, QCheckBox, QGroupBox, QGridLayout, QFrame,
-                            QSplitter, QApplication)
-from PyQt5.QtCore import Qt, QDate, QDateTime
-from PyQt5.QtGui import QIcon, QColor, QFont
+                            QSplitter, QApplication,  QFileDialog, QMessageBox, QHBoxLayout, QLayout)
+from PyQt5.QtCore import Qt, QDate, QDateTime, QMarginsF
+from PyQt5.QtGui import QIcon, QColor, QFont, QTextDocument, QPageSize, QPageLayout, QIcon
+from PyQt5.QtPrintSupport import QPrinter
+import os
+
 import datetime
 
 class CaixaWindow(QWidget):
@@ -29,7 +32,7 @@ class CaixaWindow(QWidget):
         self.frame_status = QFrame()
         self.frame_status.setFrameShape(QFrame.StyledPanel)
         self.frame_status.setFrameShadow(QFrame.Raised)
-        self.frame_status.setStyleSheet("background-color: #f5f5f5; padding: 10px;")
+        self.frame_status.setStyleSheet("background-color: #121212; padding: 10px;")
         
         status_layout = QHBoxLayout(self.frame_status)
         
@@ -562,6 +565,30 @@ class CaixaWindow(QWidget):
         cb_forma_pagamento.addItems(["Dinheiro", "Cartão de Crédito", "Cartão de Débito", "PIX", "Boleto"])
         form_layout.addRow("Forma de Pagamento:", cb_forma_pagamento)
         
+        # Criar labels para os rótulos dos campos de troco
+        lbl_valor_recebido_text = QLabel("Valor Recebido:")
+        lbl_troco_text = QLabel("Troco:")
+        
+        # Campos de valor recebido e troco
+        spin_valor_recebido = QDoubleSpinBox()
+        spin_valor_recebido.setPrefix("R$ ")
+        spin_valor_recebido.setMaximum(999999.99)
+        spin_valor_recebido.setDecimals(2)
+        spin_valor_recebido.setValue(self.total_venda)  # Inicialmente igual ao total
+        
+        lbl_troco = QLabel("R$ 0,00")
+        lbl_troco.setStyleSheet("font-size: 14px; font-weight: bold; color: #FF5722;")
+        
+        # Adicionar ao layout
+        form_layout.addRow(lbl_valor_recebido_text, spin_valor_recebido)
+        form_layout.addRow(lbl_troco_text, lbl_troco)
+        
+        # Inicialmente ocultar campos relacionados ao troco
+        lbl_valor_recebido_text.setVisible(False)
+        spin_valor_recebido.setVisible(False)
+        lbl_troco_text.setVisible(False)
+        lbl_troco.setVisible(False)
+        
         spin_parcelas = QSpinBox()
         spin_parcelas.setMinimum(1)
         spin_parcelas.setMaximum(12)
@@ -586,21 +613,59 @@ class CaixaWindow(QWidget):
         def atualizar_total_final():
             desconto = spin_desconto.value()
             total_final = self.total_venda - desconto
-            lbl_total_final.setText(f"Total a Pagar: R$ {max(0, total_final):.2f}")
+            total_final = max(0, total_final)
+            lbl_total_final.setText(f"Total a Pagar: R$ {total_final:.2f}")
+            
+            # Atualizar valor recebido para corresponder ao novo total
+            if cb_forma_pagamento.currentText() == "Dinheiro":
+                # Apenas atualiza se for menor que o valor atual
+                if spin_valor_recebido.value() < total_final:
+                    spin_valor_recebido.setValue(total_final)
+                calcular_troco()
+        
+        def calcular_troco():
+            desconto = spin_desconto.value()
+            total_final = max(0, self.total_venda - desconto)
+            valor_recebido = spin_valor_recebido.value()
+            troco = max(0, valor_recebido - total_final)
+            lbl_troco.setText(f"R$ {troco:.2f}")
+            
+            # Mudar cor conforme o valor do troco
+            if troco > 0:
+                lbl_troco.setStyleSheet("font-size: 14px; font-weight: bold; color: #4CAF50;")  # Verde se positivo
+            else:
+                lbl_troco.setStyleSheet("font-size: 14px; font-weight: bold; color: #F44336;")  # Vermelho se zero
         
         spin_desconto.valueChanged.connect(atualizar_total_final)
+        spin_valor_recebido.valueChanged.connect(calcular_troco)
         
-        # Atualizar parcelas disponíveis conforme forma de pagamento
-        def atualizar_parcelas():
+        # Atualizar campos visíveis conforme forma de pagamento
+        def atualizar_campos_forma_pagamento():
             forma_pgto = cb_forma_pagamento.currentText()
+            
+            # Configurar visibilidade e estado para forma de pagamento
             if forma_pgto == "Cartão de Crédito":
                 spin_parcelas.setEnabled(True)
             else:
                 spin_parcelas.setValue(1)
                 spin_parcelas.setEnabled(False)
+            
+            # Mostrar campos de troco apenas para pagamento em dinheiro
+            mostrar_campos_troco = (forma_pgto == "Dinheiro")
+            lbl_valor_recebido_text.setVisible(mostrar_campos_troco)
+            spin_valor_recebido.setVisible(mostrar_campos_troco)
+            lbl_troco_text.setVisible(mostrar_campos_troco)
+            lbl_troco.setVisible(mostrar_campos_troco)
+            
+            # Inicializar o valor recebido com o total da venda
+            if mostrar_campos_troco:
+                desconto = spin_desconto.value()
+                total_final = max(0, self.total_venda - desconto)
+                spin_valor_recebido.setValue(total_final)
+                calcular_troco()
         
-        cb_forma_pagamento.currentIndexChanged.connect(atualizar_parcelas)
-        atualizar_parcelas()
+        cb_forma_pagamento.currentIndexChanged.connect(atualizar_campos_forma_pagamento)
+        atualizar_campos_forma_pagamento()  # Inicializar com os valores corretos
         
         # Processar venda ao confirmar
         def processar_venda():
@@ -609,7 +674,24 @@ class CaixaWindow(QWidget):
             forma_pagamento = cb_forma_pagamento.currentText()
             parcelas = spin_parcelas.value()
             observacao = text_observacao.toPlainText()
-            total_final = self.total_venda - desconto
+            total_final = max(0, self.total_venda - desconto)
+            
+            # Verificar se é pagamento em dinheiro e se o valor recebido é suficiente
+            if forma_pagamento == "Dinheiro" and spin_valor_recebido.value() < total_final:
+                QMessageBox.warning(dialog, "Valor Insuficiente", 
+                                f"O valor recebido (R$ {spin_valor_recebido.value():.2f}) é menor que o total a pagar (R$ {total_final:.2f}).")
+                return
+            
+            # Se tudo estiver certo, registrar a venda e os dados de pagamento
+            valor_recebido = spin_valor_recebido.value() if forma_pagamento == "Dinheiro" else total_final
+            troco = max(0, valor_recebido - total_final) if forma_pagamento == "Dinheiro" else 0
+            
+            # Adicionar informações de troco à observação se for pagamento em dinheiro
+            if forma_pagamento == "Dinheiro" and troco > 0:
+                if observacao:
+                    observacao += f"\nValor recebido: R$ {valor_recebido:.2f}. Troco: R$ {troco:.2f}"
+                else:
+                    observacao = f"Valor recebido: R$ {valor_recebido:.2f}. Troco: R$ {troco:.2f}"
             
             # Registrar venda
             venda_id = self.db.registrar_venda(
@@ -635,7 +717,12 @@ class CaixaWindow(QWidget):
                 saldo_atual = self.db.obter_saldo_atual(self.caixa_atual['id'])
                 self.lbl_saldo.setText(f"Saldo Atual: R$ {saldo_atual:.2f}")
                 
-                QMessageBox.information(self, "Sucesso", "Venda finalizada com sucesso!")
+                # Mensagem de sucesso com informações do troco para pagamento em dinheiro
+                if forma_pagamento == "Dinheiro" and troco > 0:
+                    QMessageBox.information(self, "Venda Finalizada", 
+                                        f"Venda finalizada com sucesso!\nTotal: R$ {total_final:.2f}\nRecebido: R$ {valor_recebido:.2f}\nTroco: R$ {troco:.2f}")
+                else:
+                    QMessageBox.information(self, "Sucesso", "Venda finalizada com sucesso!")
                 
                 # Limpar venda atual
                 self.itens_venda = []
@@ -684,7 +771,10 @@ class CaixaWindow(QWidget):
             saldo_inicial = spin_saldo.value()
             observacao = text_obs.toPlainText()
             
-            caixa_id = self.db.abrir_caixa(saldo_inicial, "Sistema", observacao)
+            # Usar o nome do usuário logado em vez de "Sistema"
+            usuario_logado = self.usuario_atual['nome'] if hasattr(self, 'usuario_atual') else "Sistema"
+            
+            caixa_id = self.db.abrir_caixa(saldo_inicial, usuario_logado, observacao)
             if caixa_id:
                 dialog.accept()
                 self.verificar_caixa_aberto()
@@ -747,28 +837,94 @@ class CaixaWindow(QWidget):
         spin_saldo_final.valueChanged.connect(atualizar_diferenca)
 
         def confirmar_fechamento():
+            if not self.caixa_atual:
+                QMessageBox.critical(self, "Erro", "Nenhum caixa está aberto.")
+                return
+
             saldo_informado = spin_saldo_final.value()
             diferenca = saldo_informado - saldo_atual
             observacao = text_obs_fechamento.toPlainText()
             
-            # Confirmar fechamento
+            # Usar o nome do usuário logado em vez de "Sistema"
+            usuario_logado = self.usuario_atual['nome'] if hasattr(self, 'usuario_atual') else "Sistema"
+            
             confirma = QMessageBox.question(dialog, "Confirmar Fechamento", 
-                                        f"Deseja realmente fechar o caixa?\nDiferença: R$ {diferenca:.2f}",
-                                        QMessageBox.Yes | QMessageBox.No)
+                                            f"Deseja realmente fechar o caixa?\nDiferença: R$ {diferenca:.2f}",
+                                            QMessageBox.Yes | QMessageBox.No)
             
             if confirma == QMessageBox.Yes:
                 sucesso = self.db.fechar_caixa(
                     self.caixa_atual['id'], saldo_informado, diferenca, 
-                    "Sistema", observacao
+                    usuario_logado, observacao
                 )
                 
                 if sucesso:
+                    # Realizar backup dos dados após o fechamento do caixa
+                    backup_sucesso = realizar_backup()
+                    
                     dialog.accept()
                     self.verificar_caixa_aberto()
-                    self.gerar_relatorio_fechamento(self.caixa_atual['id'])
-                    QMessageBox.information(self, "Sucesso", "Caixa fechado com sucesso!")
+                    if self.caixa_atual:  # Verificar novamente antes de chamar o relatório
+                        self.gerar_relatorio_fechamento(self.caixa_atual['id'])
+                    
+                    msg = "Caixa fechado com sucesso!"
+                    if backup_sucesso:
+                        msg += "\nBackup dos dados realizado com sucesso."
+                    else:
+                        msg += "\nAtenção: Não foi possível realizar o backup dos dados."
+                    
+                    QMessageBox.information(self, "Sucesso", msg)
                 else:
                     QMessageBox.critical(self, "Erro", "Erro ao fechar o caixa")
+
+        def realizar_backup():
+            """
+            Realiza um backup completo do banco de dados do sistema.
+            Retorna True se o backup foi bem-sucedido, False caso contrário.
+            """
+            import os
+            import datetime
+            import shutil
+            import sqlite3
+            
+            try:
+                # Configurações do backup
+                data_hora = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                nome_arquivo = f"backup_sistema_{data_hora}.db"
+                
+                # Diretório para salvar os backups
+                diretorio_backup = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backups")
+                
+                # Criar o diretório de backups se não existir
+                if not os.path.exists(diretorio_backup):
+                    os.makedirs(diretorio_backup)
+                    
+                caminho_backup = os.path.join(diretorio_backup, nome_arquivo)
+                
+                # Caminho do banco de dados atual
+                # Substitua pelo caminho correto do seu banco de dados
+                caminho_db = self.db.db_path  # Ajuste conforme sua implementação
+                
+                # Método 1: Cópia direta do arquivo (se SQLite)
+                if hasattr(self.db, 'db_path'):
+                    shutil.copy2(caminho_db, caminho_backup)
+                    return True
+                
+                # Método 2: Backup via SQL (alternativa para outros SGBDs)
+                else:
+                    # Conectar ao banco de dados
+                    conexao = sqlite3.connect(caminho_backup)
+                    
+                    # Executar o comando de backup
+                    with sqlite3.connect(caminho_db) as con:
+                        con.backup(conexao)
+                        
+                    conexao.close()
+                    return True
+                    
+            except Exception as e:
+                print(f"Erro ao realizar backup: {str(e)}")
+                return False
 
         btn_confirmar.clicked.connect(confirmar_fechamento)
         dialog.exec_()
@@ -1179,3 +1335,184 @@ class CaixaWindow(QWidget):
             self.tabela_rel_vendas.setItem(i, 3, QTableWidgetItem(f"R$ {venda['valor_total']:.2f}"))
             self.tabela_rel_vendas.setItem(i, 4, QTableWidgetItem(f"R$ {venda['desconto']:.2f}"))
             self.tabela_rel_vendas.setItem(i, 5, QTableWidgetItem(venda['forma_pagamento']))
+        
+        # Adicionar botão para exportar PDF
+        self.btn_exportar_pdf = QPushButton("Exportar para PDF", self)
+        self.btn_exportar_pdf.setIcon(QIcon("icons/pdf.png"))  # Se tiver um ícone de PDF
+        self.btn_exportar_pdf.clicked.connect(lambda: self.exportar_relatorio_pdf(data_inicio, data_fim, dados))
+        
+        # Adicionar o botão ao layout (ajuste conforme seu layout específico)
+        if hasattr(self, 'layout_botoes_relatorio'):
+            self.layout_botoes_relatorio.addWidget(self.btn_exportar_pdf)
+        else:
+            # Se não existe um layout específico para botões, crie um
+            self.layout_botoes_relatorio = QHBoxLayout()
+            self.layout_botoes_relatorio.addStretch()
+            self.layout_botoes_relatorio.addWidget(self.btn_exportar_pdf)
+            
+            # Adicione este layout ao layout principal da tela de relatórios
+            # Ajuste conforme seu layout específico
+            if hasattr(self, 'layout_relatorio'):
+                self.layout_relatorio.addLayout(self.layout_botoes_relatorio)
+            else:
+                # Se necessário, busque o layout existente e adicione
+                for child in self.children():
+                    if isinstance(child, QLayout):
+                        child.addLayout(self.layout_botoes_relatorio)
+                        break
+
+    def exportar_relatorio_pdf(self, data_inicio, data_fim, dados):
+        """
+        Exporta o relatório atual para um arquivo PDF
+        """
+        # Primeiro, pergunte ao usuário onde salvar o arquivo
+        nome_arquivo = f"Relatorio_Financeiro_{data_inicio}_a_{data_fim}.pdf"
+        caminho_arquivo, _ = QFileDialog.getSaveFileName(
+            self, 
+            "Salvar Relatório em PDF",
+            os.path.join(os.path.expanduser("~"), "Downloads", nome_arquivo),
+            "Arquivos PDF (*.pdf)"
+        )
+        
+        if not caminho_arquivo:  # Usuário cancelou
+            return
+        
+        # Criar um objeto de impressora PDF
+        printer = QPrinter(QPrinter.HighResolution)
+        printer.setOutputFormat(QPrinter.PdfFormat)
+        printer.setOutputFileName(caminho_arquivo)
+        printer.setPageSize(QPageSize(QPageSize.A4))
+        # Definir margens (esquerda, topo, direita, inferior) em milímetros
+        printer.setPageMargins(15, 15, 15, 15, QPrinter.Millimeter)
+        
+        # Criar um documento para escrita
+        documento = QTextDocument()
+        
+        # Criar conteúdo HTML para o PDF
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; }}
+                h1 {{ color: #2c3e50; text-align: center; }}
+                h2 {{ color: #2980b9; }}
+                h3 {{ color: #3498db; margin-top: 20px; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 20px; }}
+                th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }}
+                th {{ background-color: #f2f2f2; }}
+                .entrada {{ color: green; }}
+                .saida {{ color: red; }}
+            </style>
+        </head>
+        <body>
+            <h1>Relatório Financeiro</h1>
+            <h2>Período: {data_inicio} a {data_fim}</h2>
+            
+            <h3>Resumo de Movimentação</h3>
+            <ul>
+                <li><strong>Total de Entradas:</strong> R$ {dados['total_entradas']:.2f}</li>
+                <li><strong>Total de Saídas:</strong> R$ {dados['total_saidas']:.2f}</li>
+                <li><strong>Saldo do Período:</strong> R$ {dados['saldo_periodo']:.2f}</li>
+            </ul>
+            
+            <h3>Vendas</h3>
+            <ul>
+                <li><strong>Quantidade de Vendas:</strong> {dados['qtd_vendas']}</li>
+                <li><strong>Valor Total de Vendas:</strong> R$ {dados['valor_vendas']:.2f}</li>
+                <li><strong>Valor Médio por Venda:</strong> R$ {dados['valor_medio_venda']:.2f}</li>
+                <li><strong>Total de Descontos:</strong> R$ {dados['total_descontos']:.2f}</li>
+            </ul>
+            
+            <h3>Formas de Pagamento</h3>
+            <ul>
+        """
+        
+        for forma, valor in dados['pagamentos'].items():
+            html_content += f"<li><strong>{forma}:</strong> R$ {valor:.2f}</li>"
+        
+        html_content += """
+            </ul>
+            
+            <h3>Produtos Mais Vendidos</h3>
+            <ol>
+        """
+        
+        for produto in dados['produtos_mais_vendidos'][:5]:
+            html_content += f"<li><strong>{produto['nome']}:</strong> {produto['quantidade']} unidades (R$ {produto['valor_total']:.2f})</li>"
+        
+        html_content += """
+            </ol>
+            
+            <h3>Movimentos Detalhados</h3>
+            <table>
+                <tr>
+                    <th>ID</th>
+                    <th>Data/Hora</th>
+                    <th>Tipo</th>
+                    <th>Descrição</th>
+                    <th>Forma Pagto</th>
+                    <th>Valor</th>
+                </tr>
+        """
+        
+        # Adicionar movimentos
+        for movimento in dados['movimentos']:
+            tipo_classe = "entrada" if movimento['tipo'] == "Entrada" else "saida"
+            html_content += f"""
+                <tr>
+                    <td>{movimento['id']}</td>
+                    <td>{movimento['data_hora']}</td>
+                    <td class="{tipo_classe}">{movimento['tipo']}</td>
+                    <td>{movimento['descricao']}</td>
+                    <td>{movimento['forma_pagamento']}</td>
+                    <td class="{tipo_classe}">R$ {movimento['valor']:.2f}</td>
+                </tr>
+            """
+        
+        html_content += """
+            </table>
+            
+            <h3>Vendas Detalhadas</h3>
+            <table>
+                <tr>
+                    <th>ID</th>
+                    <th>Data/Hora</th>
+                    <th>Cliente</th>
+                    <th>Total</th>
+                    <th>Desconto</th>
+                    <th>Forma Pagto</th>
+                </tr>
+        """
+        
+        # Adicionar vendas
+        for venda in dados['vendas']:
+            html_content += f"""
+                <tr>
+                    <td>{venda['id']}</td>
+                    <td>{venda['data_hora']}</td>
+                    <td>{venda['cliente']}</td>
+                    <td>R$ {venda['valor_total']:.2f}</td>
+                    <td>R$ {venda['desconto']:.2f}</td>
+                    <td>{venda['forma_pagamento']}</td>
+                </tr>
+            """
+        
+        html_content += """
+            </table>
+        </body>
+        </html>
+        """
+        
+        # Configurar o documento com o conteúdo HTML
+        documento.setHtml(html_content)
+        
+        # Imprimir o documento no PDF
+        documento.print_(printer)
+        
+        # Informar o usuário que o PDF foi gerado com sucesso
+        QMessageBox.information(
+            self, 
+            "PDF Gerado", 
+            f"O relatório foi exportado com sucesso para:\n{caminho_arquivo}"
+        )

@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                            QPushButton, QTableWidget, QTableWidgetItem, QFormLayout,
-                           QMessageBox, QHeaderView, QDialog, QFrame)
+                           QMessageBox, QHeaderView, QDialog, QFrame, QComboBox)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 
@@ -32,8 +32,8 @@ class FornecedorWindow(QWidget):
         
         # Tabela de fornecedores
         self.tabela = QTableWidget()
-        self.tabela.setColumnCount(6)
-        self.tabela.setHorizontalHeaderLabels(["ID", "Nome", "Documento", "Telefone", 
+        self.tabela.setColumnCount(7)
+        self.tabela.setHorizontalHeaderLabels(["ID", "Nome", "Representante", "Frequência", "Telefone", 
                                               "Email", "Ações"])
         self.tabela.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.tabela.verticalHeader().setVisible(False)
@@ -71,9 +71,10 @@ class FornecedorWindow(QWidget):
             # Adicionar dados às células
             self.tabela.setItem(row, 0, QTableWidgetItem(str(fornecedor['id'])))
             self.tabela.setItem(row, 1, QTableWidgetItem(fornecedor['nome']))
-            self.tabela.setItem(row, 2, QTableWidgetItem(fornecedor['documento'] or ""))
-            self.tabela.setItem(row, 3, QTableWidgetItem(fornecedor['telefone'] or ""))
-            self.tabela.setItem(row, 4, QTableWidgetItem(fornecedor['email'] or ""))
+            self.tabela.setItem(row, 2, QTableWidgetItem(fornecedor['representante'] or ""))
+            self.tabela.setItem(row, 3, QTableWidgetItem(fornecedor['frequencia_compra'] or ""))
+            self.tabela.setItem(row, 4, QTableWidgetItem(fornecedor['telefone'] or ""))
+            self.tabela.setItem(row, 5, QTableWidgetItem(fornecedor['email'] or ""))
             
             # Botões de ação
             acoes_widget = QWidget()
@@ -89,7 +90,7 @@ class FornecedorWindow(QWidget):
             acoes_layout.addWidget(editar_btn)
             acoes_layout.addWidget(excluir_btn)
             
-            self.tabela.setCellWidget(row, 5, acoes_widget)
+            self.tabela.setCellWidget(row, 6, acoes_widget)
     
     def abrir_formulario_fornecedor(self, fornecedor_id=None):
         """Abre o formulário para adicionar ou editar um fornecedor."""
@@ -145,8 +146,13 @@ class FormularioFornecedor(QDialog):
         
         # Campos do formulário
         self.nome_input = QLineEdit()
-        self.documento_input = QLineEdit()
-        self.documento_input.setPlaceholderText("CNPJ/CPF")
+        self.representante_input = QLineEdit()
+        self.representante_input.setPlaceholderText("Nome do representante")
+        
+        # ComboBox para frequência de compra
+        self.frequencia_input = QComboBox()
+        self.frequencia_input.addItems(["Alta", "Média", "Baixa"])
+        
         self.telefone_input = QLineEdit()
         self.email_input = QLineEdit()
         self.endereco_input = QLineEdit()
@@ -155,7 +161,8 @@ class FormularioFornecedor(QDialog):
         
         # Adicionar campos ao formulário
         form_layout.addRow("Nome:", self.nome_input)
-        form_layout.addRow("Documento:", self.documento_input)
+        form_layout.addRow("Representante:", self.representante_input)
+        form_layout.addRow("Frequência de Compra:", self.frequencia_input)
         form_layout.addRow("Telefone:", self.telefone_input)
         form_layout.addRow("Email:", self.email_input)
         form_layout.addRow("Endereço:", self.endereco_input)
@@ -184,7 +191,15 @@ class FormularioFornecedor(QDialog):
     def carregar_dados_fornecedor(self):
         """Carrega os dados do fornecedor nos campos do formulário."""
         self.nome_input.setText(self.fornecedor['nome'])
-        self.documento_input.setText(self.fornecedor['documento'] or "")
+        self.representante_input.setText(self.fornecedor['representante'] or "")
+        
+        # Definir o item selecionado no ComboBox
+        frequencia = self.fornecedor['frequencia_compra']
+        if frequencia:
+            index = self.frequencia_input.findText(frequencia, Qt.MatchFixedString)
+            if index >= 0:
+                self.frequencia_input.setCurrentIndex(index)
+        
         self.telefone_input.setText(self.fornecedor['telefone'] or "")
         self.email_input.setText(self.fornecedor['email'] or "")
         self.endereco_input.setText(self.fornecedor['endereco'] or "")
@@ -199,7 +214,8 @@ class FormularioFornecedor(QDialog):
         
         # Coletar dados do formulário
         nome = self.nome_input.text().strip()
-        documento = self.documento_input.text().strip()
+        representante = self.representante_input.text().strip()
+        frequencia_compra = self.frequencia_input.currentText()
         telefone = self.telefone_input.text().strip()
         email = self.email_input.text().strip()
         endereco = self.endereco_input.text().strip()
@@ -209,12 +225,12 @@ class FormularioFornecedor(QDialog):
             # Inserir ou atualizar fornecedor
             if self.fornecedor_id:
                 sucesso = self.db.atualizar_fornecedor(
-                    self.fornecedor_id, nome, documento, telefone, email, endereco, contato
+                    self.fornecedor_id, nome, representante, frequencia_compra, telefone, email, endereco, contato
                 )
                 mensagem = "Fornecedor atualizado com sucesso!"
             else:
                 sucesso = self.db.adicionar_fornecedor(
-                    nome, documento, telefone, email, endereco, contato
+                    nome, representante, frequencia_compra, telefone, email, endereco, contato
                 )
                 mensagem = "Fornecedor cadastrado com sucesso!"
             

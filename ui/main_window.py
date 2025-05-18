@@ -928,15 +928,6 @@ class MainWindow(QMainWindow):
         
         # Pode adicionar mais ajustes dependendo do tipo de usuário
 
-    def abrir_perfil(self):
-        """Abre a janela de perfil do usuário"""
-        from ui.profile_window import ProfileWindow
-        profile_dialog = ProfileWindow(self.db, self.usuario)
-        if profile_dialog.exec_():
-            # Atualizar informações do usuário se necessário
-            self.usuario = self.db.obter_usuario_por_id(self.usuario['id'])
-            self.user_status_label.setText(f"Usuário: {self.usuario['nome']} | Perfil: {self.usuario['tipo'].capitalize()}")
-
     def alterar_senha(self):
         """Abre a janela de alteração de senha"""
         from ui.change_password_window import ChangePasswordWindow

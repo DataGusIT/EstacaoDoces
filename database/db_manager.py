@@ -77,9 +77,10 @@ class DatabaseManager:
         # Tabela de Fornecedores
         self.cursor.execute('''
         CREATE TABLE IF NOT EXISTS fornecedores (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nome TEXT NOT NULL,
-            documento TEXT UNIQUE,
+            representante TEXT,
+            frequencia_compra TEXT,
             telefone TEXT,
             email TEXT,
             endereco TEXT,
@@ -381,20 +382,20 @@ class DatabaseManager:
             return False
         
     # Métodos para Fornecedores
-    def adicionar_fornecedor(self, nome, documento, telefone, email, endereco, contato):
+    def adicionar_fornecedor(self, nome, representante, frequencia_compra, telefone, email, endereco, contato):
         self.cursor.execute('''
-        INSERT INTO fornecedores (nome, documento, telefone, email, endereco, contato)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ''', (nome, documento, telefone, email, endereco, contato))
+        INSERT INTO fornecedores (nome, representante, frequencia_compra, telefone, email, endereco, contato)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (nome, representante, frequencia_compra, telefone, email, endereco, contato))
         self.conn.commit()
         return self.cursor.lastrowid
     
-    def atualizar_fornecedor(self, id, nome, documento, telefone, email, endereco, contato):
+    def atualizar_fornecedor(self, id, nome, representante, frequencia_compra, telefone, email, endereco, contato):
         self.cursor.execute('''
         UPDATE fornecedores
-        SET nome = ?, documento = ?, telefone = ?, email = ?, endereco = ?, contato = ?
+        SET nome = ?, representante = ?, frequencia_compra = ?, telefone = ?, email = ?, endereco = ?, contato = ?
         WHERE id = ?
-        ''', (nome, documento, telefone, email, endereco, contato, id))
+        ''', (nome, representante, frequencia_compra, telefone, email, endereco, contato, id))
         self.conn.commit()
         return self.cursor.rowcount > 0
     
@@ -411,7 +412,7 @@ class DatabaseManager:
         query = 'SELECT * FROM fornecedores'
         
         if filtro:
-            query += f" WHERE nome LIKE '%{filtro}%' OR documento LIKE '%{filtro}%'"
+            query += f" WHERE nome LIKE '%{filtro}%' OR representante LIKE '%{filtro}%'"
         
         self.cursor.execute(query)
         return self.cursor.fetchall()
@@ -1062,16 +1063,18 @@ class DatabaseManager:
             
             vendas_resumo = cursor.fetchone()
             
-            # Lucro (com base na diferença entre preço de venda e custo)
+            # Lucro (com base na diferença entre preço de venda e preço de compra)
             cursor.execute("""
-                SELECT SUM((i.preco_unitario - p.preco_custo) * i.quantidade) as lucro
+                SELECT SUM((i.preco_unitario - p.preco_compra) * i.quantidade) as lucro
                 FROM itens_venda i
                 JOIN produtos p ON i.produto_id = p.id
                 JOIN vendas v ON i.venda_id = v.id
-                WHERE date(v.data_hora) BETWEEN ? AND ? AND p.preco_custo IS NOT NULL
+                WHERE date(v.data_hora) BETWEEN ? AND ?
             """, (data_inicio, data_fim))
             
-            lucro = cursor.fetchone()['lucro'] or 0
+            # Aqui está o problema: É necessário atribuir o resultado a variável lucro
+            lucro_resultado = cursor.fetchone()
+            lucro = lucro_resultado['lucro'] if lucro_resultado['lucro'] is not None else 0
             
             # Produtos mais vendidos
             cursor.execute("""
@@ -1120,7 +1123,7 @@ class DatabaseManager:
             resultado = {
                 'faturamento': vendas_resumo['faturamento'] or 0,
                 'num_vendas': vendas_resumo['num_vendas'] or 0,
-                'lucro': lucro,
+                'lucro': lucro,  # Agora a variável lucro está definida
                 'produtos': produtos,
                 'pagamentos': pagamentos,
                 'clientes': clientes

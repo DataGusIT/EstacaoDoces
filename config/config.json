@@ -1,0 +1,29 @@
+{
+    "email": {
+        "smtp_server": "smtp.gmail.com",
+        "smtp_port": 587,
+        "username": "guxtavoestudos03@gmail.com",
+        "password": "qfef qylm pqzq jasj",
+        "sender_email": "guxtavoestudos03@gmail.com",
+        "destinatarios": [
+            "gustavomorenosouza2005@gmail.com",
+            "g.moreno.souza05@gmail.com"
+        ]
+    },
+    "notificacoes": {
+        "estoque_baixo": {
+            "ativo": true,
+            "verificar_a_cada_horas": 24,
+            "ultima_verificacao": "2025-05-18T12:04:59.942999"
+        },
+        "vencimento": {
+            "ativo": true,
+            "alertas_dias": [
+                15,
+                30
+            ],
+            "verificar_a_cada_horas": 24,
+            "ultima_verificacao": "2025-05-18T12:05:03.988750"
+        }
+    }
+}

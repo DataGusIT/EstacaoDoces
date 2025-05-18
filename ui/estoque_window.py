@@ -1,11 +1,17 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                            QPushButton, QTableWidget, QTableWidgetItem, QFormLayout,
                            QDateEdit, QComboBox, QMessageBox, QHeaderView, QSpinBox,
-                           QDoubleSpinBox, QDialog, QFrame, QToolButton, QGroupBox)
+                           QDoubleSpinBox, QDialog, QFrame, QToolButton, QGroupBox,
+                           QFileDialog)
 from PyQt5.QtCore import Qt, QDate
 from PyQt5.QtGui import QFont, QIcon, QColor, QBrush
 import os
 from datetime import datetime, timedelta
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
 
 class EstoqueWindow(QWidget):
     def __init__(self, db):
@@ -267,7 +273,170 @@ class EstoqueWindow(QWidget):
             dias_para_vencer = (datetime.strptime(produto['data_validade'], "%Y-%m-%d").date() - datetime.now().date()).days
             msg += f"• {produto['nome']} - Vencimento: {produto['data_validade']} (em {dias_para_vencer} dias)\n"
         
-        QMessageBox.information(self, "Relatório de Vencimentos", msg)
+        # Diálogo com opções de visualizar ou baixar PDF
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Relatório de Vencimentos")
+        dialog.setMinimumWidth(400)
+        
+        dialog_layout = QVBoxLayout(dialog)
+        
+        # Mensagem
+        msg_label = QLabel(msg)
+        msg_label.setWordWrap(True)
+        dialog_layout.addWidget(msg_label)
+        
+        # Botões
+        btn_layout = QHBoxLayout()
+        ok_btn = QPushButton("OK")
+        ok_btn.clicked.connect(dialog.accept)
+        
+        pdf_btn = QPushButton("Baixar como PDF")
+        pdf_btn.clicked.connect(lambda: self.gerar_pdf_vencimentos(produtos))
+        
+        btn_layout.addWidget(ok_btn)
+        btn_layout.addWidget(pdf_btn)
+        dialog_layout.addLayout(btn_layout)
+        
+        dialog.exec_()
+    
+    def gerar_pdf_vencimentos(self, produtos):
+        """Gera um PDF com os produtos próximos ao vencimento e salva no disco."""
+        try:
+            # Solicitar local para salvar o arquivo
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Salvar Relatório de Vencimentos", 
+                os.path.expanduser("~/relatorio_vencimentos.pdf"),
+                "PDF Files (*.pdf)"
+            )
+            
+            if not file_path:
+                return  # Cancelado pelo usuário
+            
+            # Criar documento PDF
+            doc = SimpleDocTemplate(
+                file_path,
+                pagesize=A4,
+                rightMargin=72,
+                leftMargin=72,
+                topMargin=72,
+                bottomMargin=72
+            )
+            
+            # Conteúdo do documento
+            elementos = []
+            
+            # Estilos
+            styles = getSampleStyleSheet()
+            titulo_style = styles["Heading1"]
+            subtitulo_style = styles["Heading2"]
+            normal_style = styles["Normal"]
+            
+            # Data atual
+            data_atual = datetime.now().strftime("%d/%m/%Y")
+            
+            # Título
+            elementos.append(Paragraph("Relatório de Produtos Próximos ao Vencimento", titulo_style))
+            elementos.append(Spacer(1, 0.5 * cm))
+            elementos.append(Paragraph(f"Gerado em: {data_atual}", normal_style))
+            elementos.append(Spacer(1, 1 * cm))
+            
+            # Subtítulo
+            elementos.append(Paragraph("Produtos que vencerão nos próximos 30 dias:", subtitulo_style))
+            elementos.append(Spacer(1, 0.5 * cm))
+            
+            # Dados da tabela
+            data = [["Nome do Produto", "Data de Validade", "Dias Restantes", "Qtde. em Estoque"]]
+            
+            hoje = datetime.now().date()
+            
+            # Ordenar produtos por data de vencimento (do mais próximo ao mais distante)
+            produtos_ordenados = sorted(produtos, 
+                                        key=lambda p: datetime.strptime(p['data_validade'], "%Y-%m-%d").date())
+            
+            for produto in produtos_ordenados:
+                data_validade = datetime.strptime(produto['data_validade'], "%Y-%m-%d").date()
+                dias_para_vencer = (data_validade - hoje).days
+                
+                # Formatação da data para exibição
+                data_formatada = data_validade.strftime("%d/%m/%Y")
+                
+                data.append([
+                    produto['nome'],
+                    data_formatada,
+                    str(dias_para_vencer),
+                    str(produto['quantidade'])
+                ])
+            
+            # Criar tabela
+            tabela = Table(data, colWidths=[doc.width * 0.4, doc.width * 0.2, doc.width * 0.2, doc.width * 0.2])
+            
+            # Estilo da tabela
+            estilo_tabela = TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('ALIGN', (1, 1), (-1, -1), 'CENTER'),
+            ])
+            
+            # Destacar produtos próximos de vencer
+            for i, produto in enumerate(produtos_ordenados, 1):
+                data_validade = datetime.strptime(produto['data_validade'], "%Y-%m-%d").date()
+                dias_para_vencer = (data_validade - hoje).days
+                
+                if dias_para_vencer <= 0:
+                    # Produto vencido
+                    estilo_tabela.add('BACKGROUND', (0, i), (-1, i), colors.pink)
+                    estilo_tabela.add('TEXTCOLOR', (0, i), (-1, i), colors.darkred)
+                elif dias_para_vencer <= 15:
+                    # Vence em 15 dias ou menos
+                    estilo_tabela.add('BACKGROUND', (0, i), (-1, i), colors.mistyrose)
+                    estilo_tabela.add('TEXTCOLOR', (0, i), (-1, i), colors.red)
+                elif dias_para_vencer <= 30:
+                    # Vence em 30 dias ou menos
+                    estilo_tabela.add('BACKGROUND', (0, i), (-1, i), colors.lightgoldenrodyellow)
+                    estilo_tabela.add('TEXTCOLOR', (0, i), (-1, i), colors.darkorange)
+            
+            tabela.setStyle(estilo_tabela)
+            elementos.append(tabela)
+            
+            # Adicionar legenda
+            elementos.append(Spacer(1, 1 * cm))
+            elementos.append(Paragraph("Legenda:", subtitulo_style))
+            elementos.append(Spacer(1, 0.2 * cm))
+            
+            legenda_style = ParagraphStyle(
+                'Legenda',
+                parent=normal_style,
+                spaceAfter=6
+            )
+            
+            elementos.append(Paragraph("• <font color='darkred'>Vermelho escuro</font>: Produtos vencidos", legenda_style))
+            elementos.append(Paragraph("• <font color='red'>Vermelho</font>: Produtos que vencem em 15 dias ou menos", legenda_style))
+            elementos.append(Paragraph("• <font color='darkorange'>Laranja</font>: Produtos que vencem entre 16 e 30 dias", legenda_style))
+            
+            # Nota de rodapé
+            elementos.append(Spacer(1, 2 * cm))
+            nota_style = ParagraphStyle(
+                'Nota',
+                parent=normal_style,
+                fontSize=8,
+                textColor=colors.grey
+            )
+            elementos.append(Paragraph("Este relatório foi gerado automaticamente pelo sistema de controle de estoque.", nota_style))
+            
+            # Construir o documento
+            doc.build(elementos)
+            
+            QMessageBox.information(self, "Sucesso", f"Relatório salvo com sucesso em:\n{file_path}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Erro ao gerar PDF: {str(e)}")
     
     def relatorio_estoque_baixo(self):
         """Gera relatório de produtos com estoque baixo."""
@@ -282,7 +451,225 @@ class EstoqueWindow(QWidget):
             estoque_minimo = produto['estoque_minimo'] or 0
             msg += f"• {produto['nome']} - Quantidade: {produto['quantidade']} (Mínimo: {estoque_minimo})\n"
         
-        QMessageBox.information(self, "Relatório de Estoque Baixo", msg)
+        # Diálogo com opções de visualizar ou baixar PDF
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Relatório de Estoque Baixo")
+        dialog.setMinimumWidth(400)
+        
+        dialog_layout = QVBoxLayout(dialog)
+        
+        # Mensagem
+        msg_label = QLabel(msg)
+        msg_label.setWordWrap(True)
+        dialog_layout.addWidget(msg_label)
+        
+        # Botões
+        btn_layout = QHBoxLayout()
+        ok_btn = QPushButton("OK")
+        ok_btn.clicked.connect(dialog.accept)
+        
+        pdf_btn = QPushButton("Baixar como PDF")
+        pdf_btn.clicked.connect(lambda: self.gerar_pdf_estoque_baixo(produtos))
+        
+        btn_layout.addWidget(ok_btn)
+        btn_layout.addWidget(pdf_btn)
+        dialog_layout.addLayout(btn_layout)
+        
+        dialog.exec_()
+    
+    def gerar_pdf_estoque_baixo(self, produtos):
+        """Gera um PDF com os produtos com estoque baixo e salva no disco."""
+        try:
+            # Solicitar local para salvar o arquivo
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Salvar Relatório de Estoque Baixo", 
+                os.path.expanduser("~/relatorio_estoque_baixo.pdf"),
+                "PDF Files (*.pdf)"
+            )
+            
+            if not file_path:
+                return  # Cancelado pelo usuário
+            
+            # Criar documento PDF
+            doc = SimpleDocTemplate(
+                file_path,
+                pagesize=A4,
+                rightMargin=72,
+                leftMargin=72,
+                topMargin=72,
+                bottomMargin=72
+            )
+            
+            # Conteúdo do documento
+            elementos = []
+            
+            # Estilos
+            styles = getSampleStyleSheet()
+            titulo_style = styles["Heading1"]
+            subtitulo_style = styles["Heading2"]
+            normal_style = styles["Normal"]
+            
+            # Data atual
+            data_atual = datetime.now().strftime("%d/%m/%Y")
+            
+            # Título
+            elementos.append(Paragraph("Relatório de Produtos com Estoque Baixo", titulo_style))
+            elementos.append(Spacer(1, 0.5 * cm))
+            elementos.append(Paragraph(f"Gerado em: {data_atual}", normal_style))
+            elementos.append(Spacer(1, 1 * cm))
+            
+            # Subtítulo
+            elementos.append(Paragraph("Produtos com estoque abaixo do mínimo definido:", subtitulo_style))
+            elementos.append(Spacer(1, 0.5 * cm))
+            
+            # Dados da tabela
+            data = [["Nome do Produto", "Qtde. Atual", "Estoque Mínimo", "Diferença", "Fornecedor"]]
+            
+            # Ordenar produtos por porcentagem em relação ao mínimo
+            def calc_percentual(produto):
+                # Evitar divisão por zero
+                if produto['estoque_minimo'] == 0:
+                    return float('inf')
+                return produto['quantidade'] / produto['estoque_minimo']
+            
+            produtos_ordenados = sorted(produtos, key=calc_percentual)
+            
+            for produto in produtos_ordenados:
+                estoque_minimo = produto['estoque_minimo'] or 0
+                diferenca = produto['quantidade'] - estoque_minimo
+                fornecedor = produto['fornecedor_nome'] if produto['fornecedor_nome'] else "N/A"
+                
+                data.append([
+                    produto['nome'],
+                    str(produto['quantidade']),
+                    str(estoque_minimo),
+                    str(diferenca),
+                    fornecedor
+                ])
+            
+            # Criar tabela
+            tabela = Table(data, colWidths=[doc.width * 0.3, doc.width * 0.15, doc.width * 0.15, 
+                                          doc.width * 0.15, doc.width * 0.25])
+            
+            # Estilo da tabela
+            estilo_tabela = TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('ALIGN', (1, 1), (-1, -1), 'CENTER'),
+            ])
+            
+            # Destacar produtos com estoque crítico
+            for i, produto in enumerate(produtos_ordenados, 1):
+                estoque_minimo = produto['estoque_minimo'] or 0
+                
+                if estoque_minimo > 0:
+                    percentual = produto['quantidade'] / estoque_minimo
+                    
+                    if percentual <= 0.25:  # Menos que 25% do estoque mínimo
+                        estilo_tabela.add('BACKGROUND', (0, i), (-1, i), colors.pink)
+                        estilo_tabela.add('TEXTCOLOR', (0, i), (-1, i), colors.darkred)
+                    elif percentual <= 0.5:  # Menos que 50% do estoque mínimo
+                        estilo_tabela.add('BACKGROUND', (0, i), (-1, i), colors.mistyrose)
+                        estilo_tabela.add('TEXTCOLOR', (0, i), (-1, i), colors.red)
+                    elif percentual <= 0.75:  # Menos que 75% do estoque mínimo
+                        estilo_tabela.add('BACKGROUND', (0, i), (-1, i), colors.lightgoldenrodyellow)
+                        estilo_tabela.add('TEXTCOLOR', (0, i), (-1, i), colors.darkorange)
+            
+            tabela.setStyle(estilo_tabela)
+            elementos.append(tabela)
+            
+            # Adicionar legenda
+            elementos.append(Spacer(1, 1 * cm))
+            elementos.append(Paragraph("Legenda de nível crítico:", subtitulo_style))
+            elementos.append(Spacer(1, 0.2 * cm))
+            
+            legenda_style = ParagraphStyle(
+                'Legenda',
+                parent=normal_style,
+                spaceAfter=6
+            )
+            
+            elementos.append(Paragraph("• <font color='darkred'>Vermelho escuro</font>: Menos de 25% do estoque mínimo", legenda_style))
+            elementos.append(Paragraph("• <font color='red'>Vermelho</font>: Entre 25% e 50% do estoque mínimo", legenda_style))
+            elementos.append(Paragraph("• <font color='darkorange'>Laranja</font>: Entre 50% e 75% do estoque mínimo", legenda_style))
+            
+            # Adicionar recomendações
+            elementos.append(Spacer(1, 1 * cm))
+            elementos.append(Paragraph("Recomendações:", subtitulo_style))
+            elementos.append(Spacer(1, 0.2 * cm))
+            
+            elementos.append(Paragraph("• Produtos em vermelho escuro requerem atenção imediata para reabastecimento.", legenda_style))
+            elementos.append(Paragraph("• Considere entrar em contato com os fornecedores para os itens mais críticos.", legenda_style))
+            elementos.append(Paragraph("• Verifique frequentemente o status de pedidos pendentes para estes produtos.", legenda_style))
+            
+            # Tabela de sugestão de compra
+            elementos.append(Spacer(1, 1 * cm))
+            elementos.append(Paragraph("Sugestão de Compra:", subtitulo_style))
+            elementos.append(Spacer(1, 0.5 * cm))
+            
+            # Dados da tabela de sugestão
+            sugestao_data = [["Nome do Produto", "Qtde. a Comprar", "Fornecedor"]]
+            
+            for produto in produtos_ordenados:
+                estoque_minimo = produto['estoque_minimo'] or 0
+                # Sugestão: repor até 2x o estoque mínimo
+                qtd_sugerida = (estoque_minimo * 2) - produto['quantidade']
+                fornecedor = produto['fornecedor_nome'] if produto['fornecedor_nome'] else "N/A"
+                
+                if qtd_sugerida > 0:
+                    sugestao_data.append([
+                        produto['nome'],
+                        str(qtd_sugerida),
+                        fornecedor
+                    ])
+            
+            # Criar tabela de sugestão se houver dados
+            if len(sugestao_data) > 1:
+                sugestao_tabela = Table(sugestao_data, colWidths=[doc.width * 0.4, doc.width * 0.2, doc.width * 0.4])
+                
+                # Estilo da tabela de sugestão
+                sugestao_estilo = TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.darkblue),
+                    ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 12),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('ALIGN', (1, 1), (1, -1), 'CENTER'),
+                ])
+                
+                sugestao_tabela.setStyle(sugestao_estilo)
+                elementos.append(sugestao_tabela)
+            else:
+                elementos.append(Paragraph("Não há sugestões de compra disponíveis.", normal_style))
+            
+            # Nota de rodapé
+            elementos.append(Spacer(1, 2 * cm))
+            nota_style = ParagraphStyle(
+                'Nota',
+                parent=normal_style,
+                fontSize=8,
+                textColor=colors.grey
+            )
+            elementos.append(Paragraph("Este relatório foi gerado automaticamente pelo sistema de controle de estoque.", nota_style))
+            
+            # Construir o documento
+            doc.build(elementos)
+            
+            QMessageBox.information(self, "Sucesso", f"Relatório salvo com sucesso em:\n{file_path}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Erro ao gerar PDF: {str(e)}")
 
 
 class FormularioProduto(QDialog):
