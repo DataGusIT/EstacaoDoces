@@ -214,8 +214,6 @@ class DatabaseManager:
         # Commit das mudanças
         self.conn.commit()
     
-   
-        
     # Métodos para Produtos (atualizados)
     def adicionar_produto(self, codigo_barras, nome, descricao, quantidade, estoque_minimo,
                         preco_compra, margem_lucro, preco_venda, 

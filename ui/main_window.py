@@ -3,9 +3,8 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QPushButton,
                             QAction, QMenu, QToolBar, QDialog, QFormLayout,
                             QComboBox, QSpinBox, QMessageBox, QStatusBar, QSizePolicy)
 from PyQt5.QtGui import QFont, QIcon, QPixmap, QCursor, QPainter, QColor, QBrush, QPainterPath
-from PyQt5.QtCore import Qt, QDate, QSize, QByteArray
-from PyQt5.QtSvg import QSvgRenderer         # Para renderizar imagens SVG
-# Adicionar esta linha se ainda não existir:
+from PyQt5.QtCore import Qt, QDate, QSize, QByteArray, QPropertyAnimation, QEasingCurve
+from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication
 
 from ui.estoque_window import EstoqueWindow
@@ -20,6 +19,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.db = db
         self.settings = settings
+        self.menu_collapsed = False
+        self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)  # Janela sem bordas
         self.initUI()
         self.check_promocoes_ativas()
         self.aplicar_tema()
@@ -29,115 +30,273 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Sistema de Estoque")
         self.setGeometry(100, 100, 1200, 700)
         
-        # Menu superior (agora contendo também as ações da toolbar)
-        self.criar_menu()
-        
-        # Remover a criação da toolbar separada, pois agora está integrada ao menu
-        # self.criar_toolbar()  # Esta linha deve ser comentada ou removida
-        
-        # Status bar com estilo moderno
-        self.statusBar = QStatusBar()
-        self.statusBar.setStyleSheet("QStatusBar{background-color: #f8f9fa; color: #495057; padding: 5px; font-size: 12px;}")
-        self.setStatusBar(self.statusBar)
-        self.statusBar.showMessage("Sistema pronto", 3000)
-        
         # Widget central
         central_widget = QWidget()
-        main_layout = QHBoxLayout(central_widget)
+        central_widget.setObjectName("centralWidget")
+        main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
+        # ===== CABEÇALHO UNIFICADO =====
+        header_frame = QFrame()
+        header_frame.setObjectName("headerFrame")
+        header_frame.setFixedHeight(40)
+        header_layout = QHBoxLayout(header_frame)
+        header_layout.setContentsMargins(10, 0, 10, 0)
+        header_layout.setSpacing(10)
+        
+        # Título da aplicação (à esquerda)
+        app_icon = QLabel("📦")
+        app_icon.setFont(QFont("Segoe UI", 14))
+        app_icon.setObjectName("appIcon")
+        
+        app_title = QLabel("Sistema de Estoque")
+        app_title.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        app_title.setObjectName("appTitle")
+        
+        # Menu principal
+        menu_frame = QFrame()
+        menu_frame.setObjectName("mainMenuFrame")
+        menu_layout = QHBoxLayout(menu_frame)
+        menu_layout.setContentsMargins(20, 0, 20, 0)
+        menu_layout.setSpacing(20)
+        
+        # Botões de menu principais
+        arquivo_btn = QPushButton("Arquivo")
+        arquivo_btn.setObjectName("headerMenuButton")
+        arquivo_btn.setCursor(Qt.PointingHandCursor)
+        arquivo_menu = QMenu(self)
+        
+        config_action = QAction('Configurações', self)
+        config_action.triggered.connect(self.abrir_configuracoes)
+        arquivo_menu.addAction(config_action)
+        arquivo_menu.addSeparator()
+        sair_action = QAction('Sair', self)
+        sair_action.triggered.connect(self.close)
+        arquivo_menu.addAction(sair_action)
+        arquivo_btn.setMenu(arquivo_menu)
+        
+        relatorios_btn = QPushButton("Relatórios")
+        relatorios_btn.setObjectName("headerMenuButton")
+        relatorios_btn.setCursor(Qt.PointingHandCursor)
+        relatorios_menu = QMenu(self)
+        
+        estoque_baixo_action = QAction('Produtos com Estoque Baixo', self)
+        estoque_baixo_action.triggered.connect(self.relatorio_estoque_baixo)
+        relatorios_menu.addAction(estoque_baixo_action)
+        
+        vencimentos_action = QAction('Produtos a Vencer', self)
+        vencimentos_action.triggered.connect(self.relatorio_vencimentos)
+        relatorios_menu.addAction(vencimentos_action)
+        
+        promocoes_action = QAction('Promoções Ativas', self)
+        promocoes_action.triggered.connect(self.relatorio_promocoes)
+        relatorios_menu.addAction(promocoes_action)
+        relatorios_btn.setMenu(relatorios_menu)
+        
+        ajuda_btn = QPushButton("Ajuda")
+        ajuda_btn.setObjectName("headerMenuButton")
+        ajuda_btn.setCursor(Qt.PointingHandCursor)
+        ajuda_menu = QMenu(self)
+        
+        sobre_action = QAction('Sobre', self)
+        sobre_action.triggered.connect(self.mostrar_sobre)
+        ajuda_menu.addAction(sobre_action)
+        ajuda_btn.setMenu(ajuda_menu)
+        
+        # Adicionar botões ao menu
+        menu_layout.addWidget(arquivo_btn)
+        menu_layout.addWidget(relatorios_btn)
+        menu_layout.addWidget(ajuda_btn)
+        
+        # Adicionar stretch para separar os menus do restante
+        header_layout.addWidget(app_icon)
+        header_layout.addWidget(app_title)
+        header_layout.addWidget(menu_frame)
+        header_layout.addStretch()
+        
+        # Área de informações e controles à direita
+        controls_frame = QFrame()
+        controls_frame.setObjectName("headerControlsFrame")
+        controls_layout = QHBoxLayout(controls_frame)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setSpacing(15)
+        
+        # Botão de atualizar
+        refresh_button = QPushButton("Atualizar")
+        refresh_button.setObjectName("refreshButton")
+        refresh_button.setCursor(Qt.PointingHandCursor)
+        refresh_button.clicked.connect(self.atualizar_dados)
+        
+        # Separador visual
+        separator = QFrame()
+        separator.setFrameShape(QFrame.VLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        separator.setObjectName("headerSeparator")
+        
+        # Informações do usuário
+        user_avatar = QLabel("A")
+        user_avatar.setObjectName("userAvatar")
+        user_avatar.setFixedSize(28, 28)
+        user_avatar.setAlignment(Qt.AlignCenter)
+        
+        user_name = QLabel("Admin")
+        user_name.setObjectName("userName")
+        user_name.setFont(QFont("Segoe UI", 10))
+        
+        # Botões de controle da janela
+        window_controls_frame = QFrame()
+        window_controls_frame.setObjectName("windowControls")
+        window_layout = QHBoxLayout(window_controls_frame)
+        window_layout.setContentsMargins(0, 0, 0, 0)
+        window_layout.setSpacing(8)
+        
+        minimize_btn = QPushButton("─")
+        minimize_btn.setObjectName("minimizeButton")
+        minimize_btn.setFixedSize(22, 22)
+        minimize_btn.setCursor(Qt.PointingHandCursor)
+        minimize_btn.clicked.connect(self.showMinimized)
+        
+        maximize_btn = QPushButton("□")
+        maximize_btn.setObjectName("maximizeButton")
+        maximize_btn.setFixedSize(22, 22)
+        maximize_btn.setCursor(Qt.PointingHandCursor)
+        maximize_btn.clicked.connect(self.toggle_maximize)
+        
+        close_btn = QPushButton("✕")
+        close_btn.setObjectName("closeButton")
+        close_btn.setFixedSize(22, 22)
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.clicked.connect(self.close)
+        
+        window_layout.addWidget(minimize_btn)
+        window_layout.addWidget(maximize_btn)
+        window_layout.addWidget(close_btn)
+        
+        # Adicionar elementos aos controles
+        controls_layout.addWidget(refresh_button)
+        controls_layout.addWidget(separator)
+        controls_layout.addWidget(user_avatar)
+        controls_layout.addWidget(user_name)
+        controls_layout.addWidget(window_controls_frame)
+        
+        header_layout.addWidget(controls_frame)
+        main_layout.addWidget(header_frame)
+        
+        # Separador abaixo do cabeçalho
+        header_separator = QFrame()
+        header_separator.setFrameShape(QFrame.HLine)
+        header_separator.setFrameShadow(QFrame.Sunken)
+        header_separator.setObjectName("headerBottomLine")
+        main_layout.addWidget(header_separator)
+        
+        # ===== CONTEÚDO PRINCIPAL =====
+        content_frame = QFrame()
+        content_frame.setObjectName("contentFrame")
+        content_layout = QHBoxLayout(content_frame)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+        
+        # Container do menu lateral
+        self.menu_container = QFrame()
+        self.menu_container.setObjectName("menuContainer")
+        menu_container_layout = QVBoxLayout(self.menu_container)
+        menu_container_layout.setContentsMargins(0, 0, 0, 0)
+        menu_container_layout.setSpacing(0)
+        
+        # Cabeçalho do menu com botão hambúrguer
+        menu_header = QFrame()
+        menu_header.setObjectName("menuHeader")
+        menu_header.setFixedHeight(50)
+        menu_header_layout = QHBoxLayout(menu_header)
+        menu_header_layout.setContentsMargins(15, 10, 15, 10)
+        
+        # Botão hambúrguer
+        self.hamburger_btn = QPushButton("☰")
+        self.hamburger_btn.setObjectName("hamburgerButton")
+        self.hamburger_btn.setFixedSize(30, 30)
+        self.hamburger_btn.setCursor(Qt.PointingHandCursor)
+        self.hamburger_btn.clicked.connect(self.toggle_menu)
+        
+        menu_header_layout.addWidget(self.hamburger_btn)
+        menu_header_layout.addStretch()
+        
         # Menu lateral
         self.menu_widget = QFrame()
-        self.menu_widget.setMinimumWidth(250)
-        self.menu_widget.setMaximumWidth(250)
         self.menu_widget.setObjectName("menuLateral")
-        menu_layout = QVBoxLayout(self.menu_widget)
-        menu_layout.setSpacing(5)
-        menu_layout.setContentsMargins(10, 20, 10, 20)
+        menu_widget_layout = QVBoxLayout(self.menu_widget)
+        menu_widget_layout.setSpacing(5)
+        menu_widget_layout.setContentsMargins(10, 20, 10, 20)
         
-        # Título do menu com logo
-        header_layout = QHBoxLayout()
-        logo_label = QLabel()
-        # Suponha que você tenha um ícone em resources/logo.png
-        # logo_pixmap = QPixmap("resources/logo.png")
-        # logo_label.setPixmap(logo_pixmap.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        # Botões do menu
+        self.btn_dashboard = self.criar_botao_menu("Dashboard", "🏠")
+        self.btn_estoque = self.criar_botao_menu("Controle de Estoque", "📦")
+        self.btn_fornecedor = self.criar_botao_menu("Fornecedores", "🚚")
+        self.btn_promocoes = self.criar_botao_menu("Promoções", "🏷️")
+        self.btn_clientes = self.criar_botao_menu("Clientes", "👥")
+        self.btn_caixa = self.criar_botao_menu("Controle de Caixa", "💰")
         
-        titulo_label = QLabel("Sistema de Estoque")
-        titulo_label.setFont(QFont("Segoe UI", this_size := 16, QFont.Bold))
-        titulo_label.setObjectName("tituloApp")
+        # Lista de botões para facilitar a manipulação
+        self.menu_buttons = [
+            self.btn_dashboard,
+            self.btn_estoque,
+            self.btn_fornecedor,
+            self.btn_promocoes,
+            self.btn_clientes,
+            self.btn_caixa
+        ]
         
-        # header_layout.addWidget(logo_label)
-        header_layout.addWidget(titulo_label)
-        header_layout.setAlignment(Qt.AlignCenter)
-        menu_layout.addLayout(header_layout)
+        # Adicionar botões ao menu
+        for btn in self.menu_buttons:
+            menu_widget_layout.addWidget(btn)
         
-        # Linha separadora
+        menu_widget_layout.addStretch()
+        
+        # Separador antes das configurações
         separador = QFrame()
         separador.setFrameShape(QFrame.HLine)
         separador.setFrameShadow(QFrame.Sunken)
         separador.setObjectName("separator")
-        menu_layout.addWidget(separador)
-        menu_layout.addSpacing(15)
-        
-        # Botões do menu com ícones
-        self.btn_dashboard = self.criar_botao_menu("Dashboard", "home")
-        self.btn_estoque = self.criar_botao_menu("Controle de Estoque", "package")
-        self.btn_fornecedor = self.criar_botao_menu("Fornecedores", "truck")
-        self.btn_promocoes = self.criar_botao_menu("Promoções", "tag")
-        self.btn_clientes = self.criar_botao_menu("Clientes", "users")
-        self.btn_caixa = self.criar_botao_menu("Controle de Caixa", "dollar-sign")
-        
-        # Adicionar botões ao menu
-        menu_layout.addWidget(self.btn_dashboard)
-        menu_layout.addWidget(self.btn_estoque)
-        menu_layout.addWidget(self.btn_fornecedor)
-        menu_layout.addWidget(self.btn_promocoes)
-        menu_layout.addWidget(self.btn_clientes)
-        menu_layout.addWidget(self.btn_caixa)
-        menu_layout.addStretch()
-        
-        # Separador antes das configurações
-        separador2 = QFrame()
-        separador2.setFrameShape(QFrame.HLine)
-        separador2.setFrameShadow(QFrame.Sunken)
-        separador2.setObjectName("separator")
-        menu_layout.addWidget(separador2)
+        menu_widget_layout.addWidget(separador)
         
         # Botão de configurações
-        self.btn_config = self.criar_botao_menu("Configurações", "settings")
+        self.btn_config = self.criar_botao_menu("Configurações", "⚙️")
         self.btn_config.clicked.connect(self.abrir_configuracoes)
-        menu_layout.addWidget(self.btn_config)
+        menu_widget_layout.addWidget(self.btn_config)
         
         # Créditos no final do menu
-        creditos = QLabel("© 2025 Sistema de Estoque")
-        creditos.setAlignment(Qt.AlignCenter)
-        creditos.setObjectName("creditos")
-        menu_layout.addWidget(creditos)
+        self.creditos = QLabel("© 2025")
+        self.creditos.setAlignment(Qt.AlignCenter)
+        self.creditos.setObjectName("creditos")
+        menu_widget_layout.addWidget(self.creditos)
         
-        # Área de conteúdo (usando QStackedWidget para alternar entre telas)
+        # Adicionar cabeçalho e menu ao container
+        menu_container_layout.addWidget(menu_header)
+        menu_container_layout.addWidget(self.menu_widget)
+        
+        # Área de conteúdo
         content_container = QFrame()
         content_container.setObjectName("contentContainer")
-        content_layout = QVBoxLayout(content_container)
-        content_layout.setContentsMargins(20, 20, 20, 20)
+        content_container_layout = QVBoxLayout(content_container)
+        content_container_layout.setContentsMargins(20, 20, 20, 20)
         
         # Cabeçalho da área de conteúdo
         self.page_title = QLabel("Dashboard")
         self.page_title.setFont(QFont("Segoe UI", 18, QFont.Bold))
         self.page_title.setObjectName("pageTitle")
-        content_layout.addWidget(self.page_title)
+        content_container_layout.addWidget(self.page_title)
         
         # Separador no conteúdo
         content_separator = QFrame()
         content_separator.setFrameShape(QFrame.HLine)
         content_separator.setFrameShadow(QFrame.Sunken)
         content_separator.setObjectName("contentSeparator")
-        content_layout.addWidget(content_separator)
-        content_layout.addSpacing(10)
+        content_container_layout.addWidget(content_separator)
+        content_container_layout.addSpacing(10)
         
         # Stack para as páginas
         self.stack = QStackedWidget()
-        content_layout.addWidget(self.stack)
+        content_container_layout.addWidget(self.stack)
         
         # Criar as páginas e adicioná-las ao stack
         self.estoque_page = EstoqueWindow(self.db)
@@ -147,7 +306,7 @@ class MainWindow(QMainWindow):
         self.caixa_page = CaixaWindow(self.db)
         self.dashboard_page = DashboardWindow(self.db)
         
-        self.stack.addWidget(self.dashboard_page)  # Mudamos a ordem para colocar o dashboard primeiro
+        self.stack.addWidget(self.dashboard_page)
         self.stack.addWidget(self.estoque_page)
         self.stack.addWidget(self.fornecedor_page)
         self.stack.addWidget(self.promocoes_page)
@@ -162,138 +321,100 @@ class MainWindow(QMainWindow):
         self.btn_clientes.clicked.connect(lambda: self.switch_page(4))
         self.btn_caixa.clicked.connect(lambda: self.switch_page(5))
         
-        # Adicionar elementos ao layout principal
-        main_layout.addWidget(self.menu_widget)
-        main_layout.addWidget(content_container)
+        # Adicionar elementos ao layout de conteúdo principal
+        content_layout.addWidget(self.menu_container)
+        content_layout.addWidget(content_container)
+        
+        # Adicionar frame de conteúdo ao layout principal
+        main_layout.addWidget(content_frame)
+        
+        # Status bar simplificado na parte inferior
+        self.statusBar = QStatusBar()
+        self.statusBar.setObjectName("statusBar")
+        self.statusBar.setMaximumHeight(25)
+        self.statusBar.showMessage("Sistema pronto", 3000)
+        
+        # Adicionar informações à direita da barra de status
+        user_info_label = QLabel(f"Usuário: Admin | Perfil: Admin")
+        user_info_label.setObjectName("statusUserInfo")
+        self.statusBar.addPermanentWidget(user_info_label)
+        
+        main_layout.addWidget(self.statusBar)
         
         # Configurar widget central
         self.setCentralWidget(central_widget)
+        
+        # Configurar estado inicial do menu (expandido)
+        self.menu_container.setMinimumWidth(250)
+        self.menu_container.setMaximumWidth(250)
+        
+        # Permitir arrastar a janela pelo cabeçalho
+        header_frame.mousePressEvent = self.start_window_drag
+        header_frame.mouseMoveEvent = self.window_drag
+        self.drag_position = None
     
-    def criar_botao_menu(self, texto, icone_nome=None):
+    def criar_botao_menu(self, texto, icone=None):
         """Cria um botão estilizado para o menu lateral."""
-        btn = QPushButton(texto)
-        btn.setFont(QFont("Segoe UI", 12))
+        btn = QPushButton()
+        btn.setObjectName("menuButton")
         btn.setMinimumHeight(45)
         btn.setCursor(Qt.PointingHandCursor)
-        btn.setObjectName("menuButton")
         
-        # Se você tiver ícones, pode adicioná-los desta forma:
-        # if icone_nome:
-        #     btn.setIcon(QIcon(f"resources/icons/{icone_nome}.png"))
-        #     btn.setIconSize(QSize(20, 20))
+        # Layout para o botão
+        layout = QHBoxLayout(btn)
+        layout.setContentsMargins(15, 8, 15, 8)
+        layout.setSpacing(10)
+        
+        # Ícone (emoji ou símbolo)
+        if icone:
+            icon_label = QLabel(icone)
+            icon_label.setFont(QFont("Segoe UI", 16))
+            icon_label.setFixedSize(24, 24)
+            icon_label.setAlignment(Qt.AlignCenter)
+            icon_label.setObjectName("buttonIcon")
+            layout.addWidget(icon_label)
+            # Guardar referência ao ícone no botão
+            btn.icon_label = icon_label
+        
+        # Texto
+        text_label = QLabel(texto)
+        text_label.setFont(QFont("Segoe UI", 11))
+        text_label.setObjectName("buttonText")
+        layout.addWidget(text_label)
+        layout.addStretch()
+        
+        # Guardar referência ao texto no botão
+        btn.text_label = text_label
+        btn.full_text = texto
         
         return btn
     
-    def criar_menu(self):
-        """Cria a barra de menu superior."""
-        menubar = self.menuBar()
-        menubar.setObjectName("menuBar")
-        
-        # Menu Arquivo
-        arquivo_menu = menubar.addMenu('Arquivo')
-        
-        config_action = QAction('Configurações', self)
-        config_action.triggered.connect(self.abrir_configuracoes)
-        # config_action.setIcon(QIcon("resources/icons/settings.png"))
-        arquivo_menu.addAction(config_action)
-        
-        arquivo_menu.addSeparator()
-        
-        sair_action = QAction('Sair', self)
-        sair_action.triggered.connect(self.close)
-        # sair_action.setIcon(QIcon("resources/icons/logout.png"))
-        arquivo_menu.addAction(sair_action)
-        
-        # Menu Relatórios
-        relatorios_menu = menubar.addMenu('Relatórios')
-        
-        estoque_baixo_action = QAction('Produtos com Estoque Baixo', self)
-        estoque_baixo_action.triggered.connect(self.relatorio_estoque_baixo)
-        # estoque_baixo_action.setIcon(QIcon("resources/icons/alert.png"))
-        relatorios_menu.addAction(estoque_baixo_action)
-        
-        vencimentos_action = QAction('Produtos a Vencer', self)
-        vencimentos_action.triggered.connect(self.relatorio_vencimentos)
-        # vencimentos_action.setIcon(QIcon("resources/icons/calendar.png"))
-        relatorios_menu.addAction(vencimentos_action)
-        
-        promocoes_action = QAction('Promoções Ativas', self)
-        promocoes_action.triggered.connect(self.relatorio_promocoes)
-        # promocoes_action.setIcon(QIcon("resources/icons/tag.png"))
-        relatorios_menu.addAction(promocoes_action)
-        
-        # Menu Ajuda
-        ajuda_menu = menubar.addMenu('Ajuda')
-        
-        sobre_action = QAction('Sobre', self)
-        sobre_action.triggered.connect(self.mostrar_sobre)
-        # sobre_action.setIcon(QIcon("resources/icons/info.png"))
-        ajuda_menu.addAction(sobre_action)
-        
-        # Adicionar ações da toolbar diretamente ao menubar (move as ações para a mesma linha)
-        toolbar_widget = QWidget()
-        toolbar_layout = QHBoxLayout(toolbar_widget)
-        toolbar_layout.setContentsMargins(0, 0, 10, 0)
-        toolbar_layout.setSpacing(5)
-        
-        refresh_action = QAction('Atualizar', self)
-        # refresh_action.setIcon(QIcon("resources/icons/refresh.png"))
-        refresh_action.triggered.connect(self.atualizar_dados)
-        
-        search_action = QAction('Pesquisar', self)
-        # search_action.setIcon(QIcon("resources/icons/search.png"))
-        
-        export_action = QAction('Exportar', self)
-        # export_action.setIcon(QIcon("resources/icons/export.png"))
-        
-        # Criar botões para a toolbar que ficará no menubar
-        refresh_button = QPushButton("Atualizar")
-        refresh_button.setObjectName("toolbarButton")
-        refresh_button.clicked.connect(self.atualizar_dados)
-        refresh_button.setCursor(Qt.PointingHandCursor)
-        
-        search_button = QPushButton("Pesquisar")
-        search_button.setObjectName("toolbarButton")
-        search_button.setCursor(Qt.PointingHandCursor)
-        
-        export_button = QPushButton("Exportar")
-        export_button.setObjectName("toolbarButton")
-        export_button.setCursor(Qt.PointingHandCursor)
-        
-        # Adicionar botões ao layout
-        toolbar_layout.addWidget(refresh_button)
-        toolbar_layout.addWidget(search_button)
-        toolbar_layout.addWidget(export_button)
-        
-        # Adicionar um widget de espaçamento que vai crescer e empurrar os botões para a direita
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        toolbar_layout.addWidget(spacer)
-        
-        # Adicionar o widget com os botões ao menubar
-        menubar.setCornerWidget(toolbar_widget)
-    
-    def criar_toolbar(self):
-        """Cria a barra de ferramentas."""
-        toolbar = QToolBar("Barra de Ferramentas")
-        toolbar.setObjectName("mainToolbar")
-        toolbar.setMovable(False)
-        toolbar.setIconSize(QSize(20, 20))
-        self.addToolBar(toolbar)
-        
-        refresh_action = QAction('Atualizar', self)
-        # refresh_action.setIcon(QIcon("resources/icons/refresh.png"))
-        refresh_action.triggered.connect(self.atualizar_dados)
-        toolbar.addAction(refresh_action)
-        
-        # Adicionar mais ações úteis à toolbar
-        search_action = QAction('Pesquisar', self)
-        # search_action.setIcon(QIcon("resources/icons/search.png"))
-        toolbar.addAction(search_action)
-        
-        export_action = QAction('Exportar', self)
-        # export_action.setIcon(QIcon("resources/icons/export.png"))
-        toolbar.addAction(export_action)
+    def toggle_menu(self):
+        """Alterna entre menu expandido e recolhido."""
+        if self.menu_collapsed:
+            # Expandir menu
+            self.menu_container.setMinimumWidth(250)
+            self.menu_container.setMaximumWidth(250)
+            self.creditos.setText("© 2025")
+            
+            # Mostrar texto dos botões
+            for btn in self.menu_buttons + [self.btn_config]:
+                if hasattr(btn, 'text_label'):
+                    btn.text_label.show()
+            
+            self.menu_collapsed = False
+        else:
+            # Recolher menu
+            self.menu_container.setMinimumWidth(70)
+            self.menu_container.setMaximumWidth(70)
+            self.creditos.setText("©")
+            
+            # Esconder texto dos botões, manter apenas ícones
+            for btn in self.menu_buttons + [self.btn_config]:
+                if hasattr(btn, 'text_label'):
+                    btn.text_label.hide()
+            
+            self.menu_collapsed = True
     
     def switch_page(self, index):
         """Muda para a página especificada e atualiza a interface."""
@@ -304,7 +425,9 @@ class MainWindow(QMainWindow):
                  "Promoções", "Clientes", "Controle de Caixa"]
         
         self.page_title.setText(titles[index])
-        self.setWindowTitle(f"Sistema de Estoque - {titles[index]}")
+        
+        # Atualizar status bar com a página atual
+        self.statusBar.showMessage(f"Área: {titles[index]}", 3000)
         
         # Destacar botão ativo
         buttons = [self.btn_dashboard, self.btn_estoque, self.btn_fornecedor, 
@@ -321,268 +444,253 @@ class MainWindow(QMainWindow):
             btn.style().polish(btn)
             btn.update()
     
+    def toggle_maximize(self):
+        """Alterna entre tela cheia e tamanho normal."""
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
+    
+    def start_window_drag(self, event):
+        """Inicia a operação de arrastar a janela."""
+        if event.button() == Qt.LeftButton:
+            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+            event.accept()
+    
+    def window_drag(self, event):
+        """Realiza a operação de arrastar a janela."""
+        if self.drag_position and event.buttons() == Qt.LeftButton:
+            self.move(event.globalPos() - self.drag_position)
+            event.accept()
+    
+
     def aplicar_tema(self):
-        """Aplica o tema conforme configurações."""
-        tema = self.settings.get_theme()
-        font_size = self.settings.get_font_size()
+        """Aplica o tema atual a todos os componentes."""
+        is_dark = self.settings.get_theme() == 'dark'
         
-        # Ajustar tamanho da fonte global
-        font = QFont("Segoe UI", font_size)
-        QApplication.setFont(font)
+        # Cores do tema
+        if is_dark:
+            bg_color = "#1c1c1e"
+            surface_color = "#2c2c2e" 
+            menu_color = "#1c1c1e"
+            text_color = "#ffffff"
+            text_secondary = "#8e8e93"
+            border_color = "#3a3a3c"
+            button_hover = "#3a3a3c"
+            accent_color = "#007AFF"
+        else:
+            bg_color = "#ffffff"
+            surface_color = "#f2f2f7"
+            menu_color = "#f9f9f9"
+            text_color = "#000000"
+            text_secondary = "#6d6d70"
+            border_color = "#d1d1d6"
+            button_hover = "#e5e5ea"
+            accent_color = "#007AFF"
         
-        # Definir folha de estilo baseada no tema
-        if tema == "dark":
-            self.setStyleSheet("""
-                QMainWindow, QDialog {
-                    background-color: #121212;
-                    color: #f0f0f0;
-                }
-                #menuLateral {
-                    background-color: #1e1e1e;
-                    border-right: 1px solid #333;
-                }
-                #menuButton {
-                    background-color: transparent;
-                    color: #d0d0d0;
-                    border: none;
-                    text-align: left;
-                    padding-left: 15px;
-                    border-radius: 5px;
-                }
-                #menuButton:hover {
-                    background-color: #2d2d2d;
-                }
-                #menuButton[active="true"] {
-                    background-color: #383838;
-                    color: #ffffff;
-                    font-weight: bold;
-                }
-                #tituloApp {
-                    color: #ffffff;
-                }
-                #pageTitle {
-                    color: #ffffff;
-                }
-                #contentContainer {
-                    background-color: #121212;
-                }
-                #separator, #contentSeparator {
-                    background-color: #333;
-                }
-                #creditos {
-                    color: #888;
-                }
-                #toolbarButton {
-                background-color: #2d2d2d;
-                color: #d0d0d0;
+        # Aplicar stylesheet principal
+        self.setStyleSheet(f"""
+            /* Janela principal */
+            QMainWindow {{
+                background-color: {bg_color};
+                color: {text_color};
+            }}
+            
+            #centralWidget {{
+                background-color: {bg_color};
+            }}
+            
+            /* Menu bar */
+            QMenuBar {{
+                background-color: {surface_color};
+                color: {text_color};
+                border-bottom: 1px solid {border_color};
+                padding: 4px;
+            }}
+            
+            QMenuBar::item {{
+                background: transparent;
+                padding: 8px 12px;
+                border-radius: 4px;
+            }}
+            
+            QMenuBar::item:selected {{
+                background-color: {button_hover};
+            }}
+            
+            QMenu {{
+                background-color: {surface_color};
+                color: {text_color};
+                border: 1px solid {border_color};
+                border-radius: 8px;
+                padding: 4px;
+            }}
+            
+            QMenu::item {{
+                padding: 8px 16px;
+                border-radius: 4px;
+            }}
+            
+            QMenu::item:selected {{
+                background-color: {button_hover};
+            }}
+            
+            QMenu::separator {{
+                height: 1px;
+                background-color: {border_color};
+                margin: 4px 8px;
+            }}
+            
+            /* Status bar */
+            #statusBar {{
+                background-color: {surface_color};
+                color: {text_secondary};
+                border-top: 1px solid {border_color};
+                padding: 4px;
+            }}
+            
+            /* Container do menu */
+            #menuContainer {{
+                background-color: {menu_color};
+                border-right: 1px solid {border_color};
+            }}
+            
+            #menuHeader {{
+                background-color: {menu_color};
+                border-bottom: 1px solid {border_color};
+            }}
+            
+            /* Menu lateral */
+            #menuLateral {{
+                background-color: {menu_color};
+            }}
+            
+            #appTitle {{
+                color: {text_color};
+            }}
+            
+            /* Botão hambúrguer */
+            #hamburgerButton {{
+                background-color: transparent;
                 border: none;
-                border-radius: 3px;
-                padding: 3px 10px;
-                margin: 2px;
-                }
-                #toolbarButton:hover {
-                    background-color: #383838;
-                }
-                #toolbarButton:pressed {
-                    background-color: #454545;
-                }
-                QMenuBar {
-                    background-color: #1e1e1e;
-                    color: #f0f0f0;
-                }
-                QMenuBar::item:selected {
-                    background-color: #2d2d2d;
-                }
-                QMenu {
-                    background-color: #1e1e1e;
-                    color: #f0f0f0;
-                    border: 1px solid #333;
-                }
-                QMenu::item:selected {
-                    background-color: #2d2d2d;
-                }
-                QToolBar {
-                    background-color: #1e1e1e;
-                    border-bottom: 1px solid #333;
-                }
-                QPushButton {
-                    background-color: #0d6efd;
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    padding: 5px 15px;
-                }
-                QPushButton:hover {
-                    background-color: #0b5ed7;
-                }
-                QPushButton:pressed {
-                    background-color: #0a58ca;
-                }
-                QLineEdit, QComboBox, QSpinBox {
-                    background-color: #2c2c2c;
-                    color: #f0f0f0;
-                    border: 1px solid #444;
-                    border-radius: 4px;
-                    padding: 4px;
-                }
-                QTableView {
-                    background-color: #2c2c2c;
-                    color: #f0f0f0;
-                    gridline-color: #444;
-                    border: 1px solid #444;
-                }
-                QHeaderView::section {
-                    background-color: #1e1e1e;
-                    color: #f0f0f0;
-                    padding: 5px;
-                    border: 1px solid #444;
-                }
-                QTabWidget::pane {
-                    border: 1px solid #444;
-                    background-color: #2c2c2c;
-                }
-                QTabBar::tab {
-                    background-color: #1e1e1e;
-                    color: #f0f0f0;
-                    border: 1px solid #444;
-                    padding: 5px 10px;
-                    margin-right: 2px;
-                }
-                QTabBar::tab:selected {
-                    background-color: #2c2c2c;
-                }
-                QTabBar::tab:hover {
-                    background-color: #2d2d2d;
-                }
-            """)
-        else:  # Tema claro
-            self.setStyleSheet("""
-                QMainWindow, QDialog {
-                    background-color: #f8f9fa;
-                    color: #212529;
-                }
-                #menuLateral {
-                    background-color: #343a40;
-                    color: #f8f9fa;
-                }
-                #menuButton {
-                    background-color: transparent;
-                    color: #f8f9fa;
-                    border: none;
-                    text-align: left;
-                    padding-left: 15px;
-                    border-radius: 5px;
-                }
-                #menuButton:hover {
-                    background-color: #495057;
-                }
-                #menuButton[active="true"] {
-                    background-color: #0d6efd;
-                    color: white;
-                    font-weight: bold;
-                }
-                #tituloApp {
-                    color: white;
-                }
-                #pageTitle {
-                    color: #212529;
-                }
-                #contentContainer {
-                    background-color: #fff;
-                    border-radius: 8px;
-                }
-                #separator {
-                    background-color: #495057;
-                }
-                #contentSeparator {
-                    background-color: #dee2e6;
-                }
-                #creditos {
-                    color: #adb5bd;
-                }
-                #toolbarButton {
-                background-color: #e9ecef;
-                color: #212529;
+                color: {text_color};
+                font-size: 18px;
+                font-weight: bold;
+                border-radius: 6px;
+                padding: 4px;
+            }}
+            
+            #hamburgerButton:hover {{
+                background-color: {button_hover};
+            }}
+            
+            #hamburgerButton:pressed {{
+                background-color: {border_color};
+            }}
+            
+            /* Botões do menu */
+            #menuButton {{
+                background-color: transparent;
                 border: none;
-                border-radius: 3px;
-                padding: 3px 10px;
-                margin: 2px;
-                }
-                #toolbarButton:hover {
-                    background-color: #dee2e6;
-                }
-                #toolbarButton:pressed {
-                    background-color: #ced4da;
-                }
-                QMenuBar {
-                    background-color: #f8f9fa;
-                    color: #212529;
-                }
-                QMenuBar::item:selected {
-                    background-color: #e9ecef;
-                }
-                QMenu {
-                    background-color: #fff;
-                    color: #212529;
-                    border: 1px solid #dee2e6;
-                }
-                QMenu::item:selected {
-                    background-color: #e9ecef;
-                }
-                QToolBar {
-                    background-color: #f8f9fa;
-                    border-bottom: 1px solid #dee2e6;
-                }
-                QPushButton {
-                    background-color: #0d6efd;
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    padding: 5px 15px;
-                }
-                QPushButton:hover {
-                    background-color: #0b5ed7;
-                }
-                QPushButton:pressed {
-                    background-color: #0a58ca;
-                }
-                QLineEdit, QComboBox, QSpinBox {
-                    background-color: #fff;
-                    color: #212529;
-                    border: 1px solid #ced4da;
-                    border-radius: 4px;
-                    padding: 4px;
-                }
-                QTableView {
-                    background-color: #fff;
-                    color: #212529;
-                    gridline-color: #dee2e6;
-                    border: 1px solid #dee2e6;
-                }
-                QHeaderView::section {
-                    background-color: #e9ecef;
-                    color: #495057;
-                    padding: 5px;
-                    border: 1px solid #dee2e6;
-                }
-                QTabWidget::pane {
-                    border: 1px solid #dee2e6;
-                    background-color: #fff;
-                }
-                QTabBar::tab {
-                    background-color: #e9ecef;
-                    color: #495057;
-                    border: 1px solid #dee2e6;
-                    padding: 5px 10px;
-                    margin-right: 2px;
-                }
-                QTabBar::tab:selected {
-                    background-color: #fff;
-                }
-                QTabBar::tab:hover {
-                    background-color: #f8f9fa;
-                }
-            """)
+                text-align: left;
+                padding: 8px;
+                border-radius: 8px;
+                color: {text_color};
+            }}
+            
+            #menuButton:hover {{
+                background-color: {button_hover};
+            }}
+            
+            #menuButton[active="true"] {{
+                background-color: {accent_color};
+                color: white;
+            }}
+            
+            #menuButton[active="true"] #buttonIcon,
+            #menuButton[active="true"] #buttonText {{
+                color: white;
+            }}
+            
+            #buttonIcon {{
+                color: {text_secondary};
+            }}
+            
+            #buttonText {{
+                color: {text_color};
+            }}
+            
+            /* Separadores */
+            #separator {{
+                background-color: {border_color};
+                border: none;
+                max-height: 1px;
+            }}
+            
+            /* Créditos */
+            #creditos {{
+                color: {text_secondary};
+                font-size: 11px;
+                padding: 8px;
+            }}
+            
+            /* Área de conteúdo */
+            #contentContainer {{
+                background-color: {bg_color};
+            }}
+            
+            #pageTitle {{
+                color: {text_color};
+                margin-bottom: 10px;
+            }}
+            
+            #contentSeparator {{
+                background-color: {border_color};
+                border: none;
+                max-height: 1px;
+            }}
+            
+            /* Botões da toolbar */
+            #toolbarButton {{
+                background-color: {accent_color};
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: 500;
+                min-width: 80px;
+            }}
+            
+            #toolbarButton:hover {{
+                background-color: #0056b3;
+            }}
+            
+            #toolbarButton:pressed {{
+                background-color: #004085;
+            }}
+            
+            /* Avatar e nome do usuário */
+            #userAvatar {{
+                background-color: {accent_color};
+                color: white;
+                border-radius: 15px;
+                font-weight: bold;
+            }}
+            
+            #userName {{
+                color: {text_color};
+                font-weight: 500;
+            }}
+        """)
+        
+        # Forçar atualização visual
+        self.update()
+        if hasattr(self, 'repaint'):
+            self.repaint()
+
+    def aplicar_tema_completo(self):
+        """Aplica tema em todos os widgets, incluindo janela principal"""
+        self.aplicar_tema()
     
     def abrir_configuracoes(self):
         """Abre a janela de configurações."""
@@ -928,11 +1036,109 @@ class MainWindow(QMainWindow):
         
         # Pode adicionar mais ajustes dependendo do tipo de usuário
 
+    def abrir_perfil(self):
+        """Abre a janela de perfil do usuário"""
+        from ui.profile_window import ProfileWindow
+        
+        # Criar a janela como atributo da classe
+        self.profile_dialog = ProfileWindow(self.db, self.usuario)
+        
+        # Desconectar quaisquer sinais antigos se houver
+        if hasattr(self, '_profile_connections') and self._profile_connections:
+            for signal, slot in self._profile_connections:
+                try:
+                    signal.disconnect(slot)
+                except:
+                    pass
+        
+        # Registrar novas conexões para limpeza posterior
+        self._profile_connections = []
+        
+        # Conectar o finished signal para limpeza
+        self.profile_dialog.finished.connect(self._cleanup_profile_dialog)
+        self._profile_connections.append((self.profile_dialog.finished, self._cleanup_profile_dialog))
+        
+        # Executar o diálogo
+        result = self.profile_dialog.exec_()
+        
+        # Lidar com o resultado se bem-sucedido
+        if result:
+            # Atualizar informações do usuário se necessário
+            self.usuario = self.db.obter_usuario_por_id(self.usuario['id'])
+            self.user_status_label.setText(f"Usuário: {self.usuario['nome']} | Perfil: {self.usuario['tipo'].capitalize()}")
+
+    def _cleanup_profile_dialog(self):
+        """Limpa recursos da janela de perfil para evitar vazamentos de memória"""
+        if hasattr(self, 'profile_dialog'):
+            # Desconectar sinais e limpar referências
+            if hasattr(self, '_profile_connections'):
+                for signal, slot in self._profile_connections:
+                    try:
+                        signal.disconnect(slot)
+                    except:
+                        pass
+                self._profile_connections = []
+            
+            # Deletar explicitamente (com cuidado)
+            try:
+                if hasattr(self.profile_dialog, 'close'):
+                    self.profile_dialog.close()
+                if hasattr(self.profile_dialog, 'deleteLater'):
+                    self.profile_dialog.deleteLater()
+            except:
+                pass
+            
+            # Remover a referência
+            self.profile_dialog = None
+
     def alterar_senha(self):
         """Abre a janela de alteração de senha"""
         from ui.change_password_window import ChangePasswordWindow
-        password_dialog = ChangePasswordWindow(self.db, self.usuario['id'])
-        password_dialog.exec_()
+        
+        # Criar a janela como atributo da classe
+        self.password_dialog = ChangePasswordWindow(self.db, self.usuario['id'])
+        
+        # Desconectar quaisquer sinais antigos se houver
+        if hasattr(self, '_password_connections') and self._password_connections:
+            for signal, slot in self._password_connections:
+                try:
+                    signal.disconnect(slot)
+                except:
+                    pass
+        
+        # Registrar novas conexões para limpeza posterior
+        self._password_connections = []
+        
+        # Conectar o finished signal para limpeza
+        self.password_dialog.finished.connect(self._cleanup_password_dialog)
+        self._password_connections.append((self.password_dialog.finished, self._cleanup_password_dialog))
+        
+        # Executar o diálogo
+        self.password_dialog.exec_()
+
+    def _cleanup_password_dialog(self):
+        """Limpa recursos da janela de alteração de senha para evitar vazamentos de memória"""
+        if hasattr(self, 'password_dialog'):
+            # Desconectar sinais e limpar referências
+            if hasattr(self, '_password_connections'):
+                for signal, slot in self._password_connections:
+                    try:
+                        signal.disconnect(slot)
+                    except:
+                        pass
+                self._password_connections = []
+            
+            # Deletar explicitamente (com cuidado)
+            try:
+                if hasattr(self.password_dialog, 'close'):
+                    self.password_dialog.close()
+                if hasattr(self.password_dialog, 'deleteLater'):
+                    self.password_dialog.deleteLater()
+            except:
+                pass
+            
+            # Remover a referência
+            self.password_dialog = None    
 
 
     def logout(self):
@@ -982,17 +1188,54 @@ class MainWindow(QMainWindow):
             # Importar a janela de administração
             from ui.admin_window import AdminWindow
             
-            # Criar e mostrar a janela de administração
-            admin_window = AdminWindow(self.db, self.usuario)
-            admin_window.exec_()
+            # Criar a janela como atributo da classe
+            self.admin_window = AdminWindow(self.db, self.usuario)
             
-            # Opcionalmente, você pode atualizar dados após o fechamento da janela
-            # Por exemplo, se alguns dados foram alterados:
-            # self.carregar_dados()
+            # Desconectar quaisquer sinais antigos se houver
+            if hasattr(self, '_admin_connections') and self._admin_connections:
+                for signal, slot in self._admin_connections:
+                    try:
+                        signal.disconnect(slot)
+                    except:
+                        pass
+            
+            # Registrar novas conexões para limpeza posterior
+            self._admin_connections = []
+            
+            # Conectar o finished signal para limpeza
+            self.admin_window.finished.connect(self._cleanup_admin_window)
+            self._admin_connections.append((self.admin_window.finished, self._cleanup_admin_window))
+            
+            # Executar o diálogo
+            self.admin_window.exec_()
             
         except Exception as e:
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Erro", f"Erro ao abrir o painel de administração: {str(e)}")
+
+    def _cleanup_admin_window(self):
+        """Limpa recursos da janela de administração para evitar vazamentos de memória"""
+        if hasattr(self, 'admin_window'):
+            # Desconectar sinais e limpar referências
+            if hasattr(self, '_admin_connections'):
+                for signal, slot in self._admin_connections:
+                    try:
+                        signal.disconnect(slot)
+                    except:
+                        pass
+                self._admin_connections = []
+            
+            # Deletar explicitamente (com cuidado)
+            try:
+                if hasattr(self.admin_window, 'close'):
+                    self.admin_window.close()
+                if hasattr(self.admin_window, 'deleteLater'):
+                    self.admin_window.deleteLater()
+            except:
+                pass
+            
+            # Remover a referência
+            self.admin_window = None
 
 class ConfigDialog(QDialog):
     def __init__(self, settings):
