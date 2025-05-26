@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QPushButton,
                             QAction, QMenu, QToolBar, QDialog, QFormLayout,
                             QComboBox, QSpinBox, QMessageBox, QStatusBar, QSizePolicy)
 from PyQt5.QtGui import QFont, QIcon, QPixmap, QCursor, QPainter, QColor, QBrush, QPainterPath
-from PyQt5.QtCore import Qt, QDate, QSize, QByteArray, QPropertyAnimation, QEasingCurve
+from PyQt5.QtCore import Qt, QDate, QSize, QByteArray, QPropertyAnimation, QEasingCurve, pyqtSignal
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication
 
@@ -778,159 +778,289 @@ class MainWindow(QMainWindow):
 
     def setup_for_user(self, usuario):
         """Configura a interface para o usuário logado"""
-        self.usuario = usuario
-        
-        # Adicionar informações do usuário na barra de status
-        self.user_status_label = QLabel(f"Usuário: {usuario['nome']} | Perfil: {usuario['tipo'].capitalize()}")
-        self.user_status_label.setStyleSheet("padding-right: 10px;")
-        self.statusBar.addPermanentWidget(self.user_status_label)
-        
-        # Adicionar botão de usuário ao menu
-        self.add_user_menu()
-        
-        # Ajustar permissões conforme o tipo de usuário
-        self.ajustar_permissoes(usuario['tipo'])
+        try:
+            if not hasattr(self, 'user_manager'):
+                self.user_manager = UserManager(self, self.db)
+            self.user_manager.setup_for_user(usuario)
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Erro ao configurar usuário: {str(e)}")
 
     def add_user_menu(self):
-        """Adiciona o menu do usuário à barra de menu"""
-        # Criar widget para o menu do usuário
-        user_widget = QWidget()
-        user_layout = QHBoxLayout(user_widget)
-        user_layout.setContentsMargins(0, 0, 15, 0)
-        user_layout.setSpacing(10)
+        """Método de compatibilidade"""
+        if hasattr(self, 'usuario'):
+            self.setup_for_user(self.usuario)
+
+    def ajustar_permissoes(self, tipo_usuario):
+        """Método de compatibilidade"""
+        if hasattr(self, 'user_manager'):
+            self.user_manager.adjust_permissions()
+
+    def abrir_perfil(self):
+        """Abre perfil do usuário"""
+        if hasattr(self, 'user_manager'):
+            self.user_manager.open_profile()
+
+    def alterar_senha(self):
+        """Altera senha do usuário"""
+        if hasattr(self, 'user_manager'):
+            self.user_manager.change_password()
+
+    def abrir_admin(self):
+        """Abre painel administrativo"""
+        if hasattr(self, 'user_manager'):
+            self.user_manager.open_admin()
+
+    def logout(self):
+        """Realiza logout"""
+        if hasattr(self, 'user_manager'):
+            self.user_manager.logout()
+
+class UserAvatarWidget(QWidget):
+    """Widget responsável por exibir o avatar do usuário"""
+    
+    def __init__(self, usuario, size=32):
+        super().__init__()
+        self.usuario = usuario
+        self.size = size
+        self.setup_ui()
+    
+    def setup_ui(self):
+        """Configura a interface do avatar"""
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
         
-        # Adicionar avatar do usuário (ícone circular)
-        avatar_label = QLabel()
-        avatar_size = 32
-        avatar_pixmap = QPixmap("assets/avatar.png")  # Você pode criar um ícone padrão
+        # Criar label para o avatar
+        self.avatar_label = QLabel()
+        self.avatar_label.setFixedSize(self.size, self.size)
         
-        if not avatar_pixmap.isNull():
-            # Criar uma versão circular do avatar
-            rounded_avatar = QPixmap(avatar_size, avatar_size)
-            rounded_avatar.fill(Qt.transparent)
-            
-            # Criar um pintor para desenhar a versão circular
-            painter = QPainter(rounded_avatar)
-            painter.setRenderHint(QPainter.Antialiasing)
-            path = QPainterPath()
-            path.addEllipse(0, 0, avatar_size, avatar_size)
-            painter.setClipPath(path)
-            
-            # Redimensionar e desenhar o avatar
-            scaled_pixmap = avatar_pixmap.scaled(avatar_size, avatar_size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-            painter.drawPixmap(0, 0, scaled_pixmap)
-            painter.end()
-            
-            avatar_label.setPixmap(rounded_avatar)
-        else:
-            # Se não tiver avatar, usar as iniciais do usuário
-            initials = "".join([name[0].upper() for name in self.usuario['nome'].split() if name])[:2]
-            
-            # Criar um círculo colorido com as iniciais
-            avatar_pixmap = QPixmap(avatar_size, avatar_size)
-            avatar_pixmap.fill(Qt.transparent)
-            
-            painter = QPainter(avatar_pixmap)
-            painter.setRenderHint(QPainter.Antialiasing)
-            
-            # Desenhar o círculo de fundo
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor("#0d6efd"))
-            painter.drawEllipse(0, 0, avatar_size, avatar_size)
-            
-            # Adicionar as iniciais
-            painter.setPen(QColor("#ffffff"))
-            painter.setFont(QFont("Arial", 12, QFont.Bold))
-            painter.drawText(avatar_pixmap.rect(), Qt.AlignCenter, initials)
-            painter.end()
-            
-            avatar_label.setPixmap(avatar_pixmap)
+        # Gerar avatar
+        self.create_avatar()
         
-        # Adicionar label com nome de usuário
-        user_label = QLabel(f"{self.usuario['nome'].split()[0]}")
-        user_label.setStyleSheet("""
-            color: #f0f0f0;
-            font-weight: bold;
-            font-size: 11pt;
-        """)
+        layout.addWidget(self.avatar_label)
+    
+    def create_avatar(self):
+        """Cria o avatar do usuário"""
+        try:
+            # Tentar carregar avatar do arquivo
+            avatar_pixmap = QPixmap("assets/avatar.png")
+            
+            if not avatar_pixmap.isNull():
+                self.create_circular_avatar(avatar_pixmap)
+            else:
+                self.create_initials_avatar()
+                
+        except Exception:
+            self.create_initials_avatar()
+    
+    def create_circular_avatar(self, pixmap):
+        """Cria um avatar circular a partir de uma imagem"""
+        rounded_avatar = QPixmap(self.size, self.size)
+        rounded_avatar.fill(Qt.transparent)
         
-        # Criar botão de menu do usuário com ícone de seta para baixo
-        user_button = QPushButton()
-        user_button.setObjectName("userButton")
-        user_button.setFixedSize(24, 24)
-        user_button.setCursor(Qt.PointingHandCursor)
+        painter = QPainter(rounded_avatar)
+        painter.setRenderHint(QPainter.Antialiasing)
         
-        # Usar um ícone SVG para melhor escalabilidade
-        chevron_icon = """
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="6 9 12 15 18 9"></polyline>
-        </svg>
+        # Criar caminho circular
+        path = QPainterPath()
+        path.addEllipse(0, 0, self.size, self.size)
+        painter.setClipPath(path)
+        
+        # Redimensionar e desenhar
+        scaled_pixmap = pixmap.scaled(
+            self.size, self.size, 
+            Qt.KeepAspectRatioByExpanding, 
+            Qt.SmoothTransformation
+        )
+        painter.drawPixmap(0, 0, scaled_pixmap)
+        painter.end()
+        
+        self.avatar_label.setPixmap(rounded_avatar)
+    
+    def create_initials_avatar(self):
+        """Cria um avatar com as iniciais do usuário"""
+        initials = self.get_user_initials()
+        
+        avatar_pixmap = QPixmap(self.size, self.size)
+        avatar_pixmap.fill(Qt.transparent)
+        
+        painter = QPainter(avatar_pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Desenhar círculo de fundo
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#0d6efd"))
+        painter.drawEllipse(0, 0, self.size, self.size)
+        
+        # Adicionar iniciais
+        painter.setPen(QColor("#ffffff"))
+        font_size = max(8, self.size // 3)
+        painter.setFont(QFont("Arial", font_size, QFont.Bold))
+        painter.drawText(avatar_pixmap.rect(), Qt.AlignCenter, initials)
+        painter.end()
+        
+        self.avatar_label.setPixmap(avatar_pixmap)
+    
+    def get_user_initials(self):
+        """Obtém as iniciais do usuário"""
+        try:
+            nome_parts = self.usuario['nome'].split()
+            initials = "".join([part[0].upper() for part in nome_parts if part])[:2]
+            return initials if initials else "U"
+        except (KeyError, IndexError, AttributeError):
+            return "U"
+
+
+class IconProvider:
+    """Provedor de ícones SVG"""
+    
+    ICONS = {
+        'chevron_down': """
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" 
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+        """,
+        'profile': """
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" 
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                <circle cx="12" cy="7" r="4"></circle>
+            </svg>
+        """,
+        'password': """
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" 
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+        """,
+        'admin': """
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" 
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+            </svg>
+        """,
+        'logout': """
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" 
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16 17 21 12 16 7"></polyline>
+                <line x1="21" y1="12" x2="9" y2="12"></line>
+            </svg>
         """
+    }
+    
+    @classmethod
+    def create_icon(cls, icon_name, size=16):
+        """Cria um ícone a partir do SVG"""
+        if icon_name not in cls.ICONS:
+            return QIcon()
         
-        # Definir ícone SVG como stylesheet
-        user_button.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: #f0f0f0;
-                border: none;
-                font-size: 10px;
-                padding: 0;
-                icon-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #2d2d2d;
-                border-radius: 12px;
-            }
-        """)
+        svg_content = cls.ICONS[icon_name]
+        svg_renderer = QSvgRenderer(QByteArray(svg_content.encode()))
         
-        # Definir ícone SVG para o botão
-        svg_renderer = QSvgRenderer(QByteArray(chevron_icon.encode()))
-        icon_pixmap = QPixmap(24, 24)
+        icon_pixmap = QPixmap(size, size)
         icon_pixmap.fill(Qt.transparent)
+        
         painter = QPainter(icon_pixmap)
         svg_renderer.render(painter)
         painter.end()
         
-        user_button.setIcon(QIcon(icon_pixmap))
+        return QIcon(icon_pixmap)
+
+
+class UserMenuWidget(QFrame):
+    """Widget do menu do usuário"""
+    
+    profile_requested = pyqtSignal()
+    password_change_requested = pyqtSignal()
+    admin_requested = pyqtSignal()
+    logout_requested = pyqtSignal()
+    
+    def __init__(self, usuario):
+        super().__init__()
+        self.usuario = usuario
+        self.setup_ui()
+        self.setup_menu()
+    
+    def setup_ui(self):
+        """Configura a interface do widget"""
+        self.setObjectName("userContainer")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setup_styles()
         
-        # Adicionar ao layout
-        user_layout.addWidget(avatar_label)
-        user_layout.addWidget(user_label)
-        user_layout.addWidget(user_button)
+        # Layout principal
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(8)
         
-        # Criar container para o widget do usuário com estilo
-        user_container = QFrame()
-        user_container.setObjectName("userContainer")
-        user_container.setStyleSheet("""
+        # Avatar
+        self.avatar_widget = UserAvatarWidget(self.usuario, 28)
+        layout.addWidget(self.avatar_widget)
+        
+        # Nome do usuário
+        first_name = self.get_first_name()
+        self.name_label = QLabel(first_name)
+        self.name_label.setStyleSheet("""
+            color: #f0f0f0;
+            font-weight: bold;
+            font-size: 11pt;
+        """)
+        layout.addWidget(self.name_label)
+        
+        # Botão dropdown
+        self.dropdown_button = QPushButton()
+        self.dropdown_button.setFixedSize(20, 20)
+        self.dropdown_button.setCursor(Qt.PointingHandCursor)
+        self.dropdown_button.setIcon(IconProvider.create_icon('chevron_down', 12))
+        self.dropdown_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                padding: 0;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 10px;
+            }
+        """)
+        layout.addWidget(self.dropdown_button)
+        
+        # Conectar eventos
+        self.dropdown_button.clicked.connect(self.show_menu)
+        self.mousePressEvent = self.on_click
+    
+    def setup_styles(self):
+        """Configura os estilos do widget"""
+        self.setStyleSheet("""
             #userContainer {
                 background-color: #1e1e1e;
-                border-radius: 20px;
-                padding: 2px 5px 2px 5px;
+                border-radius: 16px;
+                border: 1px solid #333;
             }
             #userContainer:hover {
                 background-color: #2d2d2d;
+                border-color: #444;
             }
         """)
-        
-        # Adicionar o widget do usuário ao container
-        container_layout = QHBoxLayout(user_container)
-        container_layout.setContentsMargins(5, 0, 5, 0)
-        container_layout.addWidget(user_widget)
-        
-        # Criar menu de usuário
-        user_menu = QMenu(self)
-        user_menu.setStyleSheet("""
+    
+    def setup_menu(self):
+        """Configura o menu dropdown"""
+        self.menu = QMenu(self)
+        self.menu.setStyleSheet("""
             QMenu {
                 background-color: #1e1e1e;
                 color: #f0f0f0;
                 border: 1px solid #333;
-                border-radius: 6px;
-                padding: 5px;
+                border-radius: 8px;
+                padding: 8px;
+                min-width: 160px;
             }
             QMenu::item {
-                padding: 10px 30px 10px 20px;
-                border-radius: 4px;
-                margin: 2px 5px;
+                padding: 12px 16px;
+                border-radius: 6px;
+                margin: 2px;
             }
             QMenu::item:selected {
                 background-color: #2d2d2d;
@@ -939,303 +1069,317 @@ class MainWindow(QMainWindow):
             QMenu::separator {
                 height: 1px;
                 background-color: #333;
-                margin: 5px 10px;
+                margin: 8px 4px;
             }
         """)
         
-        # Adicionar ações ao menu com ícones SVG
-        # Ícone SVG para perfil
-        perfil_icon = """
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-            <circle cx="12" cy="7" r="4"></circle>
-        </svg>
-        """
+        # Adicionar ações ao menu
+        self.add_menu_actions()
+    
+    def add_menu_actions(self):
+        """Adiciona as ações ao menu"""
+        # Ação de perfil
+        profile_action = QAction(IconProvider.create_icon('profile'), "Meu Perfil", self)
+        profile_action.triggered.connect(self.profile_requested.emit)
+        self.menu.addAction(profile_action)
         
-        # Ícone SVG para senha
-        senha_icon = """
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-        </svg>
-        """
+        # Ação de alterar senha
+        password_action = QAction(IconProvider.create_icon('password'), "Alterar Senha", self)
+        password_action.triggered.connect(self.password_change_requested.emit)
+        self.menu.addAction(password_action)
         
-        # Ícone SVG para admin
-        admin_icon = """
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 20h9"></path>
-            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-        </svg>
-        """
+        # Separador e ação de admin (se aplicável)
+        if self.is_admin():
+            self.menu.addSeparator()
+            admin_action = QAction(IconProvider.create_icon('admin'), "Administração", self)
+            admin_action.triggered.connect(self.admin_requested.emit)
+            self.menu.addAction(admin_action)
         
-        # Ícone SVG para logout
-        logout_icon = """
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-            <polyline points="16 17 21 12 16 7"></polyline>
-            <line x1="21" y1="12" x2="9" y2="12"></line>
-        </svg>
-        """
-        
-        # Função para criar ícone a partir de SVG
-        def create_icon_from_svg(svg_content):
-            svg_renderer = QSvgRenderer(QByteArray(svg_content.encode()))
-            icon_pixmap = QPixmap(16, 16)
-            icon_pixmap.fill(Qt.transparent)
-            painter = QPainter(icon_pixmap)
-            svg_renderer.render(painter)
-            painter.end()
-            return QIcon(icon_pixmap)
-        
-        # Criar ações com ícones
-        perfil_action = QAction(create_icon_from_svg(perfil_icon), "Meu Perfil", self)
-        perfil_action.triggered.connect(self.abrir_perfil)
-        
-        senha_action = QAction(create_icon_from_svg(senha_icon), "Alterar Senha", self)
-        senha_action.triggered.connect(self.alterar_senha)
-        
-        if self.usuario['tipo'] == 'admin':
-            admin_action = QAction(create_icon_from_svg(admin_icon), "Administração", self)
-            admin_action.triggered.connect(self.abrir_admin)
-            user_menu.addAction(admin_action)
-            user_menu.addSeparator()
-        
-        user_menu.addAction(perfil_action)
-        user_menu.addAction(senha_action)
-        user_menu.addSeparator()
-        
-        logout_action = QAction(create_icon_from_svg(logout_icon), "Sair", self)
-        logout_action.triggered.connect(self.logout)
-        user_menu.addAction(logout_action)
-        
-        # Conectar botão ao menu
-        user_button.clicked.connect(lambda: user_menu.exec_(QCursor.pos()))
-        
-        # Conectar o container inteiro para abrir o menu também
-        user_container.mousePressEvent = lambda event: user_menu.exec_(QCursor.pos()) if event.button() == Qt.LeftButton else None
-        
-        # Adicionar à barra de menu
-        corner_widget = self.menuBar().cornerWidget(Qt.TopRightCorner)
-        if corner_widget:
-            corner_layout = corner_widget.layout()
-            corner_layout.insertWidget(0, user_container)
-        else:
-            self.menuBar().setCornerWidget(user_container, Qt.TopRightCorner)
+        # Separador e logout
+        self.menu.addSeparator()
+        logout_action = QAction(IconProvider.create_icon('logout'), "Sair", self)
+        logout_action.triggered.connect(self.logout_requested.emit)
+        self.menu.addAction(logout_action)
+    
+    def show_menu(self):
+        """Exibe o menu dropdown"""
+        # Posicionar o menu abaixo do widget
+        menu_pos = self.mapToGlobal(self.rect().bottomLeft())
+        menu_pos.setX(menu_pos.x() - 10)  # Pequeno ajuste horizontal
+        self.menu.exec_(menu_pos)
+    
+    def on_click(self, event):
+        """Manipula o clique no widget"""
+        if event.button() == Qt.LeftButton:
+            self.show_menu()
+        super().mousePressEvent(event)
+    
+    def get_first_name(self):
+        """Obtém o primeiro nome do usuário"""
+        try:
+            return self.usuario['nome'].split()[0]
+        except (KeyError, IndexError, AttributeError):
+            return "Usuário"
+    
+    def is_admin(self):
+        """Verifica se o usuário é administrador"""
+        try:
+            return self.usuario.get('tipo', '').lower() == 'admin'
+        except (KeyError, AttributeError):
+            return False
 
-    def ajustar_permissoes(self, tipo_usuario):
+
+class UserManager:
+    """Gerenciador principal do usuário na aplicação"""
+    
+    def __init__(self, main_window, db):
+        self.main_window = main_window
+        self.db = db
+        self.usuario = None
+        self.user_menu_widget = None
+        self.user_status_label = None
+        
+        # Diálogos ativos
+        self.active_dialogs = {}
+    
+    def setup_for_user(self, usuario):
+        """Configura a interface para o usuário logado"""
+        self.usuario = usuario
+        self.setup_status_bar()
+        self.setup_user_menu()
+        self.adjust_permissions()
+    
+    def setup_status_bar(self):
+        """Configura a barra de status com informações do usuário"""
+        try:
+            user_info = f"Usuário: {self.usuario['nome']} | Perfil: {self.usuario['tipo'].capitalize()}"
+            self.user_status_label = QLabel(user_info)
+            self.user_status_label.setStyleSheet("padding-right: 10px;")
+            self.main_window.statusBar.addPermanentWidget(self.user_status_label)
+        except Exception as e:
+            print(f"Erro ao configurar barra de status: {e}")
+    
+    def setup_user_menu(self):
+        """Configura o menu do usuário"""
+        try:
+            # Criar widget do menu do usuário
+            self.user_menu_widget = UserMenuWidget(self.usuario)
+            
+            # Conectar sinais
+            self.user_menu_widget.profile_requested.connect(self.open_profile)
+            self.user_menu_widget.password_change_requested.connect(self.change_password)
+            self.user_menu_widget.admin_requested.connect(self.open_admin)
+            self.user_menu_widget.logout_requested.connect(self.logout)
+            
+            # Adicionar à barra de menu
+            self.main_window.menuBar().setCornerWidget(self.user_menu_widget, Qt.TopRightCorner)
+            
+        except Exception as e:
+            print(f"Erro ao configurar menu do usuário: {e}")
+    
+    def adjust_permissions(self):
         """Ajusta a interface baseado nas permissões do usuário"""
-        if tipo_usuario != 'admin':
-            # Desabilitar funcionalidades de administração
-            # Por exemplo, ocultar o botão de configurações do menu lateral
-            self.btn_config.setVisible(False)
-            
-            # Remover opção de administração do menu
-            admin_menu = self.menuBar().findChild(QMenu, "adminMenu")
-            if admin_menu:
-                self.menuBar().removeAction(admin_menu.menuAction())
-        
-        # Pode adicionar mais ajustes dependendo do tipo de usuário
-
-    def abrir_perfil(self):
+        try:
+            if self.usuario.get('tipo', '').lower() != 'admin':
+                # Ocultar funcionalidades de administração
+                if hasattr(self.main_window, 'btn_config'):
+                    self.main_window.btn_config.setVisible(False)
+                
+                # Remover menu de administração se existir
+                admin_menu = self.main_window.menuBar().findChild(QMenu, "adminMenu")
+                if admin_menu:
+                    self.main_window.menuBar().removeAction(admin_menu.menuAction())
+                    
+        except Exception as e:
+            print(f"Erro ao ajustar permissões: {e}")
+    
+    def open_profile(self):
         """Abre a janela de perfil do usuário"""
-        from ui.profile_window import ProfileWindow
-        
-        # Criar a janela como atributo da classe
-        self.profile_dialog = ProfileWindow(self.db, self.usuario)
-        
-        # Desconectar quaisquer sinais antigos se houver
-        if hasattr(self, '_profile_connections') and self._profile_connections:
-            for signal, slot in self._profile_connections:
-                try:
-                    signal.disconnect(slot)
-                except:
-                    pass
-        
-        # Registrar novas conexões para limpeza posterior
-        self._profile_connections = []
-        
-        # Conectar o finished signal para limpeza
-        self.profile_dialog.finished.connect(self._cleanup_profile_dialog)
-        self._profile_connections.append((self.profile_dialog.finished, self._cleanup_profile_dialog))
-        
-        # Executar o diálogo
-        result = self.profile_dialog.exec_()
-        
-        # Lidar com o resultado se bem-sucedido
-        if result:
-            # Atualizar informações do usuário se necessário
-            self.usuario = self.db.obter_usuario_por_id(self.usuario['id'])
-            self.user_status_label.setText(f"Usuário: {self.usuario['nome']} | Perfil: {self.usuario['tipo'].capitalize()}")
-
-    def _cleanup_profile_dialog(self):
-        """Limpa recursos da janela de perfil para evitar vazamentos de memória"""
-        if hasattr(self, 'profile_dialog'):
-            # Desconectar sinais e limpar referências
-            if hasattr(self, '_profile_connections'):
-                for signal, slot in self._profile_connections:
-                    try:
-                        signal.disconnect(slot)
-                    except:
-                        pass
-                self._profile_connections = []
+        try:
+            if 'profile' in self.active_dialogs:
+                self.active_dialogs['profile'].raise_()
+                return
             
-            # Deletar explicitamente (com cuidado)
-            try:
-                if hasattr(self.profile_dialog, 'close'):
-                    self.profile_dialog.close()
-                if hasattr(self.profile_dialog, 'deleteLater'):
-                    self.profile_dialog.deleteLater()
-            except:
-                pass
+            from ui.profile_window import ProfileWindow
             
-            # Remover a referência
-            self.profile_dialog = None
-
-    def alterar_senha(self):
+            profile_dialog = ProfileWindow(self.db, self.usuario)
+            self.active_dialogs['profile'] = profile_dialog
+            
+            # Conectar sinal de finalização
+            profile_dialog.finished.connect(lambda: self.cleanup_dialog('profile'))
+            
+            result = profile_dialog.exec_()
+            
+            if result == QDialog.Accepted:
+                # Atualizar informações do usuário
+                self.update_user_info()
+                
+        except Exception as e:
+            QMessageBox.critical(self.main_window, "Erro", f"Erro ao abrir perfil: {str(e)}")
+    
+    def change_password(self):
         """Abre a janela de alteração de senha"""
-        from ui.change_password_window import ChangePasswordWindow
-        
-        # Criar a janela como atributo da classe
-        self.password_dialog = ChangePasswordWindow(self.db, self.usuario['id'])
-        
-        # Desconectar quaisquer sinais antigos se houver
-        if hasattr(self, '_password_connections') and self._password_connections:
-            for signal, slot in self._password_connections:
-                try:
-                    signal.disconnect(slot)
-                except:
-                    pass
-        
-        # Registrar novas conexões para limpeza posterior
-        self._password_connections = []
-        
-        # Conectar o finished signal para limpeza
-        self.password_dialog.finished.connect(self._cleanup_password_dialog)
-        self._password_connections.append((self.password_dialog.finished, self._cleanup_password_dialog))
-        
-        # Executar o diálogo
-        self.password_dialog.exec_()
-
-    def _cleanup_password_dialog(self):
-        """Limpa recursos da janela de alteração de senha para evitar vazamentos de memória"""
-        if hasattr(self, 'password_dialog'):
-            # Desconectar sinais e limpar referências
-            if hasattr(self, '_password_connections'):
-                for signal, slot in self._password_connections:
-                    try:
-                        signal.disconnect(slot)
-                    except:
-                        pass
-                self._password_connections = []
+        try:
+            if 'password' in self.active_dialogs:
+                self.active_dialogs['password'].raise_()
+                return
             
-            # Deletar explicitamente (com cuidado)
-            try:
-                if hasattr(self.password_dialog, 'close'):
-                    self.password_dialog.close()
-                if hasattr(self.password_dialog, 'deleteLater'):
-                    self.password_dialog.deleteLater()
-            except:
-                pass
+            from ui.change_password_window import ChangePasswordWindow
             
-            # Remover a referência
-            self.password_dialog = None    
-
-
+            password_dialog = ChangePasswordWindow(self.db, self.usuario['id'])
+            self.active_dialogs['password'] = password_dialog
+            
+            # Conectar sinal de finalização
+            password_dialog.finished.connect(lambda: self.cleanup_dialog('password'))
+            
+            password_dialog.exec_()
+            
+        except Exception as e:
+            QMessageBox.critical(self.main_window, "Erro", f"Erro ao abrir alteração de senha: {str(e)}")
+    
+    def open_admin(self):
+        """Abre a janela de administração"""
+        try:
+            if not self.user_menu_widget.is_admin():
+                QMessageBox.warning(self.main_window, "Acesso Negado", 
+                                  "Você não tem permissões de administrador.")
+                return
+            
+            if 'admin' in self.active_dialogs:
+                self.active_dialogs['admin'].raise_()
+                return
+            
+            from ui.admin_window import AdminWindow
+            
+            admin_dialog = AdminWindow(self.db, self.usuario)
+            self.active_dialogs['admin'] = admin_dialog
+            
+            # Conectar sinal de finalização
+            admin_dialog.finished.connect(lambda: self.cleanup_dialog('admin'))
+            
+            admin_dialog.exec_()
+            
+        except Exception as e:
+            QMessageBox.critical(self.main_window, "Erro", f"Erro ao abrir administração: {str(e)}")
+    
     def logout(self):
         """Realiza o logout do usuário"""
-        resposta = QMessageBox.question(self, "Confirmação", 
-                                    "Deseja realmente sair do sistema?",
-                                    QMessageBox.Yes | QMessageBox.No)
-        
-        if resposta == QMessageBox.Yes:
-            # Importante: reconectar o banco de dados antes de passar para a tela de login
-            if hasattr(self, 'db') and self.db:
-                # Assegurar que a conexão está ativa antes de tentar fazer login novamente
+        try:
+            reply = QMessageBox.question(
+                self.main_window, 
+                "Confirmação", 
+                "Deseja realmente sair do sistema?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                self.perform_logout()
+                
+        except Exception as e:
+            QMessageBox.critical(self.main_window, "Erro", f"Erro ao realizar logout: {str(e)}")
+    
+    def perform_logout(self):
+        """Executa o processo de logout"""
+        try:
+            # Fechar todos os diálogos ativos
+            self.cleanup_all_dialogs()
+            
+            # Garantir conexão com o banco
+            if hasattr(self.db, 'ensure_connection'):
                 self.db.ensure_connection()
             
-            # Fechar a janela principal sem destruir recursos globais
-            self.hide()  # Em vez de close(), apenas esconda a janela
+            # Ocultar janela principal
+            self.main_window.hide()
             
-            # Criar nova janela de login com a mesma conexão de banco de dados
+            # Abrir janela de login
             from ui.login_window import LoginWindow
-            from PyQt5.QtWidgets import QDialog
             
             login_window = LoginWindow(self.db)
             
-            # Conectar o sinal de login bem-sucedido
-            if hasattr(self, 'parent') and self.parent() and hasattr(self.parent(), 'on_login_success'):
-                login_window.login_success_signal.connect(self.parent().on_login_success)
+            # Conectar sinal de login bem-sucedido se necessário
+            if (hasattr(self.main_window, 'parent') and 
+                self.main_window.parent() and 
+                hasattr(self.main_window.parent(), 'on_login_success')):
+                login_window.login_success_signal.connect(
+                    self.main_window.parent().on_login_success
+                )
             
-            # Executar a janela de login
             result = login_window.exec_()
             
             if result == QDialog.Accepted:
-                # Se login bem-sucedido, mostrar a janela principal novamente com novo usuário
-                self.usuario = login_window.usuario
-                # Atualizar a interface para o novo usuário se necessário
-                if hasattr(self, 'setup_user_interface'):
-                    self.setup_user_interface()
-                self.show()
+                # Login bem-sucedido - configurar novo usuário
+                new_usuario = getattr(login_window, 'usuario', None)
+                if new_usuario:
+                    self.setup_for_user(new_usuario)
+                    self.main_window.show()
+                else:
+                    self.exit_application()
             else:
-                # Se o login for cancelado, encerrar a aplicação
-                import sys
-                self.close()  # Agora sim fechamos a janela principal
-                sys.exit(0)
-
-    def abrir_admin(self):
-        """Abre a janela de administração do sistema"""
-        try:
-            # Importar a janela de administração
-            from ui.admin_window import AdminWindow
-            
-            # Criar a janela como atributo da classe
-            self.admin_window = AdminWindow(self.db, self.usuario)
-            
-            # Desconectar quaisquer sinais antigos se houver
-            if hasattr(self, '_admin_connections') and self._admin_connections:
-                for signal, slot in self._admin_connections:
-                    try:
-                        signal.disconnect(slot)
-                    except:
-                        pass
-            
-            # Registrar novas conexões para limpeza posterior
-            self._admin_connections = []
-            
-            # Conectar o finished signal para limpeza
-            self.admin_window.finished.connect(self._cleanup_admin_window)
-            self._admin_connections.append((self.admin_window.finished, self._cleanup_admin_window))
-            
-            # Executar o diálogo
-            self.admin_window.exec_()
-            
+                # Login cancelado
+                self.exit_application()
+                
         except Exception as e:
-            from PyQt5.QtWidgets import QMessageBox
-            QMessageBox.critical(self, "Erro", f"Erro ao abrir o painel de administração: {str(e)}")
+            print(f"Erro durante logout: {e}")
+            self.exit_application()
+    
+    def update_user_info(self):
+        """Atualiza as informações do usuário na interface"""
+        try:
+            # Atualizar dados do usuário
+            self.usuario = self.db.obter_usuario_por_id(self.usuario['id'])
+            
+            # Atualizar barra de status
+            if self.user_status_label:
+                user_info = f"Usuário: {self.usuario['nome']} | Perfil: {self.usuario['tipo'].capitalize()}"
+                self.user_status_label.setText(user_info)
+            
+            # Atualizar menu do usuário
+            if self.user_menu_widget:
+                self.user_menu_widget.usuario = self.usuario
+                self.user_menu_widget.name_label.setText(self.user_menu_widget.get_first_name())
+                
+        except Exception as e:
+            print(f"Erro ao atualizar informações do usuário: {e}")
+    
+    def cleanup_dialog(self, dialog_name):
+        """Limpa referência de diálogo específico"""
+        if dialog_name in self.active_dialogs:
+            dialog = self.active_dialogs.pop(dialog_name)
+            if dialog:
+                dialog.deleteLater()
+    
+    def cleanup_all_dialogs(self):
+        """Limpa todos os diálogos ativos"""
+        for dialog_name, dialog in list(self.active_dialogs.items()):
+            if dialog:
+                try:
+                    dialog.close()
+                    dialog.deleteLater()
+                except:
+                    pass
+        self.active_dialogs.clear()
+    
+    def exit_application(self):
+        """Encerra a aplicação"""
+        try:
+            self.cleanup_all_dialogs()
+            self.main_window.close()
+            import sys
+            sys.exit(0)
+        except:
+            import os
+            os._exit(0)
 
-    def _cleanup_admin_window(self):
-        """Limpa recursos da janela de administração para evitar vazamentos de memória"""
-        if hasattr(self, 'admin_window'):
-            # Desconectar sinais e limpar referências
-            if hasattr(self, '_admin_connections'):
-                for signal, slot in self._admin_connections:
-                    try:
-                        signal.disconnect(slot)
-                    except:
-                        pass
-                self._admin_connections = []
-            
-            # Deletar explicitamente (com cuidado)
-            try:
-                if hasattr(self.admin_window, 'close'):
-                    self.admin_window.close()
-                if hasattr(self.admin_window, 'deleteLater'):
-                    self.admin_window.deleteLater()
-            except:
-                pass
-            
-            # Remover a referência
-            self.admin_window = None
+
+# Integração com a janela principal - substitua os métodos antigos por estes:
+
+def setup_for_user(self, usuario):
+    """Método para integrar na janela principal"""
+    if not hasattr(self, 'user_manager'):
+        self.user_manager = UserManager(self, self.db)
+    
+    self.user_manager.setup_for_user(usuario)
 
 class ConfigDialog(QDialog):
     def __init__(self, settings):
@@ -1340,3 +1484,4 @@ class ConfigDialog(QDialog):
 
 # Adicionar esta linha se ainda não existir:
 from PyQt5.QtWidgets import QApplication
+

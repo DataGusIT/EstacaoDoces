@@ -822,6 +822,55 @@ class CaixaWindow(QWidget):
         btn_confirmar.setStyleSheet("background-color: #F44336; color: white; font-weight: bold;")
         layout.addWidget(btn_confirmar)
 
+        # CORREÇÃO: Definir a função realizar_backup ANTES de usar
+        def realizar_backup():
+            """
+            Realiza um backup completo do banco de dados do sistema.
+            Retorna True se o backup foi bem-sucedido, False caso contrário.
+            """
+            import os
+            import datetime
+            import shutil
+            import sqlite3
+
+            try:
+                # Configurações do backup
+                data_hora = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                nome_arquivo = f"backup_sistema_{data_hora}.db"
+
+                # Diretório para salvar os backups na unidade C:
+                diretorio_backup = os.path.join("C:\\backups_sistema")
+
+                # Criar o diretório de backups se não existir
+                if not os.path.exists(diretorio_backup):
+                    os.makedirs(diretorio_backup)
+
+                caminho_backup = os.path.join(diretorio_backup, nome_arquivo)
+
+                # Caminho do banco de dados atual
+                caminho_db = self.db.db_path  # Ajuste conforme sua implementação
+
+                # Método 1: Cópia direta do arquivo (se SQLite)
+                if hasattr(self.db, 'db_path'):
+                    shutil.copy2(caminho_db, caminho_backup)
+                    print(f"Backup realizado com sucesso em: {caminho_backup}")
+                    return True
+
+                # Método 2: Backup via SQL (alternativa para outros SGBDs)
+                else:
+                    conexao = sqlite3.connect(caminho_backup)
+
+                    with sqlite3.connect(caminho_db) as con:
+                        con.backup(conexao)
+
+                    conexao.close()
+                    print(f"Backup realizado com sucesso em: {caminho_backup}")
+                    return True
+
+            except Exception as e:
+                print(f"Erro ao realizar backup: {str(e)}")
+                return False
+
         # Atualizar diferença ao alterar saldo final
         def atualizar_diferenca():
             saldo_informado = spin_saldo_final.value()
@@ -860,7 +909,7 @@ class CaixaWindow(QWidget):
                 
                 if sucesso:
                     # Realizar backup dos dados após o fechamento do caixa
-                    backup_sucesso = realizar_backup()
+                    backup_sucesso = realizar_backup()  # Agora funciona corretamente
                     
                     dialog.accept()
                     self.verificar_caixa_aberto()
@@ -876,55 +925,6 @@ class CaixaWindow(QWidget):
                     QMessageBox.information(self, "Sucesso", msg)
                 else:
                     QMessageBox.critical(self, "Erro", "Erro ao fechar o caixa")
-
-        def realizar_backup():
-            """
-            Realiza um backup completo do banco de dados do sistema.
-            Retorna True se o backup foi bem-sucedido, False caso contrário.
-            """
-            import os
-            import datetime
-            import shutil
-            import sqlite3
-            
-            try:
-                # Configurações do backup
-                data_hora = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                nome_arquivo = f"backup_sistema_{data_hora}.db"
-                
-                # Diretório para salvar os backups
-                diretorio_backup = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backups")
-                
-                # Criar o diretório de backups se não existir
-                if not os.path.exists(diretorio_backup):
-                    os.makedirs(diretorio_backup)
-                    
-                caminho_backup = os.path.join(diretorio_backup, nome_arquivo)
-                
-                # Caminho do banco de dados atual
-                # Substitua pelo caminho correto do seu banco de dados
-                caminho_db = self.db.db_path  # Ajuste conforme sua implementação
-                
-                # Método 1: Cópia direta do arquivo (se SQLite)
-                if hasattr(self.db, 'db_path'):
-                    shutil.copy2(caminho_db, caminho_backup)
-                    return True
-                
-                # Método 2: Backup via SQL (alternativa para outros SGBDs)
-                else:
-                    # Conectar ao banco de dados
-                    conexao = sqlite3.connect(caminho_backup)
-                    
-                    # Executar o comando de backup
-                    with sqlite3.connect(caminho_db) as con:
-                        con.backup(conexao)
-                        
-                    conexao.close()
-                    return True
-                    
-            except Exception as e:
-                print(f"Erro ao realizar backup: {str(e)}")
-                return False
 
         btn_confirmar.clicked.connect(confirmar_fechamento)
         dialog.exec_()
