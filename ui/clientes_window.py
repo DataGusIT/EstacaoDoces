@@ -1,8 +1,9 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                            QPushButton, QTableWidget, QTableWidgetItem, QFormLayout,
-                           QMessageBox, QHeaderView, QDialog, QFrame)
-from PyQt5.QtCore import Qt
+                           QMessageBox, QHeaderView, QDialog, QFrame, QDateEdit)
+from PyQt5.QtCore import Qt, QDate
 from PyQt5.QtGui import QFont
+from datetime import datetime
 
 class ClientesWindow(QWidget):
     def __init__(self, db):
@@ -33,7 +34,7 @@ class ClientesWindow(QWidget):
         # Tabela de clientes
         self.tabela = QTableWidget()
         self.tabela.setColumnCount(6)
-        self.tabela.setHorizontalHeaderLabels(["ID", "Nome", "Documento", "Telefone", 
+        self.tabela.setHorizontalHeaderLabels(["ID", "Nome", "Data Nascimento", "Telefone", 
                                               "Email", "Ações"])
         self.tabela.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.tabela.verticalHeader().setVisible(False)
@@ -61,6 +62,26 @@ class ClientesWindow(QWidget):
         
         self.atualizar_tabela(clientes)
     
+    def formatar_data_nascimento(self, data_nascimento):
+        """Formata a data de nascimento para exibição."""
+        if not data_nascimento:
+            return ""
+        
+        try:
+            # Se for string, converter para datetime
+            if isinstance(data_nascimento, str):
+                data = datetime.strptime(data_nascimento, '%Y-%m-%d')
+            else:
+                data = data_nascimento
+            
+            # Calcular idade
+            hoje = datetime.now()
+            idade = hoje.year - data.year - ((hoje.month, hoje.day) < (data.month, data.day))
+            
+            return f"{data.strftime('%d/%m/%Y')} ({idade} anos)"
+        except:
+            return str(data_nascimento)
+    
     def atualizar_tabela(self, clientes):
         """Atualiza a tabela com os clientes fornecidos."""
         self.tabela.setRowCount(0)
@@ -71,7 +92,7 @@ class ClientesWindow(QWidget):
             # Adicionar dados às células
             self.tabela.setItem(row, 0, QTableWidgetItem(str(cliente['id'])))
             self.tabela.setItem(row, 1, QTableWidgetItem(cliente['nome']))
-            self.tabela.setItem(row, 2, QTableWidgetItem(cliente['documento'] or ""))
+            self.tabela.setItem(row, 2, QTableWidgetItem(self.formatar_data_nascimento(cliente['data_nascimento'])))
             self.tabela.setItem(row, 3, QTableWidgetItem(cliente['telefone'] or ""))
             self.tabela.setItem(row, 4, QTableWidgetItem(cliente['email'] or ""))
             
@@ -145,15 +166,20 @@ class FormularioCliente(QDialog):
         
         # Campos do formulário
         self.nome_input = QLineEdit()
-        self.documento_input = QLineEdit()
-        self.documento_input.setPlaceholderText("CPF")
+        
+        # Campo de data de nascimento
+        self.data_nascimento_input = QDateEdit()
+        self.data_nascimento_input.setCalendarPopup(True)
+        self.data_nascimento_input.setDate(QDate.currentDate().addYears(-18))  # Data padrão: 18 anos atrás
+        self.data_nascimento_input.setDisplayFormat("dd/MM/yyyy")
+        
         self.telefone_input = QLineEdit()
         self.email_input = QLineEdit()
         self.endereco_input = QLineEdit()
         
         # Adicionar campos ao formulário
         form_layout.addRow("Nome:", self.nome_input)
-        form_layout.addRow("Documento:", self.documento_input)
+        form_layout.addRow("Data de Nascimento:", self.data_nascimento_input)
         form_layout.addRow("Telefone:", self.telefone_input)
         form_layout.addRow("Email:", self.email_input)
         form_layout.addRow("Endereço:", self.endereco_input)
@@ -181,7 +207,17 @@ class FormularioCliente(QDialog):
     def carregar_dados_cliente(self):
         """Carrega os dados do cliente nos campos do formulário."""
         self.nome_input.setText(self.cliente['nome'])
-        self.documento_input.setText(self.cliente['documento'] or "")
+        
+        # Carregar data de nascimento
+        if self.cliente['data_nascimento']:
+            try:
+                if isinstance(self.cliente['data_nascimento'], str):
+                    data = datetime.strptime(self.cliente['data_nascimento'], '%Y-%m-%d')
+                    qdate = QDate(data.year, data.month, data.day)
+                    self.data_nascimento_input.setDate(qdate)
+            except:
+                pass  # Manter data padrão se houver erro
+        
         self.telefone_input.setText(self.cliente['telefone'] or "")
         self.email_input.setText(self.cliente['email'] or "")
         self.endereco_input.setText(self.cliente['endereco'] or "")
@@ -195,7 +231,7 @@ class FormularioCliente(QDialog):
         
         # Coletar dados do formulário
         nome = self.nome_input.text().strip()
-        documento = self.documento_input.text().strip()
+        data_nascimento = self.data_nascimento_input.date().toString("yyyy-MM-dd")
         telefone = self.telefone_input.text().strip()
         email = self.email_input.text().strip()
         endereco = self.endereco_input.text().strip()
@@ -204,12 +240,12 @@ class FormularioCliente(QDialog):
             # Inserir ou atualizar cliente
             if self.cliente_id:
                 sucesso = self.db.atualizar_cliente(
-                    self.cliente_id, nome, documento, telefone, email, endereco
+                    self.cliente_id, nome, data_nascimento, telefone, email, endereco
                 )
                 mensagem = "Cliente atualizado com sucesso!"
             else:
                 sucesso = self.db.adicionar_cliente(
-                    nome, documento, telefone, email, endereco
+                    nome, data_nascimento, telefone, email, endereco
                 )
                 mensagem = "Cliente cadastrado com sucesso!"
             

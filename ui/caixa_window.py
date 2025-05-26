@@ -31,9 +31,7 @@ class CaixaWindow(QWidget):
         # Status do caixa
         self.frame_status = QFrame()
         self.frame_status.setFrameShape(QFrame.StyledPanel)
-        self.frame_status.setFrameShadow(QFrame.Raised)
-        self.frame_status.setStyleSheet("background-color: #121212; padding: 10px;")
-        
+        self.frame_status.setFrameShadow(QFrame.Raised)        
         status_layout = QHBoxLayout(self.frame_status)
         
         self.lbl_status = QLabel("Status do Caixa: Fechado")
@@ -166,6 +164,15 @@ class CaixaWindow(QWidget):
         self.lbl_total = QLabel("Total: R$ 0,00")
         self.lbl_total.setStyleSheet("font-size: 18px; font-weight: bold;")
         frame_total_layout.addWidget(self.lbl_total)
+
+        self.lbl_total.setStyleSheet("""
+            font-size: 30px; 
+            font-weight: bold;
+            color: #2c3e50;
+            padding: 10px;
+            background-color: #ecf0f1;
+            border-radius: 5px;
+        """)
         
         # Botões de ação
         frame_total_layout.addStretch()
@@ -987,9 +994,12 @@ class CaixaWindow(QWidget):
         edit_nome = QLineEdit()
         form_layout.addRow("Nome:", edit_nome)
         
-        # CPF/CNPJ
-        edit_cpf_cnpj = QLineEdit()
-        form_layout.addRow("CPF/CNPJ:", edit_cpf_cnpj)
+        # Data de Nascimento
+        edit_data_nascimento = QDateEdit()
+        edit_data_nascimento.setCalendarPopup(True)
+        edit_data_nascimento.setDate(QDate.currentDate().addYears(-18))  # Data padrão: 18 anos atrás
+        edit_data_nascimento.setDisplayFormat("dd/MM/yyyy")
+        form_layout.addRow("Data de Nascimento:", edit_data_nascimento)
         
         # Telefone
         edit_telefone = QLineEdit()
@@ -999,6 +1009,10 @@ class CaixaWindow(QWidget):
         edit_email = QLineEdit()
         form_layout.addRow("Email:", edit_email)
         
+        # Endereço
+        edit_endereco = QLineEdit()
+        form_layout.addRow("Endereço:", edit_endereco)
+        
         layout.addLayout(form_layout)
         
         btn_salvar = QPushButton("Salvar")
@@ -1006,16 +1020,17 @@ class CaixaWindow(QWidget):
         
         def salvar_cliente():
             nome = edit_nome.text().strip()
-            cpf_cnpj = edit_cpf_cnpj.text().strip()
+            data_nascimento = edit_data_nascimento.date().toString("yyyy-MM-dd")
             telefone = edit_telefone.text().strip()
             email = edit_email.text().strip()
+            endereco = edit_endereco.text().strip()
             
             if not nome:
                 QMessageBox.warning(dialog, "Campos Obrigatórios", "O campo Nome é obrigatório")
                 return
             
-            # Registrar cliente
-            cliente_id = self.db.adicionar_cliente(nome, cpf_cnpj, telefone, email)
+            # Registrar cliente com todos os parâmetros necessários
+            cliente_id = self.db.adicionar_cliente(nome, data_nascimento, telefone, email, endereco)
             
             if cliente_id:
                 dialog.accept()

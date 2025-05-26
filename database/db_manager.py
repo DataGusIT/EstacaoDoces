@@ -94,7 +94,7 @@ class DatabaseManager:
         CREATE TABLE IF NOT EXISTS clientes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nome TEXT NOT NULL,
-            documento TEXT UNIQUE,
+            data_nascimento DATE,
             telefone TEXT,
             email TEXT,
             endereco TEXT,
@@ -415,41 +415,85 @@ class DatabaseManager:
         self.cursor.execute(query)
         return self.cursor.fetchall()
     
-    # Métodos para Clientes
-    def adicionar_cliente(self, nome, documento, telefone, email, endereco):
-        self.cursor.execute('''
-        INSERT INTO clientes (nome, documento, telefone, email, endereco)
-        VALUES (?, ?, ?, ?, ?)
-        ''', (nome, documento, telefone, email, endereco))
-        self.conn.commit()
-        return self.cursor.lastrowid
-    
-    def atualizar_cliente(self, id, nome, documento, telefone, email, endereco):
-        self.cursor.execute('''
-        UPDATE clientes
-        SET nome = ?, documento = ?, telefone = ?, email = ?, endereco = ?
-        WHERE id = ?
-        ''', (nome, documento, telefone, email, endereco, id))
-        self.conn.commit()
-        return self.cursor.rowcount > 0
-    
+    # Métodos para Clientes Atualizados
+    def adicionar_cliente(self, nome, data_nascimento, telefone, email, endereco):
+        """Adiciona um novo cliente ao banco de dados."""
+        try:
+            self.cursor.execute('''
+            INSERT INTO clientes (nome, data_nascimento, telefone, email, endereco)
+            VALUES (?, ?, ?, ?, ?)
+            ''', (nome, data_nascimento, telefone, email, endereco))
+            self.conn.commit()
+            return self.cursor.lastrowid
+        except Exception as e:
+            print(f"Erro ao adicionar cliente: {e}")
+            return False
+
+    def atualizar_cliente(self, id, nome, data_nascimento, telefone, email, endereco):
+        """Atualiza os dados de um cliente existente."""
+        try:
+            self.cursor.execute('''
+            UPDATE clientes
+            SET nome = ?, data_nascimento = ?, telefone = ?, email = ?, endereco = ?
+            WHERE id = ?
+            ''', (nome, data_nascimento, telefone, email, endereco, id))
+            self.conn.commit()
+            return self.cursor.rowcount > 0
+        except Exception as e:
+            print(f"Erro ao atualizar cliente: {e}")
+            return False
+
     def excluir_cliente(self, id):
-        self.cursor.execute('DELETE FROM clientes WHERE id = ?', (id,))
-        self.conn.commit()
-        return self.cursor.rowcount > 0
-    
+        """Exclui um cliente do banco de dados."""
+        try:
+            self.cursor.execute('DELETE FROM clientes WHERE id = ?', (id,))
+            self.conn.commit()
+            return self.cursor.rowcount > 0
+        except Exception as e:
+            print(f"Erro ao excluir cliente: {e}")
+            return False
+
     def obter_cliente(self, id):
-        self.cursor.execute('SELECT * FROM clientes WHERE id = ?', (id,))
-        return self.cursor.fetchone()
-    
+        """Obtém os dados de um cliente específico."""
+        try:
+            self.cursor.execute('SELECT * FROM clientes WHERE id = ?', (id,))
+            cliente = self.cursor.fetchone()
+            if cliente:
+                # Converter para dicionário para facilitar o acesso
+                colunas = [description[0] for description in self.cursor.description]
+                return dict(zip(colunas, cliente))
+            return None
+        except Exception as e:
+            print(f"Erro ao obter cliente: {e}")
+            return None
+
     def listar_clientes(self, filtro=None):
-        query = 'SELECT * FROM clientes'
-        
-        if filtro:
-            query += f" WHERE nome LIKE '%{filtro}%' OR documento LIKE '%{filtro}%'"
-        
-        self.cursor.execute(query)
-        return self.cursor.fetchall()
+        """Lista todos os clientes ou filtra por termo de busca."""
+        try:
+            query = 'SELECT * FROM clientes'
+            params = ()
+            
+            if filtro:
+                query += " WHERE nome LIKE ? OR telefone LIKE ? OR email LIKE ?"
+                filtro_param = f'%{filtro}%'
+                params = (filtro_param, filtro_param, filtro_param)
+            
+            query += ' ORDER BY nome'
+            
+            self.cursor.execute(query, params)
+            resultados = self.cursor.fetchall()
+            
+            # Converter para lista de dicionários
+            clientes = []
+            if resultados:
+                colunas = [description[0] for description in self.cursor.description]
+                for resultado in resultados:
+                    clientes.append(dict(zip(colunas, resultado)))
+            
+            return clientes
+        except Exception as e:
+            print(f"Erro ao listar clientes: {e}")
+            return []
     
     # Métodos para Promoções
     def adicionar_promocao(self, produto_id, preco_antigo, preco_promocional, 
