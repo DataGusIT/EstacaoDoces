@@ -207,20 +207,19 @@ class DatabaseManager:
         # Verificar se existe pelo menos um usuário admin
         self.cursor.execute("SELECT COUNT(*) FROM usuarios WHERE tipo='admin'")
         count = self.cursor.fetchone()[0]
-        
+
         if count == 0:
-            # Criar um usuário admin padrão se não existir nenhum
-            # Senha padrão: admin123 (em produção, use hash adequado)
-            import hashlib
-            senha_hash = hashlib.sha256("admin123".encode()).hexdigest()
+            # Criar um usuário admin padrão sem hash de senha (somente para desenvolvimento)
+            senha = "admin123"
             
             self.cursor.execute('''
             INSERT INTO usuarios (nome, login, senha, email, tipo)
             VALUES (?, ?, ?, ?, ?)
-            ''', ("Administrador", "admin", senha_hash, "admin@sistema.com", "admin"))
-        
+            ''', ("Administrador", "admin", senha, "admin@sistema.com", "admin"))
+
         # Commit das mudanças
         self.conn.commit()
+
     
     # Métodos para Produtos (atualizados)
     def adicionar_produto(self, codigo_barras, nome, descricao, quantidade, estoque_minimo,
