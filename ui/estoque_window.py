@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdi
                            QPushButton, QTableWidget, QTableWidgetItem, QFormLayout,
                            QDateEdit, QComboBox, QMessageBox, QHeaderView, QSpinBox,
                            QDoubleSpinBox, QDialog, QFrame, QToolButton, QGroupBox,
-                           QFileDialog)
+                           QFileDialog, QCheckBox)
 from PyQt5.QtCore import Qt, QDate
 from PyQt5.QtGui import QFont, QIcon, QColor, QBrush
 import os
@@ -19,6 +19,7 @@ class EstoqueWindow(QWidget):
         self.db = db
         self.initUI()
         self.carregar_dados()
+        
     
     def initUI(self):
         # Layout principal
@@ -102,7 +103,7 @@ class EstoqueWindow(QWidget):
         self.tabela = QTableWidget()
         self.tabela.setColumnCount(12)
         self.tabela.setHorizontalHeaderLabels([
-            "ID", "Código de Barras", "Nome", "Quantidade", "Estoque Mín.", 
+            "ID", "Código de Barras", "Nome", "Estoque Detalhado", "Estoque Mín.", 
             "Preço Compra", "Margem %", "Preço Venda", "Validade", 
             "Localização", "Fornecedor", "Ações"
         ])
@@ -128,16 +129,16 @@ class EstoqueWindow(QWidget):
     
     def carregar_dados(self):
         """Carrega os produtos do banco de dados para a tabela."""
-        produtos = self.db.listar_produtos()
+        produtos = self.db.listar_produtos_com_fracionamento()  # Usando novo método
         self.atualizar_tabela(produtos)
     
     def pesquisar_produtos(self):
         """Pesquisa produtos pelo termo digitado."""
         termo = self.search_input.text()
         if termo:
-            produtos = self.db.listar_produtos(filtro=termo)
+            produtos = self.db.listar_produtos_com_fracionamento(filtro=termo)  # Usando novo método
         else:
-            produtos = self.db.listar_produtos()
+            produtos = self.db.listar_produtos_com_fracionamento()  # Usando novo método
         
         self.atualizar_tabela(produtos)
     
@@ -169,18 +170,32 @@ class EstoqueWindow(QWidget):
             self.tabela.setItem(row, 0, QTableWidgetItem(str(produto['id'])))
             self.tabela.setItem(row, 1, QTableWidgetItem(produto['codigo_barras'] or ""))
             
-            # Nome do produto
-            nome_item = QTableWidgetItem(produto['nome'])
+            # Nome do produto - incluir indicador se é fracionado
+            nome_produto = produto['nome']
+            if produto['fracionado']:
+                nome_produto += f" (Frac. - {produto['unidade_medida']})"
+            nome_item = QTableWidgetItem(nome_produto)
             self.tabela.setItem(row, 2, nome_item)
             
-            # Quantidade
-            quantidade_item = QTableWidgetItem(str(produto['quantidade']))
+            # Quantidade - mostrar detalhes se for fracionado
+            if produto['fracionado']:
+                estoque_total = produto['estoque_total_calculado']
+                quantidade_display = f"{produto['quantidade']} emb. + {produto['estoque_fracionado']} {produto['unidade_medida']} (Total: {estoque_total})"
+                tooltip_text = f"Embalagens: {produto['quantidade']}\nFracionado: {produto['estoque_fracionado']} {produto['unidade_medida']}\nTotal em unidades: {estoque_total}"
+            else:
+                quantidade_display = str(produto['quantidade'])
+                tooltip_text = f"Quantidade: {produto['quantidade']}"
+            
+            quantidade_item = QTableWidgetItem(quantidade_display)
+            quantidade_item.setToolTip(tooltip_text)
+            
             estoque_minimo = produto['estoque_minimo'] or 0
             
-            # Verificar se está abaixo do estoque mínimo
-            if produto['quantidade'] <= estoque_minimo:
+            # Verificar se está abaixo do estoque mínimo (usando estoque total calculado)
+            estoque_atual = produto['estoque_total_calculado'] if produto['fracionado'] else produto['quantidade']
+            if estoque_atual <= estoque_minimo:
                 quantidade_item.setForeground(QBrush(QColor('red')))
-                quantidade_item.setToolTip("Estoque abaixo do mínimo!")
+                quantidade_item.setToolTip(quantidade_item.toolTip() + "\nESTOQUE ABAIXO DO MÍNIMO!")
             
             self.tabela.setItem(row, 3, quantidade_item)
             self.tabela.setItem(row, 4, QTableWidgetItem(str(estoque_minimo)))
@@ -190,9 +205,14 @@ class EstoqueWindow(QWidget):
             margem = produto['margem_lucro'] or 0
             self.tabela.setItem(row, 6, QTableWidgetItem(f"{margem:.2f}%"))
             
-            self.tabela.setItem(row, 7, QTableWidgetItem(f"R$ {produto['preco_venda']:.2f}"))
+            # Preço de venda - mostrar preço da embalagem e fração se aplicável
+            if produto['fracionado'] and produto['preco_unitario_fracao']:
+                preco_display = f"Emb: R$ {produto['preco_venda']:.2f} | Un: R$ {produto['preco_unitario_fracao']:.2f}"
+            else:
+                preco_display = f"R$ {produto['preco_venda']:.2f}"
+            self.tabela.setItem(row, 7, QTableWidgetItem(preco_display))
             
-            # Data de validade
+            # Data de validade (mantém igual)
             validade_item = QTableWidgetItem(str(produto['data_validade'] or ""))
             
             # Verificar vencimento
@@ -202,15 +222,12 @@ class EstoqueWindow(QWidget):
                     dias_para_vencer = (data_validade - hoje).days
                     
                     if dias_para_vencer <= 0:
-                        # Produto vencido
                         validade_item.setForeground(QBrush(QColor('darkred')))
                         validade_item.setToolTip("Produto VENCIDO!")
                     elif dias_para_vencer <= 15:
-                        # Vence em 15 dias ou menos
                         validade_item.setForeground(QBrush(QColor('red')))
                         validade_item.setToolTip(f"Vence em {dias_para_vencer} dias!")
                     elif dias_para_vencer <= 30:
-                        # Vence em 30 dias ou menos
                         validade_item.setForeground(QBrush(QColor('orange')))
                         validade_item.setToolTip(f"Vence em {dias_para_vencer} dias!")
                 except:
@@ -222,7 +239,7 @@ class EstoqueWindow(QWidget):
             fornecedor_nome = produto['fornecedor_nome'] if produto['fornecedor_nome'] else "N/A"
             self.tabela.setItem(row, 10, QTableWidgetItem(fornecedor_nome))
             
-            # Botões de ação
+            # Botões de ação - adicionar botão para quebrar embalagem se for fracionado
             acoes_widget = QWidget()
             acoes_layout = QHBoxLayout(acoes_widget)
             acoes_layout.setContentsMargins(0, 0, 0, 0)
@@ -236,7 +253,26 @@ class EstoqueWindow(QWidget):
             acoes_layout.addWidget(editar_btn)
             acoes_layout.addWidget(excluir_btn)
             
+            # Botão para quebrar embalagem (apenas se for fracionado e tiver embalagens)
+            if produto['fracionado'] and produto['quantidade'] > 0:
+                quebrar_btn = QPushButton("Quebrar")
+                quebrar_btn.setToolTip("Quebrar embalagem em unidades")
+                quebrar_btn.clicked.connect(lambda _, p_id=produto['id']: self.abrir_dialog_quebrar_embalagem(p_id))
+                acoes_layout.addWidget(quebrar_btn)
+            
             self.tabela.setCellWidget(row, 11, acoes_widget)
+    
+    def abrir_dialog_quebrar_embalagem(self, produto_id):
+        """Abre diálogo para quebrar embalagens em unidades fracionadas."""
+        produto_info = self.db.obter_info_estoque_fracionado(produto_id)
+        
+        if not produto_info or not produto_info['fracionado']:
+            QMessageBox.warning(self, "Erro", "Este produto não é fracionado!")
+            return
+        
+        dialog = DialogQuebrarEmbalagem(self.db, produto_info)
+        if dialog.exec_() == QDialog.Accepted:
+            self.carregar_dados()  # Recarregar tabela após quebrar embalagem
     
     def abrir_formulario_produto(self, produto_id=None):
         """Abre o formulário para adicionar ou editar um produto."""
@@ -743,6 +779,25 @@ class FormularioProduto(QDialog):
         self.data_validade_input.setDate(QDate.currentDate().addDays(30))  # Default para 30 dias
         
         self.localizacao_input = QLineEdit()
+
+        self.fracionado_checkbox = QCheckBox("Produto Fracionado")
+        self.fracionado_checkbox.toggled.connect(self.toggle_campos_fracionado)
+        
+        # Campos específicos para fracionamento
+        self.unidade_medida_input = QLineEdit()
+        self.unidade_medida_input.setPlaceholderText("Ex: kg, litros, metros, etc.")
+        
+        self.qtd_por_embalagem_input = QSpinBox()
+        self.qtd_por_embalagem_input.setRange(1, 9999)
+        self.qtd_por_embalagem_input.setValue(1)
+        
+        self.preco_unitario_fracao_input = QDoubleSpinBox()
+        self.preco_unitario_fracao_input.setRange(0, 99999.99)
+        self.preco_unitario_fracao_input.setPrefix("R$ ")
+        self.preco_unitario_fracao_input.setDecimals(2)
+        
+        self.estoque_fracionado_input = QSpinBox()
+        self.estoque_fracionado_input.setRange(0, 99999)
         
         self.fornecedor_combo = QComboBox()
         self.carregar_fornecedores()
@@ -759,7 +814,15 @@ class FormularioProduto(QDialog):
         form_layout.addRow("Data de Validade:", self.data_validade_input)
         form_layout.addRow("Localização:", self.localizacao_input)
         form_layout.addRow("Fornecedor:", self.fornecedor_combo)
-        
+        form_layout.addRow("", self.fracionado_checkbox)
+        form_layout.addRow("Unidade de Medida:", self.unidade_medida_input)
+        form_layout.addRow("Qtd por Embalagem:", self.qtd_por_embalagem_input)
+        form_layout.addRow("Preço Unitário (Fração):", self.preco_unitario_fracao_input)
+        form_layout.addRow("Estoque Fracionado:", self.estoque_fracionado_input)
+
+         # Inicialmente desabilitar campos de fracionamento
+        self.toggle_campos_fracionado()
+
         layout.addLayout(form_layout)
         
         # Separador
@@ -779,6 +842,22 @@ class FormularioProduto(QDialog):
         button_layout.addWidget(self.cancelar_btn)
         
         layout.addLayout(button_layout)
+    
+    def toggle_campos_fracionado(self):
+        """Habilita/desabilita campos de fracionamento baseado no checkbox."""
+        enabled = self.fracionado_checkbox.isChecked()
+        
+        self.unidade_medida_input.setEnabled(enabled)
+        self.qtd_por_embalagem_input.setEnabled(enabled)
+        self.preco_unitario_fracao_input.setEnabled(enabled)
+        self.estoque_fracionado_input.setEnabled(enabled)
+        
+        if not enabled:
+            # Limpar campos quando desabilitado
+            self.unidade_medida_input.clear()
+            self.qtd_por_embalagem_input.setValue(1)
+            self.preco_unitario_fracao_input.setValue(0)
+            self.estoque_fracionado_input.setValue(0)
     
     def calcular_preco_venda(self):
         """Calcula o preço de venda com base no preço de compra e margem de lucro."""
@@ -810,7 +889,8 @@ class FormularioProduto(QDialog):
         
         fornecedores = self.db.listar_fornecedores()
         for fornecedor in fornecedores:
-            self.fornecedor_combo.addItem(fornecedor['nome'], fornecedor['id'])
+            # Mudança aqui: usar 'empresa' ao invés de 'nome'
+            self.fornecedor_combo.addItem(fornecedor['empresa'], fornecedor['id'])
     
     def carregar_dados_produto(self):
         """Carrega os dados do produto nos campos do formulário."""
@@ -838,6 +918,20 @@ class FormularioProduto(QDialog):
         
         self.localizacao_input.setText(self.produto['localizacao'] or "")
         
+        # Carregar dados de fracionamento
+        self.fracionado_checkbox.setChecked(bool(self.produto['fracionado']))
+        self.unidade_medida_input.setText(self.produto['unidade_medida'] or "")
+        
+        # Converter para int antes de definir o valor
+        qtd_embalagem = int(self.produto['qtd_por_embalagem'] or 1)
+        self.qtd_por_embalagem_input.setValue(qtd_embalagem)
+        
+        self.preco_unitario_fracao_input.setValue(self.produto['preco_unitario_fracao'] or 0)
+        
+        # Converter estoque fracionado para int se necessário
+        estoque_frac = int(self.produto['estoque_fracionado'] or 0)
+        self.estoque_fracionado_input.setValue(estoque_frac)
+        
         # Selecionar o fornecedor
         if self.produto['fornecedor_id']:
             index = self.fornecedor_combo.findData(self.produto['fornecedor_id'])
@@ -851,6 +945,15 @@ class FormularioProduto(QDialog):
             QMessageBox.warning(self, "Erro", "O nome do produto é obrigatório!")
             return
         
+        # Validações para produtos fracionados
+        if self.fracionado_checkbox.isChecked():
+            if not self.unidade_medida_input.text().strip():
+                QMessageBox.warning(self, "Erro", "Unidade de medida é obrigatória para produtos fracionados!")
+                return
+            if self.qtd_por_embalagem_input.value() <= 0:
+                QMessageBox.warning(self, "Erro", "Quantidade por embalagem deve ser maior que zero!")
+                return
+        
         # Coletar dados do formulário
         codigo_barras = self.codigo_barras_input.text().strip()
         nome = self.nome_input.text().strip()
@@ -863,6 +966,13 @@ class FormularioProduto(QDialog):
         data_validade = self.data_validade_input.date().toString("yyyy-MM-dd")
         localizacao = self.localizacao_input.text().strip()
         
+        # Dados de fracionamento
+        fracionado = self.fracionado_checkbox.isChecked()
+        unidade_medida = self.unidade_medida_input.text().strip() if fracionado else "unidade"
+        qtd_por_embalagem = self.qtd_por_embalagem_input.value() if fracionado else 1
+        preco_unitario_fracao = self.preco_unitario_fracao_input.value() if fracionado else None
+        estoque_fracionado = self.estoque_fracionado_input.value() if fracionado else 0
+        
         fornecedor_id = self.fornecedor_combo.currentData()
         if fornecedor_id == "":
             fornecedor_id = None
@@ -873,14 +983,18 @@ class FormularioProduto(QDialog):
                 sucesso = self.db.atualizar_produto(
                     self.produto_id, codigo_barras, nome, descricao, quantidade, 
                     estoque_minimo, preco_compra, margem_lucro, preco_venda, 
-                    data_validade, localizacao, fornecedor_id
+                    data_validade, localizacao, fornecedor_id,
+                    fracionado, unidade_medida, qtd_por_embalagem, 
+                    preco_unitario_fracao, estoque_fracionado
                 )
                 mensagem = "Produto atualizado com sucesso!"
             else:
                 sucesso = self.db.adicionar_produto(
                     codigo_barras, nome, descricao, quantidade, estoque_minimo,
                     preco_compra, margem_lucro, preco_venda, data_validade, 
-                    localizacao, fornecedor_id
+                    localizacao, fornecedor_id,
+                    fracionado, unidade_medida, qtd_por_embalagem, 
+                    preco_unitario_fracao, estoque_fracionado
                 )
                 mensagem = "Produto cadastrado com sucesso!"
             
@@ -892,3 +1006,92 @@ class FormularioProduto(QDialog):
         
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"Erro ao salvar produto: {str(e)}")
+
+class DialogQuebrarEmbalagem(QDialog):
+    def __init__(self, db, produto_info):
+        super().__init__()
+        self.db = db
+        self.produto_info = produto_info
+        self.initUI()
+    
+    def initUI(self):
+        self.setWindowTitle("Quebrar Embalagem")
+        self.setFixedSize(400, 300)
+        
+        layout = QVBoxLayout(self)
+        
+        # Informações do produto
+        info_group = QGroupBox("Informações do Produto")
+        info_layout = QFormLayout(info_group)
+        
+        info_layout.addRow("Produto:", QLabel(self.produto_info['nome']))
+        info_layout.addRow("Embalagens disponíveis:", QLabel(str(self.produto_info['embalagens_inteiras'])))
+        info_layout.addRow("Unidades por embalagem:", QLabel(str(self.produto_info['qtd_por_embalagem'])))
+        info_layout.addRow("Estoque fracionado atual:", QLabel(f"{self.produto_info['estoque_fracionado']} {self.produto_info['unidade_medida']}"))
+        
+        layout.addWidget(info_group)
+        
+        # Entrada para quantidade a quebrar
+        quebrar_group = QGroupBox("Quebrar Embalagens")
+        quebrar_layout = QFormLayout(quebrar_group)
+        
+        self.quantidade_input = QSpinBox()
+        self.quantidade_input.setRange(1, self.produto_info['embalagens_inteiras'])
+        self.quantidade_input.setValue(1)
+        self.quantidade_input.valueChanged.connect(self.atualizar_preview)
+        
+        quebrar_layout.addRow("Quantidade de embalagens:", self.quantidade_input)
+        
+        # Preview do resultado
+        self.preview_label = QLabel()
+        self.atualizar_preview()
+        quebrar_layout.addRow("Resultado:", self.preview_label)
+        
+        layout.addWidget(quebrar_group)
+        
+        # Botões
+        button_layout = QHBoxLayout()
+        
+        confirmar_btn = QPushButton("Confirmar")
+        confirmar_btn.clicked.connect(self.quebrar_embalagem)
+        
+        cancelar_btn = QPushButton("Cancelar")
+        cancelar_btn.clicked.connect(self.reject)
+        
+        button_layout.addWidget(confirmar_btn)
+        button_layout.addWidget(cancelar_btn)
+        
+        layout.addLayout(button_layout)
+    
+    def atualizar_preview(self):
+        """Atualiza o preview do resultado da quebra."""
+        qtd_quebrar = self.quantidade_input.value()
+        unidades_geradas = qtd_quebrar * self.produto_info['qtd_por_embalagem']
+        novo_estoque_fracionado = self.produto_info['estoque_fracionado'] + unidades_geradas
+        novas_embalagens = self.produto_info['embalagens_inteiras'] - qtd_quebrar
+        
+        preview_text = f"""
+        Embalagens restantes: {novas_embalagens}
+        Estoque fracionado: {novo_estoque_fracionado} {self.produto_info['unidade_medida']}
+        (+{unidades_geradas} {self.produto_info['unidade_medida']} geradas)
+        """
+        
+        self.preview_label.setText(preview_text.strip())
+    
+    def quebrar_embalagem(self):
+        """Confirma a quebra da embalagem."""
+        qtd_quebrar = self.quantidade_input.value()
+        
+        confirmacao = QMessageBox.question(
+            self, 
+            "Confirmar Quebra",
+            f"Confirma quebrar {qtd_quebrar} embalagem(ns) em unidades fracionadas?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if confirmacao == QMessageBox.Yes:
+            if self.db.quebrar_embalagem(self.produto_info['produto_id'], qtd_quebrar):
+                QMessageBox.information(self, "Sucesso", "Embalagem quebrada com sucesso!")
+                self.accept()
+            else:
+                QMessageBox.warning(self, "Erro", "Não foi possível quebrar a embalagem.")

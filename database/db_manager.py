@@ -64,12 +64,20 @@ class DatabaseManager:
             quantidade INTEGER DEFAULT 0,
             estoque_minimo INTEGER DEFAULT 0,
             preco_compra REAL,
-            margem_lucro REAL,
+            margem_lucro REAL DEFAULT 30.0,
             preco_venda REAL,
             data_validade DATE,
             localizacao TEXT,
             fornecedor_id INTEGER,
             data_cadastro DATE DEFAULT CURRENT_DATE,
+
+            -- Campos para controle de produtos fracionados
+            fracionado INTEGER DEFAULT 0,
+            unidade_medida TEXT DEFAULT 'unidade',
+            qtd_por_embalagem REAL DEFAULT 1,
+            preco_unitario_fracao REAL,
+            estoque_fracionado REAL DEFAULT 0,
+
             FOREIGN KEY (fornecedor_id) REFERENCES fornecedores (id)
         )
         ''')
@@ -77,8 +85,8 @@ class DatabaseManager:
         # Tabela de Fornecedores
         self.cursor.execute('''
         CREATE TABLE IF NOT EXISTS fornecedores (
-             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            empresa TEXT NOT NULL,
             representante TEXT,
             frequencia_compra TEXT,
             telefone TEXT,
@@ -88,7 +96,7 @@ class DatabaseManager:
             data_cadastro DATE DEFAULT CURRENT_DATE
         )
         ''')
-        
+
         # Tabela de Clientes
         self.cursor.execute('''
         CREATE TABLE IF NOT EXISTS clientes (
@@ -216,36 +224,49 @@ class DatabaseManager:
     
     # Métodos para Produtos (atualizados)
     def adicionar_produto(self, codigo_barras, nome, descricao, quantidade, estoque_minimo,
-                        preco_compra, margem_lucro, preco_venda, 
-                        data_validade, localizacao, fornecedor_id):
+                    preco_compra, margem_lucro, preco_venda, 
+                    data_validade, localizacao, fornecedor_id, 
+                    fracionado=False, unidade_medida="unidade", qtd_por_embalagem=1, 
+                    preco_unitario_fracao=None, estoque_fracionado=0):
+    
         self.cursor.execute('''
         INSERT INTO produtos (
             codigo_barras, nome, descricao, quantidade, estoque_minimo,
             preco_compra, margem_lucro, preco_venda, 
-            data_validade, localizacao, fornecedor_id
+            data_validade, localizacao, fornecedor_id,
+            fracionado, unidade_medida, qtd_por_embalagem, preco_unitario_fracao, estoque_fracionado
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             codigo_barras, nome, descricao, quantidade, estoque_minimo,
             preco_compra, margem_lucro, preco_venda, 
-            data_validade, localizacao, fornecedor_id
+            data_validade, localizacao, fornecedor_id,
+            1 if fracionado else 0, unidade_medida, qtd_por_embalagem, 
+            preco_unitario_fracao, estoque_fracionado
         ))
         self.conn.commit()
         return self.cursor.lastrowid
 
     def atualizar_produto(self, id, codigo_barras, nome, descricao, quantidade, estoque_minimo,
-                        preco_compra, margem_lucro, preco_venda, 
-                        data_validade, localizacao, fornecedor_id):
+                    preco_compra, margem_lucro, preco_venda, 
+                    data_validade, localizacao, fornecedor_id,
+                    fracionado=False, unidade_medida="unidade", qtd_por_embalagem=1, 
+                    preco_unitario_fracao=None, estoque_fracionado=0):
+    
         self.cursor.execute('''
         UPDATE produtos
         SET codigo_barras = ?, nome = ?, descricao = ?, quantidade = ?, estoque_minimo = ?,
             preco_compra = ?, margem_lucro = ?, preco_venda = ?,
-            data_validade = ?, localizacao = ?, fornecedor_id = ?
+            data_validade = ?, localizacao = ?, fornecedor_id = ?,
+            fracionado = ?, unidade_medida = ?, qtd_por_embalagem = ?, 
+            preco_unitario_fracao = ?, estoque_fracionado = ?
         WHERE id = ?
         ''', (
             codigo_barras, nome, descricao, quantidade, estoque_minimo,
             preco_compra, margem_lucro, preco_venda,
-            data_validade, localizacao, fornecedor_id, id
+            data_validade, localizacao, fornecedor_id,
+            1 if fracionado else 0, unidade_medida, qtd_por_embalagem, 
+            preco_unitario_fracao, estoque_fracionado, id
         ))
         self.conn.commit()
         return self.cursor.rowcount > 0
@@ -259,8 +280,33 @@ class DatabaseManager:
         self.cursor.execute('SELECT * FROM produtos WHERE id = ?', (id,))
         return self.cursor.fetchone()
 
+    def verificar_produtos_vencidos(self):
+        data_hoje = datetime.now().strftime('%Y-%m-%d')
+        
+        self.cursor.execute('''
+        SELECT p.*, f.empresa as fornecedor_nome 
+        FROM produtos p 
+        LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
+        WHERE p.data_validade < ?
+        ORDER BY p.data_validade
+        ''', (data_hoje,))
+        
+        return self.cursor.fetchall()
+
+    def verificar_produtos_estoque_baixo(self):
+        """Verifica produtos com estoque abaixo do mínimo definido."""
+        self.cursor.execute('''
+        SELECT p.*, f.empresa as fornecedor_nome 
+        FROM produtos p 
+        LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
+        WHERE p.quantidade <= p.estoque_minimo AND p.estoque_minimo > 0
+        ORDER BY p.nome
+        ''')
+        
+        return self.cursor.fetchall()
+
     def listar_produtos(self, filtro=None):
-        query = 'SELECT p.*, f.nome as fornecedor_nome FROM produtos p LEFT JOIN fornecedores f ON p.fornecedor_id = f.id'
+        query = 'SELECT p.*, f.empresa as fornecedor_nome FROM produtos p LEFT JOIN fornecedores f ON p.fornecedor_id = f.id'
         
         if filtro:
             query += f" WHERE p.nome LIKE '%{filtro}%' OR p.descricao LIKE '%{filtro}%' OR p.codigo_barras LIKE '%{filtro}%'"
@@ -273,37 +319,12 @@ class DatabaseManager:
         data_hoje = datetime.now().strftime('%Y-%m-%d')
         
         self.cursor.execute('''
-        SELECT p.*, f.nome as fornecedor_nome 
+        SELECT p.*, f.empresa as fornecedor_nome 
         FROM produtos p 
         LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
         WHERE p.data_validade <= ? AND p.data_validade >= ?
         ORDER BY p.data_validade
         ''', (data_limite, data_hoje))
-        
-        return self.cursor.fetchall()
-
-    def verificar_produtos_vencidos(self):
-        data_hoje = datetime.now().strftime('%Y-%m-%d')
-        
-        self.cursor.execute('''
-        SELECT p.*, f.nome as fornecedor_nome 
-        FROM produtos p 
-        LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
-        WHERE p.data_validade < ?
-        ORDER BY p.data_validade
-        ''', (data_hoje,))
-        
-        return self.cursor.fetchall()
-
-    def verificar_produtos_estoque_baixo(self):
-        """Verifica produtos com estoque abaixo do mínimo definido."""
-        self.cursor.execute('''
-        SELECT p.*, f.nome as fornecedor_nome 
-        FROM produtos p 
-        LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
-        WHERE p.quantidade <= p.estoque_minimo AND p.estoque_minimo > 0
-        ORDER BY p.nome
-        ''')
         
         return self.cursor.fetchall()
 
@@ -313,7 +334,7 @@ class DatabaseManager:
         
         # Base da consulta
         query = '''
-        SELECT p.*, f.nome as fornecedor_nome 
+        SELECT p.*, f.empresa as fornecedor_nome 
         FROM produtos p 
         LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
         WHERE 1=1
@@ -346,6 +367,156 @@ class DatabaseManager:
         
         self.cursor.execute(query, params)
         return self.cursor.fetchall()
+    
+    def calcular_estoque_total_produto(self, produto_id):
+        """Calcula o estoque total considerando embalagens + fracionado"""
+        try:
+            produto = self.obter_produto(produto_id)
+            if not produto:
+                return 0
+            
+            # Se não é fracionado, retorna apenas a quantidade normal
+            if not produto['fracionado']:
+                return produto['quantidade']
+            
+            # Se é fracionado, soma: (embalagens * qtd_por_embalagem) + estoque_fracionado
+            estoque_embalagens = produto['quantidade'] * produto['qtd_por_embalagem']
+            estoque_total = estoque_embalagens + produto['estoque_fracionado']
+            
+            return estoque_total
+        except Exception as e:
+            print(f"Erro ao calcular estoque total: {e}")
+            return 0
+        
+    def atualizar_estoque_fracionado(self, produto_id, quantidade_vendida, tipo_venda="fracao"):
+        """
+        Atualiza o estoque considerando venda fracionada
+        tipo_venda: "embalagem" ou "fracao"
+        """
+        try:
+            produto = self.obter_produto(produto_id)
+            if not produto:
+                return False
+            
+            if not produto['fracionado']:
+                # Produto não fracionado, desconta normalmente
+                self.cursor.execute('''
+                    UPDATE produtos SET quantidade = quantidade - ? WHERE id = ?
+                ''', (quantidade_vendida, produto_id))
+            else:
+                if tipo_venda == "embalagem":
+                    # Vendeu embalagem inteira
+                    self.cursor.execute('''
+                        UPDATE produtos SET quantidade = quantidade - ? WHERE id = ?
+                    ''', (quantidade_vendida, produto_id))
+                else:
+                    # Vendeu por fração
+                    estoque_fracionado_atual = produto['estoque_fracionado']
+                    qtd_por_embalagem = produto['qtd_por_embalagem']
+                    
+                    # Se tem estoque fracionado suficiente
+                    if estoque_fracionado_atual >= quantidade_vendida:
+                        self.cursor.execute('''
+                            UPDATE produtos SET estoque_fracionado = estoque_fracionado - ? WHERE id = ?
+                        ''', (quantidade_vendida, produto_id))
+                    else:
+                        # Precisa quebrar embalagens
+                        falta = quantidade_vendida - estoque_fracionado_atual
+                        embalagens_para_quebrar = int(falta / qtd_por_embalagem) + (1 if falta % qtd_por_embalagem > 0 else 0)
+                        
+                        # Quebra as embalagens necessárias
+                        novo_estoque_fracionado = (embalagens_para_quebrar * qtd_por_embalagem) + estoque_fracionado_atual - quantidade_vendida
+                        
+                        self.cursor.execute('''
+                            UPDATE produtos 
+                            SET quantidade = quantidade - ?, estoque_fracionado = ?
+                            WHERE id = ?
+                        ''', (embalagens_para_quebrar, novo_estoque_fracionado, produto_id))
+            
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"Erro ao atualizar estoque fracionado: {e}")
+            return False
+
+    def quebrar_embalagem(self, produto_id, quantidade_embalagens=1):
+        """Quebra embalagens para criar estoque fracionado"""
+        try:
+            produto = self.obter_produto(produto_id)
+            if not produto or not produto['fracionado']:
+                return False
+            
+            if produto['quantidade'] < quantidade_embalagens:
+                return False
+            
+            unidades_geradas = quantidade_embalagens * produto['qtd_por_embalagem']
+            
+            self.cursor.execute('''
+                UPDATE produtos 
+                SET quantidade = quantidade - ?, estoque_fracionado = estoque_fracionado + ?
+                WHERE id = ?
+            ''', (quantidade_embalagens, unidades_geradas, produto_id))
+            
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"Erro ao quebrar embalagem: {e}")
+            return False
+
+    def obter_info_estoque_fracionado(self, produto_id):
+        """Retorna informações detalhadas do estoque de um produto fracionado"""
+        try:
+            produto = self.obter_produto(produto_id)
+            if not produto:
+                return None
+            
+            info = {
+                'produto_id': produto_id,
+                'nome': produto['nome'],
+                'fracionado': bool(produto['fracionado']),
+                'unidade_medida': produto['unidade_medida'],
+                'embalagens_inteiras': produto['quantidade'],
+                'estoque_fracionado': produto['estoque_fracionado'] if produto['fracionado'] else 0,
+                'qtd_por_embalagem': produto['qtd_por_embalagem'] if produto['fracionado'] else 1,
+                'preco_embalagem': produto['preco_venda'],
+                'preco_unitario_fracao': produto['preco_unitario_fracao'] if produto['fracionado'] else produto['preco_venda']
+            }
+            
+            if produto['fracionado']:
+                # Calcular estoque total em unidades
+                info['estoque_total_unidades'] = (produto['quantidade'] * produto['qtd_por_embalagem']) + produto['estoque_fracionado']
+            else:
+                info['estoque_total_unidades'] = produto['quantidade']
+            
+            return info
+        except Exception as e:
+            print(f"Erro ao obter info de estoque fracionado: {e}")
+            return None
+        
+    def listar_produtos_com_fracionamento(self, filtro=None):
+        """Lista produtos incluindo informações de fracionamento"""
+        try:
+            query = '''
+            SELECT p.*, f.empresa as fornecedor_nome,
+                CASE 
+                    WHEN p.fracionado = 1 THEN 
+                        (p.quantidade * p.qtd_por_embalagem + p.estoque_fracionado)
+                    ELSE p.quantidade
+                END as estoque_total_calculado
+            FROM produtos p 
+            LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
+            '''
+            
+            if filtro:
+                query += f" WHERE p.nome LIKE '%{filtro}%' OR p.descricao LIKE '%{filtro}%' OR p.codigo_barras LIKE '%{filtro}%'"
+            
+            query += " ORDER BY p.nome"
+            
+            self.cursor.execute(query)
+            return self.cursor.fetchall()
+        except Exception as e:
+            print(f"Erro ao listar produtos com fracionamento: {e}")
+            return []
 
     # Método para migrar a tabela existente para a nova estrutura
     def migrar_tabela_produtos(self):
@@ -380,20 +551,20 @@ class DatabaseManager:
             return False
         
     # Métodos para Fornecedores
-    def adicionar_fornecedor(self, nome, representante, frequencia_compra, telefone, email, endereco, contato):
+    def adicionar_fornecedor(self, empresa, representante, frequencia_compra, telefone, email, endereco, contato):
         self.cursor.execute('''
-        INSERT INTO fornecedores (nome, representante, frequencia_compra, telefone, email, endereco, contato)
+        INSERT INTO fornecedores (empresa, representante, frequencia_compra, telefone, email, endereco, contato)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (nome, representante, frequencia_compra, telefone, email, endereco, contato))
+        ''', (empresa, representante, frequencia_compra, telefone, email, endereco, contato))
         self.conn.commit()
         return self.cursor.lastrowid
     
-    def atualizar_fornecedor(self, id, nome, representante, frequencia_compra, telefone, email, endereco, contato):
+    def atualizar_fornecedor(self, id, empresa, representante, frequencia_compra, telefone, email, endereco, contato):
         self.cursor.execute('''
         UPDATE fornecedores
-        SET nome = ?, representante = ?, frequencia_compra = ?, telefone = ?, email = ?, endereco = ?, contato = ?
+        SET empresa = ?, representante = ?, frequencia_compra = ?, telefone = ?, email = ?, endereco = ?, contato = ?
         WHERE id = ?
-        ''', (nome, representante, frequencia_compra, telefone, email, endereco, contato, id))
+        ''', (empresa, representante, frequencia_compra, telefone, email, endereco, contato, id))
         self.conn.commit()
         return self.cursor.rowcount > 0
     
@@ -410,7 +581,7 @@ class DatabaseManager:
         query = 'SELECT * FROM fornecedores'
         
         if filtro:
-            query += f" WHERE nome LIKE '%{filtro}%' OR representante LIKE '%{filtro}%'"
+            query += f" WHERE empresa LIKE '%{filtro}%' OR representante LIKE '%{filtro}%'"
         
         self.cursor.execute(query)
         return self.cursor.fetchall()
@@ -1063,29 +1234,28 @@ class DatabaseManager:
             print(f"Erro ao registrar venda: {e}")
             return False
     
-    def registrar_item_venda(self, venda_id, produto_id, quantidade, preco_unitario, subtotal):
+    def registrar_item_venda(self, venda_id, produto_id, quantidade, preco_unitario, subtotal, tipo_venda="embalagem"):
+        """
+        Registra item de venda considerando se é embalagem ou fração
+        tipo_venda: "embalagem" ou "fracao"
+        """
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Registrar item
+            # Registrar item na tabela itens_venda
             cursor.execute("""
                 INSERT INTO itens_venda 
                 (venda_id, produto_id, quantidade, preco_unitario, subtotal)
                 VALUES (?, ?, ?, ?, ?)
             """, (venda_id, produto_id, quantidade, preco_unitario, subtotal))
             
-            # Atualizar estoque
-            cursor.execute("""
-                UPDATE produtos 
-                SET quantidade = quantidade - ?
-                WHERE id = ?
-            """, (quantidade, produto_id))
-            
             conn.commit()
             conn.close()
             
-            return True
+            # Atualizar estoque usando o método específico para fracionados
+            return self.atualizar_estoque_fracionado(produto_id, quantidade, tipo_venda)
+            
         except Exception as e:
             print(f"Erro ao registrar item de venda: {e}")
             return False

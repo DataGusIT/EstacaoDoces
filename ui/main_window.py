@@ -134,16 +134,6 @@ class MainWindow(QMainWindow):
         separator.setFrameShadow(QFrame.Sunken)
         separator.setObjectName("headerSeparator")
         
-        # Informações do usuário
-        user_avatar = QLabel("A")
-        user_avatar.setObjectName("userAvatar")
-        user_avatar.setFixedSize(28, 28)
-        user_avatar.setAlignment(Qt.AlignCenter)
-        
-        user_name = QLabel("Admin")
-        user_name.setObjectName("userName")
-        user_name.setFont(QFont("Segoe UI", 10))
-        
         # Botões de controle da janela
         window_controls_frame = QFrame()
         window_controls_frame.setObjectName("windowControls")
@@ -176,8 +166,6 @@ class MainWindow(QMainWindow):
         # Adicionar elementos aos controles
         controls_layout.addWidget(refresh_button)
         controls_layout.addWidget(separator)
-        controls_layout.addWidget(user_avatar)
-        controls_layout.addWidget(user_name)
         controls_layout.addWidget(window_controls_frame)
         
         header_layout.addWidget(controls_frame)
@@ -333,13 +321,6 @@ class MainWindow(QMainWindow):
         self.statusBar.setObjectName("statusBar")
         self.statusBar.setMaximumHeight(25)
         self.statusBar.showMessage("Sistema pronto", 3000)
-        
-        # Adicionar informações à direita da barra de status
-        user_info_label = QLabel(f"Usuário: Admin | Perfil: Admin")
-        user_info_label.setObjectName("statusUserInfo")
-        self.statusBar.addPermanentWidget(user_info_label)
-        
-        main_layout.addWidget(self.statusBar)
         
         # Configurar widget central
         self.setCentralWidget(central_widget)

@@ -33,7 +33,7 @@ class FornecedorWindow(QWidget):
         # Tabela de fornecedores
         self.tabela = QTableWidget()
         self.tabela.setColumnCount(7)
-        self.tabela.setHorizontalHeaderLabels(["ID", "Nome", "Representante", "Frequência", "Telefone", 
+        self.tabela.setHorizontalHeaderLabels(["ID", "Empresa", "Representante", "Frequência", "Telefone", 
                                               "Email", "Ações"])
         self.tabela.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.tabela.verticalHeader().setVisible(False)
@@ -70,7 +70,7 @@ class FornecedorWindow(QWidget):
             
             # Adicionar dados às células
             self.tabela.setItem(row, 0, QTableWidgetItem(str(fornecedor['id'])))
-            self.tabela.setItem(row, 1, QTableWidgetItem(fornecedor['nome']))
+            self.tabela.setItem(row, 1, QTableWidgetItem(fornecedor['empresa']))
             self.tabela.setItem(row, 2, QTableWidgetItem(fornecedor['representante'] or ""))
             self.tabela.setItem(row, 3, QTableWidgetItem(fornecedor['frequencia_compra'] or ""))
             self.tabela.setItem(row, 4, QTableWidgetItem(fornecedor['telefone'] or ""))
@@ -145,7 +145,7 @@ class FormularioFornecedor(QDialog):
         form_layout = QFormLayout()
         
         # Campos do formulário
-        self.nome_input = QLineEdit()
+        self.empresa_input = QLineEdit()
         self.representante_input = QLineEdit()
         self.representante_input.setPlaceholderText("Nome do representante")
         
@@ -160,7 +160,7 @@ class FormularioFornecedor(QDialog):
         self.contato_input.setPlaceholderText("Nome do contato")
         
         # Adicionar campos ao formulário
-        form_layout.addRow("Nome:", self.nome_input)
+        form_layout.addRow("Empresa:", self.empresa_input)
         form_layout.addRow("Representante:", self.representante_input)
         form_layout.addRow("Frequência de Compra:", self.frequencia_input)
         form_layout.addRow("Telefone:", self.telefone_input)
@@ -190,7 +190,7 @@ class FormularioFornecedor(QDialog):
     
     def carregar_dados_fornecedor(self):
         """Carrega os dados do fornecedor nos campos do formulário."""
-        self.nome_input.setText(self.fornecedor['nome'])
+        self.empresa_input.setText(self.fornecedor['empresa'])
         self.representante_input.setText(self.fornecedor['representante'] or "")
         
         # Definir o item selecionado no ComboBox
@@ -208,12 +208,12 @@ class FormularioFornecedor(QDialog):
     def salvar_fornecedor(self):
         """Salva os dados do fornecedor no banco de dados."""
         # Validar campos obrigatórios
-        if not self.nome_input.text().strip():
-            QMessageBox.warning(self, "Erro", "O nome do fornecedor é obrigatório!")
+        if not self.empresa_input.text().strip():
+            QMessageBox.warning(self, "Erro", "O nome da empresa é obrigatório!")
             return
         
         # Coletar dados do formulário
-        nome = self.nome_input.text().strip()
+        empresa = self.empresa_input.text().strip()
         representante = self.representante_input.text().strip()
         frequencia_compra = self.frequencia_input.currentText()
         telefone = self.telefone_input.text().strip()
@@ -225,12 +225,12 @@ class FormularioFornecedor(QDialog):
             # Inserir ou atualizar fornecedor
             if self.fornecedor_id:
                 sucesso = self.db.atualizar_fornecedor(
-                    self.fornecedor_id, nome, representante, frequencia_compra, telefone, email, endereco, contato
+                    self.fornecedor_id, empresa, representante, frequencia_compra, telefone, email, endereco, contato
                 )
                 mensagem = "Fornecedor atualizado com sucesso!"
             else:
                 sucesso = self.db.adicionar_fornecedor(
-                    nome, representante, frequencia_compra, telefone, email, endereco, contato
+                    empresa, representante, frequencia_compra, telefone, email, endereco, contato
                 )
                 mensagem = "Fornecedor cadastrado com sucesso!"
             
