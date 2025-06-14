@@ -12,6 +12,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
+import csv
 
 class EstoqueWindow(QWidget):
     def __init__(self, db):
@@ -122,16 +123,26 @@ class EstoqueWindow(QWidget):
         action_layout = QHBoxLayout()
         self.add_button = QPushButton("Adicionar Produto")
         self.add_button.clicked.connect(self.abrir_formulario_produto)
-        
+
         self.relatorio_btn = QPushButton("Relatório de Vencimentos")
         self.relatorio_btn.clicked.connect(self.relatorio_vencimentos)
-        
+
         self.relatorio_estoque_btn = QPushButton("Relatório de Estoque Baixo")
         self.relatorio_estoque_btn.clicked.connect(self.relatorio_estoque_baixo)
-        
+
+        # NOVOS BOTÕES - ADICIONE ESTAS LINHAS
+        self.exportar_csv_btn = QPushButton("Exportar CSV")
+        self.exportar_csv_btn.clicked.connect(self.exportar_csv)
+
+        self.importar_csv_btn = QPushButton("Importar CSV")
+        self.importar_csv_btn.clicked.connect(self.importar_csv)
+
         action_layout.addWidget(self.add_button)
         action_layout.addWidget(self.relatorio_btn)
         action_layout.addWidget(self.relatorio_estoque_btn)
+        # ADICIONE ESTAS LINHAS TAMBÉM
+        action_layout.addWidget(self.exportar_csv_btn)
+        action_layout.addWidget(self.importar_csv_btn)
         layout.addLayout(action_layout)
     
     def atualizar_categorias_filtro(self):
@@ -801,6 +812,255 @@ class EstoqueWindow(QWidget):
             
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"Erro ao gerar PDF: {str(e)}")
+    
+    def exportar_csv(self):
+        """Exporta os dados da tabela atual para um arquivo CSV."""
+        try:
+            # Solicitar local para salvar o arquivo
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Exportar Estoque para CSV", 
+                os.path.expanduser("~/estoque_export.csv"),
+                "CSV Files (*.csv)"
+            )
+            
+            if not file_path:
+                return  # Cancelado pelo usuário
+            
+            # Obter dados atuais da tabela (considerando filtros aplicados)
+            produtos = []
+            for row in range(self.tabela.rowCount()):
+                produto = {}
+                produto['id'] = self.tabela.item(row, 0).text() if self.tabela.item(row, 0) else ""
+                produto['codigo_barras'] = self.tabela.item(row, 1).text() if self.tabela.item(row, 1) else ""
+                produto['nome'] = self.tabela.item(row, 2).text() if self.tabela.item(row, 2) else ""
+                produto['categoria'] = self.tabela.item(row, 3).text() if self.tabela.item(row, 3) else ""
+                produto['estoque_detalhado'] = self.tabela.item(row, 4).text() if self.tabela.item(row, 4) else ""
+                produto['estoque_minimo'] = self.tabela.item(row, 5).text() if self.tabela.item(row, 5) else ""
+                produto['preco_compra'] = self.tabela.item(row, 6).text() if self.tabela.item(row, 6) else ""
+                produto['margem'] = self.tabela.item(row, 7).text() if self.tabela.item(row, 7) else ""
+                produto['preco_venda'] = self.tabela.item(row, 8).text() if self.tabela.item(row, 8) else ""
+                produto['validade'] = self.tabela.item(row, 9).text() if self.tabela.item(row, 9) else ""
+                produto['localizacao'] = self.tabela.item(row, 10).text() if self.tabela.item(row, 10) else ""
+                produto['fornecedor'] = self.tabela.item(row, 11).text() if self.tabela.item(row, 11) else ""
+                produtos.append(produto)
+            
+            # Escrever CSV
+            with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
+                fieldnames = ['id', 'codigo_barras', 'nome', 'categoria', 'estoque_detalhado', 
+                            'estoque_minimo', 'preco_compra', 'margem', 'preco_venda', 
+                            'validade', 'localizacao', 'fornecedor']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                
+                # Cabeçalho
+                writer.writeheader()
+                
+                # Dados
+                for produto in produtos:
+                    writer.writerow(produto)
+            
+            QMessageBox.information(self, "Sucesso", f"Dados exportados com sucesso para:\n{file_path}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Erro ao exportar CSV: {str(e)}")
+
+    def importar_csv(self):
+        """Importa dados de um arquivo CSV para o estoque."""
+        try:
+            # Solicitar arquivo para importar
+            file_path, _ = QFileDialog.getOpenFileName(
+                self, "Importar CSV para Estoque", 
+                os.path.expanduser("~"),
+                "CSV Files (*.csv)"
+            )
+            
+            if not file_path:
+                return  # Cancelado pelo usuário
+            
+            # Confirmação antes de importar
+            confirmacao = QMessageBox.question(
+                self, 
+                "Confirmar Importação",
+                "Esta operação irá importar os dados do CSV.\n"
+                "Produtos com mesmo código de barras serão atualizados.\n"
+                "Deseja continuar?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            
+            if confirmacao != QMessageBox.Yes:
+                return
+            
+            produtos_importados = 0
+            produtos_erro = 0
+            erros_detalhes = []
+            
+            # Ler CSV
+            with open(file_path, 'r', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                
+                for linha_num, row in enumerate(reader, start=2):  # Start=2 porque linha 1 é cabeçalho
+                    try:
+                        # Validar dados obrigatórios
+                        if not row.get('nome', '').strip():
+                            erros_detalhes.append(f"Linha {linha_num}: Nome do produto é obrigatório")
+                            produtos_erro += 1
+                            continue
+                        
+                        # Preparar dados para inserção/atualização
+                        produto_data = {
+                            'codigo_barras': row.get('codigo_barras', '').strip(),
+                            'nome': row.get('nome', '').strip(),
+                            'categoria': row.get('categoria', '').strip() or None,
+                            'quantidade': self._extrair_quantidade_do_estoque_detalhado(row.get('estoque_detalhado', '0')),
+                            'estoque_minimo': int(row.get('estoque_minimo', '0') or 0),
+                            'preco_compra': self._extrair_preco(row.get('preco_compra', '0')),
+                            'margem_lucro': self._extrair_margem(row.get('margem', '0')),
+                            'preco_venda': self._extrair_preco(row.get('preco_venda', '0')),
+                            'data_validade': self._formatar_data_validade(row.get('validade', '')),
+                            'localizacao': row.get('localizacao', '').strip() or None,
+                            'fornecedor_id': None  # Por simplicidade, não importamos fornecedor por agora
+                        }
+                        
+                        # Verificar se produto já existe (por código de barras ou nome)
+                        produto_existente = None
+                        if produto_data['codigo_barras']:
+                            produto_existente = self.db.buscar_produto_por_codigo_barras(produto_data['codigo_barras'])
+                        
+                        if not produto_existente:
+                            produto_existente = self.db.buscar_produto_por_nome_exato(produto_data['nome'])
+                        
+                        if produto_existente:
+                            # Atualizar produto existente
+                            if self.db.atualizar_produto(
+                                produto_existente['id'],
+                                produto_data['codigo_barras'],
+                                produto_data['nome'],
+                                produto_data.get('descricao', ''),  # Campo que estava faltando
+                                produto_data['quantidade'],
+                                produto_data['estoque_minimo'],
+                                produto_data['preco_compra'],
+                                produto_data['margem_lucro'],
+                                produto_data['preco_venda'],
+                                produto_data['data_validade'],
+                                produto_data['localizacao'],
+                                produto_data['fornecedor_id'],
+                                produto_data.get('categoria')
+                            ):
+                                produtos_importados += 1
+                            else:
+                                erros_detalhes.append(f"Linha {linha_num}: Erro ao atualizar produto '{produto_data['nome']}'")
+                                produtos_erro += 1
+                        else:
+                            # Criar novo produto
+                            produto_id = self.db.adicionar_produto(
+                                produto_data['codigo_barras'],
+                                produto_data['nome'],
+                                produto_data.get('descricao', ''),  # Campo que estava faltando
+                                produto_data['quantidade'],
+                                produto_data['estoque_minimo'],
+                                produto_data['preco_compra'],
+                                produto_data['margem_lucro'],
+                                produto_data['preco_venda'],
+                                produto_data['data_validade'],
+                                produto_data['localizacao'],
+                                produto_data['fornecedor_id'],
+                                produto_data.get('categoria')
+                            )
+                            
+                            if produto_id:
+                                produtos_importados += 1
+                            else:
+                                erros_detalhes.append(f"Linha {linha_num}: Erro ao criar produto '{produto_data['nome']}'")
+                                produtos_erro += 1
+                                
+                    except Exception as e:
+                        erros_detalhes.append(f"Linha {linha_num}: {str(e)}")
+                        produtos_erro += 1
+            
+            # Recarregar dados
+            self.carregar_dados()
+            
+            # Mostrar resultado
+            mensagem = f"Importação concluída!\n\n"
+            mensagem += f"Produtos importados/atualizados: {produtos_importados}\n"
+            mensagem += f"Erros encontrados: {produtos_erro}\n"
+            
+            if erros_detalhes:
+                mensagem += f"\nDetalhes dos erros (primeiros 10):\n"
+                for erro in erros_detalhes[:10]:
+                    mensagem += f"• {erro}\n"
+                
+                if len(erros_detalhes) > 10:
+                    mensagem += f"... e mais {len(erros_detalhes) - 10} erros."
+            
+            if produtos_erro > 0:
+                QMessageBox.warning(self, "Importação com Erros", mensagem)
+            else:
+                QMessageBox.information(self, "Importação Concluída", mensagem)
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Erro ao importar CSV: {str(e)}")
+
+    def _extrair_quantidade_do_estoque_detalhado(self, estoque_str):
+        """Extrai a quantidade numérica do campo estoque detalhado."""
+        try:
+            # Se for só um número
+            if estoque_str.isdigit():
+                return int(estoque_str)
+            
+            # Se tiver formato complexo, pegar primeiro número
+            import re
+            numeros = re.findall(r'\d+', estoque_str)
+            if numeros:
+                return int(numeros[0])
+            
+            return 0
+        except:
+            return 0
+
+    def _extrair_preco(self, preco_str):
+        """Extrai valor numérico de string de preço."""
+        try:
+            # Remover R$, espaços e outros caracteres
+            preco_limpo = preco_str.replace('R$', '').replace(' ', '').replace(',', '.')
+            return float(preco_limpo)
+        except:
+            return 0.0
+
+    def _extrair_margem(self, margem_str):
+        """Extrai valor numérico de string de margem."""
+        try:
+            margem_limpa = margem_str.replace('%', '').replace(' ', '').replace(',', '.')
+            return float(margem_limpa)
+        except:
+            return 0.0
+
+    def _formatar_data_validade(self, data_str):
+        """Formata data de validade para formato YYYY-MM-DD."""
+        if not data_str or data_str.strip() == "":
+            return None
+        
+        try:
+            # Tentar diferentes formatos de data
+            from datetime import datetime
+            
+            # Formato YYYY-MM-DD (já correto)
+            if len(data_str) == 10 and data_str.count('-') == 2:
+                datetime.strptime(data_str, "%Y-%m-%d")
+                return data_str
+            
+            # Formato DD/MM/YYYY
+            if len(data_str) == 10 and data_str.count('/') == 2:
+                data_obj = datetime.strptime(data_str, "%d/%m/%Y")
+                return data_obj.strftime("%Y-%m-%d")
+            
+            # Formato DD-MM-YYYY
+            if len(data_str) == 10 and data_str.count('-') == 2:
+                data_obj = datetime.strptime(data_str, "%d-%m-%Y")
+                return data_obj.strftime("%Y-%m-%d")
+            
+            return None
+        except:
+            return None
 
 
 class FormularioProduto(QDialog):

@@ -19,7 +19,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.db = db
         self.settings = settings
-        self.menu_collapsed = False
+        self.menu_collapsed = True
         self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)  # Janela sem bordas
         self.initUI()
         self.check_promocoes_ativas()
@@ -32,7 +32,7 @@ class MainWindow(QMainWindow):
         
         # Widget central
         central_widget = QWidget()
-        central_widget.setObjectName("centralWidget")
+        self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
@@ -326,8 +326,13 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         
         # Configurar estado inicial do menu (expandido)
-        self.menu_container.setMinimumWidth(250)
-        self.menu_container.setMaximumWidth(250)
+        self.menu_container.setMinimumWidth(70)
+        self.menu_container.setMaximumWidth(70)
+        self.creditos.setText("©")
+
+        for btn in self.menu_buttons + [self.btn_config]:
+            if hasattr(btn, 'text_label'):
+                btn.text_label.hide()
         
         # Permitir arrastar a janela pelo cabeçalho
         header_frame.mousePressEvent = self.start_window_drag

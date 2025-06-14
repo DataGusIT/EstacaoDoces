@@ -1,8 +1,17 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                            QPushButton, QTableWidget, QTableWidgetItem, QFormLayout,
-                           QMessageBox, QHeaderView, QDialog, QFrame, QComboBox)
-from PyQt5.QtCore import Qt
+                           QMessageBox, QHeaderView, QDialog, QFrame, QComboBox, QFileDialog,
+                           QTextEdit, QSpinBox, QCheckBox, QGroupBox, QProgressBar)
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont
+import csv
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
+import os
+from datetime import datetime
 
 class FornecedorWindow(QWidget):
     def __init__(self, db):
@@ -41,9 +50,31 @@ class FornecedorWindow(QWidget):
         
         # Botões de ação
         action_layout = QHBoxLayout()
+        
+        # Grupo de botões principais
         self.add_button = QPushButton("Adicionar Fornecedor")
         self.add_button.clicked.connect(self.abrir_formulario_fornecedor)
         action_layout.addWidget(self.add_button)
+        
+        # Grupo de botões CSV
+        csv_group = QGroupBox("Importar/Exportar")
+        csv_layout = QHBoxLayout(csv_group)
+        
+        self.importar_csv_btn = QPushButton("Importar CSV")
+        self.importar_csv_btn.clicked.connect(self.importar_csv)
+        csv_layout.addWidget(self.importar_csv_btn)
+        
+        self.exportar_csv_btn = QPushButton("Exportar CSV")
+        self.exportar_csv_btn.clicked.connect(self.exportar_csv)
+        csv_layout.addWidget(self.exportar_csv_btn)
+        
+        action_layout.addWidget(csv_group)
+        
+        # Botão de verificar estoque baixo
+        self.verificar_estoque_btn = QPushButton("Verificar Estoque Baixo")
+        self.verificar_estoque_btn.clicked.connect(self.verificar_estoque_baixo)
+        action_layout.addWidget(self.verificar_estoque_btn)
+        
         layout.addLayout(action_layout)
     
     def carregar_dados(self):
@@ -113,6 +144,285 @@ class FornecedorWindow(QWidget):
                 self.carregar_dados()
             else:
                 QMessageBox.warning(self, "Erro", "Não foi possível excluir o fornecedor.")
+    
+    def importar_csv(self):
+        """Importa fornecedores de um arquivo CSV."""
+        arquivo, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Importar Fornecedores CSV", 
+            "", 
+            "CSV Files (*.csv)"
+        )
+        
+        if arquivo:
+            try:
+                with open(arquivo, 'r', encoding='utf-8') as file:
+                    reader = csv.DictReader(file)
+                    fornecedores_importados = 0
+                    
+                    for row in reader:
+                        # Validar dados obrigatórios
+                        if not row.get('empresa', '').strip():
+                            continue
+                            
+                        # Adicionar fornecedor
+                        sucesso = self.db.adicionar_fornecedor(
+                            empresa=row.get('empresa', '').strip(),
+                            representante=row.get('representante', '').strip(),
+                            frequencia_compra=row.get('frequencia_compra', '').strip(),
+                            telefone=row.get('telefone', '').strip(),
+                            email=row.get('email', '').strip(),
+                            endereco=row.get('endereco', '').strip(),
+                            contato=row.get('contato', '').strip()
+                        )
+                        
+                        if sucesso:
+                            fornecedores_importados += 1
+                    
+                    self.carregar_dados()
+                    QMessageBox.information(
+                        self, 
+                        "Importação Concluída", 
+                        f"Importados {fornecedores_importados} fornecedores com sucesso!"
+                    )
+                    
+            except Exception as e:
+                QMessageBox.critical(self, "Erro na Importação", f"Erro ao importar CSV: {str(e)}")
+    
+    def exportar_csv(self):
+        """Exporta fornecedores para um arquivo CSV."""
+        arquivo, _ = QFileDialog.getSaveFileName(
+            self, 
+            "Exportar Fornecedores CSV", 
+            f"fornecedores_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", 
+            "CSV Files (*.csv)"
+        )
+        
+        if arquivo:
+            try:
+                fornecedores = self.db.listar_fornecedores()
+                
+                with open(arquivo, 'w', newline='', encoding='utf-8') as file:
+                    fieldnames = ['empresa', 'representante', 'frequencia_compra', 'telefone', 'email', 'endereco', 'contato']
+                    writer = csv.DictWriter(file, fieldnames=fieldnames)
+                    
+                    writer.writeheader()
+                    
+                    for fornecedor in fornecedores:
+                        writer.writerow({
+                            'empresa': fornecedor['empresa'],
+                            'representante': fornecedor['representante'] or '',
+                            'frequencia_compra': fornecedor['frequencia_compra'] or '',
+                            'telefone': fornecedor['telefone'] or '',
+                            'email': fornecedor['email'] or '',
+                            'endereco': fornecedor['endereco'] or '',
+                            'contato': fornecedor['contato'] or ''
+                        })
+                
+                QMessageBox.information(
+                    self, 
+                    "Exportação Concluída", 
+                    f"Fornecedores exportados para: {arquivo}"
+                )
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Erro na Exportação", f"Erro ao exportar CSV: {str(e)}")
+    
+    def verificar_estoque_baixo(self):
+        """Verifica produtos com estoque baixo e permite envio de email para fornecedores."""
+        produtos_baixo = self.db.verificar_produtos_estoque_baixo()
+        
+        if not produtos_baixo:
+            QMessageBox.information(self, "Estoque OK", "Não há produtos com estoque baixo no momento.")
+            return
+        
+        # Agrupar produtos por fornecedor
+        produtos_por_fornecedor = {}
+        for produto in produtos_baixo:
+            fornecedor_nome = produto['fornecedor_nome'] or 'Sem fornecedor'
+            if fornecedor_nome not in produtos_por_fornecedor:
+                produtos_por_fornecedor[fornecedor_nome] = []
+            produtos_por_fornecedor[fornecedor_nome].append(produto)
+        
+        # Abrir dialog para envio de emails
+        dialog = DialogEstoqueBaixo(self.db, produtos_por_fornecedor)
+        dialog.exec_()
+
+
+class DialogEstoqueBaixo(QDialog):
+    def __init__(self, db, produtos_por_fornecedor):
+        super().__init__()
+        self.db = db
+        self.produtos_por_fornecedor = produtos_por_fornecedor
+        self.initUI()
+    
+    def initUI(self):
+        self.setWindowTitle("Produtos com Estoque Baixo")
+        self.setFixedSize(800, 600)
+        
+        layout = QVBoxLayout(self)
+        
+        # Título
+        titulo = QLabel("Produtos com Estoque Baixo")
+        titulo.setFont(QFont("Arial", 12, QFont.Bold))
+        layout.addWidget(titulo)
+        
+        # Área de produtos
+        self.produtos_text = QTextEdit()
+        self.produtos_text.setReadOnly(True)
+        
+        # Montar texto dos produtos
+        texto_produtos = ""
+        for fornecedor, produtos in self.produtos_por_fornecedor.items():
+            texto_produtos += f"\n--- {fornecedor} ---\n"
+            for produto in produtos:
+                texto_produtos += f"• {produto['nome']} - Estoque: {produto['quantidade']} (Mínimo: {produto['estoque_minimo']})\n"
+        
+        self.produtos_text.setPlainText(texto_produtos)
+        layout.addWidget(self.produtos_text)
+        
+        # Configurações de email
+        email_group = QGroupBox("Configurações de Email")
+        email_layout = QFormLayout(email_group)
+        
+        self.smtp_server = QLineEdit("smtp.gmail.com")
+        self.smtp_port = QSpinBox()
+        self.smtp_port.setRange(1, 65535)
+        self.smtp_port.setValue(587)
+        
+        self.email_usuario = QLineEdit()
+        self.email_usuario.setPlaceholderText("seu.email@gmail.com")
+        
+        self.email_senha = QLineEdit()
+        self.email_senha.setEchoMode(QLineEdit.Password)
+        self.email_senha.setPlaceholderText("senha do app ou senha do email")
+        
+        email_layout.addRow("Servidor SMTP:", self.smtp_server)
+        email_layout.addRow("Porta:", self.smtp_port)
+        email_layout.addRow("Seu Email:", self.email_usuario)
+        email_layout.addRow("Senha:", self.email_senha)
+        
+        layout.addWidget(email_group)
+        
+        # Botões
+        button_layout = QHBoxLayout()
+        
+        self.enviar_emails_btn = QPushButton("Enviar Emails para Fornecedores")
+        self.enviar_emails_btn.clicked.connect(self.enviar_emails)
+        
+        self.fechar_btn = QPushButton("Fechar")
+        self.fechar_btn.clicked.connect(self.accept)
+        
+        button_layout.addWidget(self.enviar_emails_btn)
+        button_layout.addWidget(self.fechar_btn)
+        
+        layout.addLayout(button_layout)
+    
+    def enviar_emails(self):
+        """Envia emails para os fornecedores com produtos em estoque baixo."""
+        if not self.email_usuario.text() or not self.email_senha.text():
+            QMessageBox.warning(self, "Erro", "Preencha suas credenciais de email!")
+            return
+        
+        # Criar progress bar
+        progress = QProgressBar()
+        progress.setRange(0, len(self.produtos_por_fornecedor))
+        progress.setValue(0)
+        
+        # Adicionar temporariamente à janela
+        self.layout().addWidget(progress)
+        
+        try:
+            # Conectar ao servidor SMTP
+            server = smtplib.SMTP(self.smtp_server.text(), self.smtp_port.value())
+            server.starttls()
+            server.login(self.email_usuario.text(), self.email_senha.text())
+            
+            emails_enviados = 0
+            emails_falharam = 0
+            
+            for i, (fornecedor_nome, produtos) in enumerate(self.produtos_por_fornecedor.items()):
+                # Buscar email do fornecedor
+                fornecedor_email = self.obter_email_fornecedor(fornecedor_nome)
+                
+                if not fornecedor_email:
+                    emails_falharam += 1
+                    progress.setValue(i + 1)
+                    continue
+                
+                # Criar email
+                msg = MIMEMultipart()
+                msg['From'] = self.email_usuario.text()
+                msg['To'] = fornecedor_email
+                msg['Subject'] = f"Solicitação de Reposição de Estoque - {fornecedor_nome}"
+                
+                # Corpo do email
+                corpo = f"""
+Prezado(a) {fornecedor_nome},
+
+Espero que esta mensagem o(a) encontre bem.
+
+Gostaríamos de solicitar a reposição dos seguintes produtos que estão com estoque baixo:
+
+"""
+                
+                for produto in produtos:
+                    corpo += f"• {produto['nome']} - Estoque atual: {produto['quantidade']} unidades (Mínimo: {produto['estoque_minimo']})\n"
+                
+                corpo += """
+Por favor, entre em contato conosco para confirmar a disponibilidade e prazo de entrega.
+
+Aguardamos seu retorno.
+
+Atenciosamente,
+Sistema de Gestão de Estoque
+"""
+                
+                msg.attach(MIMEText(corpo, 'plain'))
+                
+                # Enviar email
+                try:
+                    text = msg.as_string()
+                    server.sendmail(self.email_usuario.text(), fornecedor_email, text)
+                    emails_enviados += 1
+                except Exception as e:
+                    print(f"Erro ao enviar email para {fornecedor_nome}: {e}")
+                    emails_falharam += 1
+                
+                progress.setValue(i + 1)
+            
+            server.quit()
+            
+            # Remover progress bar
+            self.layout().removeWidget(progress)
+            progress.deleteLater()
+            
+            # Mostrar resultado
+            QMessageBox.information(
+                self, 
+                "Envio Concluído", 
+                f"Emails enviados: {emails_enviados}\nEmails falharam: {emails_falharam}"
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Erro ao enviar emails: {str(e)}")
+            # Remover progress bar em caso de erro
+            try:
+                self.layout().removeWidget(progress)
+                progress.deleteLater()
+            except:
+                pass
+    
+    def obter_email_fornecedor(self, fornecedor_nome):
+        """Obtém o email do fornecedor pelo nome da empresa."""
+        try:
+            fornecedores = self.db.listar_fornecedores()
+            for fornecedor in fornecedores:
+                if fornecedor['empresa'] == fornecedor_nome:
+                    return fornecedor['email']
+            return None
+        except:
+            return None
 
 
 class FormularioFornecedor(QDialog):

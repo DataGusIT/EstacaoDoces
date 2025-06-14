@@ -13,6 +13,10 @@ class DatabaseManager:
         # Conectar ao banco de dados
         self.conn = sqlite3.connect(db_file)
         self.conn.row_factory = sqlite3.Row
+        
+        # CORREÇÃO: Padronizar o nome - usar 'conexao' em todos os métodos
+        self.conexao = self.conn  # Criar alias para compatibilidade
+        
         self.cursor = self.conn.cursor()
         
         # Inicializar as tabelas
@@ -30,7 +34,11 @@ class DatabaseManager:
             
             # Estabelecer nova conexão
             self.conn = sqlite3.connect(self.db_path)
-            self.conn.row_factory = sqlite3.Row  # Para acessar colunas pelo nome
+            self.conn.row_factory = sqlite3.Row
+            
+            # CORREÇÃO: Atualizar ambos os atributos
+            self.conexao = self.conn  # Manter alias
+            
             self.cursor = self.conn.cursor()
             return True
         except Exception as e:
@@ -52,6 +60,36 @@ class DatabaseManager:
         if not self.is_connection_active():
             return self.connect_to_database()
         return True
+    
+    def buscar_produto_por_codigo_barras(self, codigo_barras):
+        """Busca produto por código de barras."""
+        try:
+            # CORREÇÃO: Garantir conexão ativa
+            if not self.ensure_connection():
+                return None
+                
+            cursor = self.conexao.cursor()
+            cursor.execute("SELECT * FROM produtos WHERE codigo_barras = ?", (codigo_barras,))
+            resultado = cursor.fetchone()
+            return dict(resultado) if resultado else None
+        except Exception as e:
+            print(f"Erro ao buscar produto por código de barras: {e}")
+            return None
+
+    def buscar_produto_por_nome_exato(self, nome):
+        """Busca produto por nome exato."""
+        try:
+            # CORREÇÃO: Garantir conexão ativa
+            if not self.ensure_connection():
+                return None
+                
+            cursor = self.conexao.cursor()
+            cursor.execute("SELECT * FROM produtos WHERE LOWER(nome) = LOWER(?)", (nome,))
+            resultado = cursor.fetchone()
+            return dict(resultado) if resultado else None
+        except Exception as e:
+            print(f"Erro ao buscar produto por nome: {e}")
+            return None
     
     def criar_tabelas(self):
         # Tabela de Produtos (com novos campos)
@@ -220,8 +258,21 @@ class DatabaseManager:
 
         # Commit das mudanças
         self.conn.commit()
-
     
+    def fechar_conexao(self):
+        """Fecha a conexão com o banco de dados"""
+        try:
+            if hasattr(self, 'conn') and self.conn:
+                self.conn.close()
+                self.conn = None
+                self.conexao = None
+        except Exception as e:
+            print(f"Erro ao fechar conexão: {e}")
+
+    def __del__(self):
+        """Destrutor para garantir que a conexão seja fechada"""
+        self.fechar_conexao()
+
     # Métodos para Produtos (atualizados)
     def adicionar_produto(self, codigo_barras, nome, descricao, quantidade, estoque_minimo,
                 preco_compra, margem_lucro, preco_venda, 
