@@ -64,6 +64,13 @@ class EstoqueWindow(QWidget):
         self.vencimento_combo.addItem("Vencidos", "vencidos")
         filter_layout.addWidget(QLabel("Vencimento:"))
         filter_layout.addWidget(self.vencimento_combo)
+
+        # Filtro de categoria - REFATORADO
+        self.categoria_combo = QComboBox()
+        self.categoria_combo.addItem("Todas as categorias", "todas")
+        self.carregar_categorias()
+        filter_layout.addWidget(QLabel("Categoria:"))
+        filter_layout.addWidget(self.categoria_combo)
         
         # Botão de aplicar filtros
         self.aplicar_filtro_btn = QPushButton("Aplicar Filtros")
@@ -127,10 +134,34 @@ class EstoqueWindow(QWidget):
         action_layout.addWidget(self.relatorio_estoque_btn)
         layout.addLayout(action_layout)
     
+    def atualizar_categorias_filtro(self):
+        """Método público para atualizar as categorias do filtro quando um produto é adicionado/editado."""
+        categoria_selecionada = self.categoria_combo.currentData()  # Salvar seleção atual
+        self.carregar_categorias()
+        
+        # Tentar restaurar a seleção anterior
+        if categoria_selecionada and categoria_selecionada != "todas":
+            index = self.categoria_combo.findData(categoria_selecionada)
+            if index >= 0:
+                self.categoria_combo.setCurrentIndex(index)
+    
     def carregar_dados(self):
         """Carrega os produtos do banco de dados para a tabela."""
         produtos = self.db.listar_produtos_com_fracionamento()  # Usando novo método
         self.atualizar_tabela(produtos)
+        # Recarregar categorias para manter o filtro atualizado
+        self.carregar_categorias()
+
+    def carregar_categorias(self):
+        """Carrega as categorias existentes no combobox."""
+        # Limpar categorias existentes (exceto a primeira opção "Todas as categorias")
+        while self.categoria_combo.count() > 1:
+            self.categoria_combo.removeItem(1)
+        
+        categorias = self.db.listar_categorias_unicas()
+        for categoria in categorias:
+            if categoria and categoria.strip():  # Verifica se a categoria não está vazia ou só com espaços
+                self.categoria_combo.addItem(categoria, categoria)
     
     def pesquisar_produtos(self):
         """Pesquisa produtos pelo termo digitado."""
@@ -141,25 +172,84 @@ class EstoqueWindow(QWidget):
             produtos = self.db.listar_produtos_com_fracionamento()  # Usando novo método
         
         self.atualizar_tabela(produtos)
+        # Recarregar categorias após pesquisa para manter filtro atualizado
+        self.carregar_categorias()
     
     def aplicar_filtros(self):
         """Aplica os filtros selecionados."""
         filtro_estoque = self.estoque_combo.currentData()
         filtro_vencimento = self.vencimento_combo.currentData()
+        filtro_categoria = self.categoria_combo.currentData()
         
-        produtos = self.db.filtrar_produtos(filtro_estoque, filtro_vencimento)
-        self.atualizar_tabela(produtos)
+        # Obter produtos filtrados
+        produtos = self.db.listar_produtos_com_fracionamento()
+        
+        # Aplicar filtros manualmente
+        produtos_filtrados = []
+        hoje = datetime.now().date()
+        
+        for produto in produtos:
+            # Filtro de categoria
+            if filtro_categoria != "todas":
+                produto_categoria = produto['categoria'] if produto['categoria'] else ''
+                produto_categoria = produto_categoria.lower()
+                if not produto_categoria or produto_categoria != filtro_categoria.lower():
+                    continue
+            
+            # Filtro de estoque
+            if filtro_estoque != "todos":
+                estoque_atual = produto['estoque_total_calculado'] if produto['fracionado'] else produto['quantidade']
+                estoque_minimo = produto['estoque_minimo'] if produto['estoque_minimo'] else 0
+                
+                if filtro_estoque == "baixo" and estoque_atual > estoque_minimo:
+                    continue
+                elif filtro_estoque == "medio" and (estoque_atual <= estoque_minimo or estoque_atual > estoque_minimo * 2):
+                    continue
+                elif filtro_estoque == "alto" and estoque_atual <= estoque_minimo * 2:
+                    continue
+            
+            # Filtro de vencimento
+            if filtro_vencimento != "todos":
+                data_validade = produto['data_validade']
+                if not data_validade:
+                    if filtro_vencimento != "todos":
+                        continue
+                else:
+                    try:
+                        data_validade_obj = datetime.strptime(data_validade, "%Y-%m-%d").date()
+                        dias_para_vencer = (data_validade_obj - hoje).days
+                        
+                        if filtro_vencimento == "vencidos" and dias_para_vencer > 0:
+                            continue
+                        elif filtro_vencimento == "15" and (dias_para_vencer > 15 or dias_para_vencer <= 0):
+                            continue
+                        elif filtro_vencimento == "30" and (dias_para_vencer > 30 or dias_para_vencer <= 0):
+                            continue
+                    except:
+                        if filtro_vencimento != "todos":
+                            continue
+            
+            produtos_filtrados.append(produto)
+        
+        self.atualizar_tabela(produtos_filtrados)
     
     def limpar_filtros(self):
         """Limpa todos os filtros aplicados."""
         self.estoque_combo.setCurrentIndex(0)
         self.vencimento_combo.setCurrentIndex(0)
+        self.categoria_combo.setCurrentIndex(0)  # ADICIONADO
         self.search_input.clear()
         self.carregar_dados()
     
     def atualizar_tabela(self, produtos):
         """Atualiza a tabela com os produtos fornecidos."""
         self.tabela.setRowCount(0)
+        self.tabela.setColumnCount(13)  # Era 12, agora 13
+        self.tabela.setHorizontalHeaderLabels([
+            "ID", "Código de Barras", "Nome", "Categoria", "Estoque Detalhado", "Estoque Mín.", 
+            "Preço Compra", "Margem %", "Preço Venda", "Validade", 
+            "Localização", "Fornecedor", "Ações"  # NOVA COLUNA
+        ])
         
         hoje = datetime.now().date()
         
@@ -176,6 +266,10 @@ class EstoqueWindow(QWidget):
                 nome_produto += f" (Frac. - {produto['unidade_medida']})"
             nome_item = QTableWidgetItem(nome_produto)
             self.tabela.setItem(row, 2, nome_item)
+            
+            # NOVA COLUNA - Categoria
+            categoria_nome = produto['categoria'] if produto['categoria'] else "Sem categoria"
+            self.tabela.setItem(row, 3, QTableWidgetItem(categoria_nome))
             
             # Quantidade - mostrar detalhes se for fracionado
             if produto['fracionado']:
@@ -197,20 +291,20 @@ class EstoqueWindow(QWidget):
                 quantidade_item.setForeground(QBrush(QColor('red')))
                 quantidade_item.setToolTip(quantidade_item.toolTip() + "\nESTOQUE ABAIXO DO MÍNIMO!")
             
-            self.tabela.setItem(row, 3, quantidade_item)
-            self.tabela.setItem(row, 4, QTableWidgetItem(str(estoque_minimo)))
-            self.tabela.setItem(row, 5, QTableWidgetItem(f"R$ {produto['preco_compra']:.2f}"))
+            self.tabela.setItem(row, 4, quantidade_item)
+            self.tabela.setItem(row, 5, QTableWidgetItem(str(estoque_minimo)))
+            self.tabela.setItem(row, 6, QTableWidgetItem(f"R$ {produto['preco_compra']:.2f}"))
             
             # Margem de lucro
             margem = produto['margem_lucro'] or 0
-            self.tabela.setItem(row, 6, QTableWidgetItem(f"{margem:.2f}%"))
+            self.tabela.setItem(row, 7, QTableWidgetItem(f"{margem:.2f}%"))
             
             # Preço de venda - mostrar preço da embalagem e fração se aplicável
             if produto['fracionado'] and produto['preco_unitario_fracao']:
                 preco_display = f"Emb: R$ {produto['preco_venda']:.2f} | Un: R$ {produto['preco_unitario_fracao']:.2f}"
             else:
                 preco_display = f"R$ {produto['preco_venda']:.2f}"
-            self.tabela.setItem(row, 7, QTableWidgetItem(preco_display))
+            self.tabela.setItem(row, 8, QTableWidgetItem(preco_display))
             
             # Data de validade (mantém igual)
             validade_item = QTableWidgetItem(str(produto['data_validade'] or ""))
@@ -233,11 +327,11 @@ class EstoqueWindow(QWidget):
                 except:
                     pass
             
-            self.tabela.setItem(row, 8, validade_item)
-            self.tabela.setItem(row, 9, QTableWidgetItem(produto['localizacao'] or ""))
+            self.tabela.setItem(row, 9, validade_item)
+            self.tabela.setItem(row, 10, QTableWidgetItem(produto['localizacao'] or ""))
             
             fornecedor_nome = produto['fornecedor_nome'] if produto['fornecedor_nome'] else "N/A"
-            self.tabela.setItem(row, 10, QTableWidgetItem(fornecedor_nome))
+            self.tabela.setItem(row, 11, QTableWidgetItem(fornecedor_nome))
             
             # Botões de ação - adicionar botão para quebrar embalagem se for fracionado
             acoes_widget = QWidget()
@@ -260,7 +354,8 @@ class EstoqueWindow(QWidget):
                 quebrar_btn.clicked.connect(lambda _, p_id=produto['id']: self.abrir_dialog_quebrar_embalagem(p_id))
                 acoes_layout.addWidget(quebrar_btn)
             
-            self.tabela.setCellWidget(row, 11, acoes_widget)
+            # Botões de ação agora na coluna 12 (última coluna)
+            self.tabela.setCellWidget(row, 12, acoes_widget)
     
     def abrir_dialog_quebrar_embalagem(self, produto_id):
         """Abre diálogo para quebrar embalagens em unidades fracionadas."""
@@ -801,11 +896,16 @@ class FormularioProduto(QDialog):
         
         self.fornecedor_combo = QComboBox()
         self.carregar_fornecedores()
+
+        self.categoria_combo = QComboBox()
+        self.categoria_combo.setEditable(True)  # Permite criar nova categoria
+        self.carregar_categorias()
         
         # Adicionar campos ao formulário
         form_layout.addRow("Código de Barras:", self.codigo_barras_input)
         form_layout.addRow("Nome:", self.nome_input)
         form_layout.addRow("Descrição:", self.descricao_input)
+        form_layout.addRow("Categoria:", self.categoria_combo)
         form_layout.addRow("Quantidade:", self.quantidade_input)
         form_layout.addRow("Estoque Mínimo:", self.estoque_minimo_input)
         form_layout.addRow("Preço de Compra:", self.preco_compra_input)
@@ -842,6 +942,15 @@ class FormularioProduto(QDialog):
         button_layout.addWidget(self.cancelar_btn)
         
         layout.addLayout(button_layout)
+    
+    def carregar_categorias(self):
+        """Carrega as categorias existentes no combobox."""
+        self.categoria_combo.clear()
+        self.categoria_combo.addItem("Selecione uma categoria", "")
+        
+        categorias = self.db.listar_categorias_unicas()
+        for categoria in categorias:
+            self.categoria_combo.addItem(categoria, categoria)
     
     def toggle_campos_fracionado(self):
         """Habilita/desabilita campos de fracionamento baseado no checkbox."""
@@ -937,6 +1046,16 @@ class FormularioProduto(QDialog):
             index = self.fornecedor_combo.findData(self.produto['fornecedor_id'])
             if index != -1:
                 self.fornecedor_combo.setCurrentIndex(index)
+        
+        # Após carregar o fornecedor:
+        if self.produto['categoria']:
+            index = self.categoria_combo.findText(self.produto['categoria'])
+            if index != -1:
+                self.categoria_combo.setCurrentIndex(index)
+            else:
+                # Se a categoria não existe na lista, adiciona ela
+                self.categoria_combo.addItem(self.produto['categoria'], self.produto['categoria'])
+                self.categoria_combo.setCurrentText(self.produto['categoria'])
     
     def salvar_produto(self):
         """Salva os dados do produto no banco de dados."""
@@ -973,9 +1092,12 @@ class FormularioProduto(QDialog):
         preco_unitario_fracao = self.preco_unitario_fracao_input.value() if fracionado else None
         estoque_fracionado = self.estoque_fracionado_input.value() if fracionado else 0
         
+        categoria = self.categoria_combo.currentText().strip() if self.categoria_combo.currentText().strip() else None
+
         fornecedor_id = self.fornecedor_combo.currentData()
         if fornecedor_id == "":
             fornecedor_id = None
+        
         
         try:
             # Inserir ou atualizar produto
@@ -983,7 +1105,7 @@ class FormularioProduto(QDialog):
                 sucesso = self.db.atualizar_produto(
                     self.produto_id, codigo_barras, nome, descricao, quantidade, 
                     estoque_minimo, preco_compra, margem_lucro, preco_venda, 
-                    data_validade, localizacao, fornecedor_id,
+                    data_validade, localizacao, fornecedor_id, categoria,  # NOVO PARÂMETRO
                     fracionado, unidade_medida, qtd_por_embalagem, 
                     preco_unitario_fracao, estoque_fracionado
                 )
@@ -992,7 +1114,7 @@ class FormularioProduto(QDialog):
                 sucesso = self.db.adicionar_produto(
                     codigo_barras, nome, descricao, quantidade, estoque_minimo,
                     preco_compra, margem_lucro, preco_venda, data_validade, 
-                    localizacao, fornecedor_id,
+                    localizacao, fornecedor_id, categoria,  # NOVO PARÂMETRO
                     fracionado, unidade_medida, qtd_por_embalagem, 
                     preco_unitario_fracao, estoque_fracionado
                 )

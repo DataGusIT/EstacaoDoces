@@ -69,6 +69,7 @@ class DatabaseManager:
             data_validade DATE,
             localizacao TEXT,
             fornecedor_id INTEGER,
+            categoria TEXT,  -- NOVO CAMPO
             data_cadastro DATE DEFAULT CURRENT_DATE,
 
             -- Campos para controle de produtos fracionados
@@ -223,23 +224,23 @@ class DatabaseManager:
     
     # Métodos para Produtos (atualizados)
     def adicionar_produto(self, codigo_barras, nome, descricao, quantidade, estoque_minimo,
-                    preco_compra, margem_lucro, preco_venda, 
-                    data_validade, localizacao, fornecedor_id, 
-                    fracionado=False, unidade_medida="unidade", qtd_por_embalagem=1, 
-                    preco_unitario_fracao=None, estoque_fracionado=0):
-    
+                preco_compra, margem_lucro, preco_venda, 
+                data_validade, localizacao, fornecedor_id, categoria=None,  # NOVO PARÂMETRO
+                fracionado=False, unidade_medida="unidade", qtd_por_embalagem=1, 
+                preco_unitario_fracao=None, estoque_fracionado=0):
+
         self.cursor.execute('''
         INSERT INTO produtos (
             codigo_barras, nome, descricao, quantidade, estoque_minimo,
             preco_compra, margem_lucro, preco_venda, 
-            data_validade, localizacao, fornecedor_id,
+            data_validade, localizacao, fornecedor_id, categoria,
             fracionado, unidade_medida, qtd_por_embalagem, preco_unitario_fracao, estoque_fracionado
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             codigo_barras, nome, descricao, quantidade, estoque_minimo,
             preco_compra, margem_lucro, preco_venda, 
-            data_validade, localizacao, fornecedor_id,
+            data_validade, localizacao, fornecedor_id, categoria,
             1 if fracionado else 0, unidade_medida, qtd_por_embalagem, 
             preco_unitario_fracao, estoque_fracionado
         ))
@@ -248,22 +249,22 @@ class DatabaseManager:
 
     def atualizar_produto(self, id, codigo_barras, nome, descricao, quantidade, estoque_minimo,
                     preco_compra, margem_lucro, preco_venda, 
-                    data_validade, localizacao, fornecedor_id,
+                    data_validade, localizacao, fornecedor_id, categoria=None,  # NOVO PARÂMETRO
                     fracionado=False, unidade_medida="unidade", qtd_por_embalagem=1, 
                     preco_unitario_fracao=None, estoque_fracionado=0):
-    
+
         self.cursor.execute('''
         UPDATE produtos
         SET codigo_barras = ?, nome = ?, descricao = ?, quantidade = ?, estoque_minimo = ?,
             preco_compra = ?, margem_lucro = ?, preco_venda = ?,
-            data_validade = ?, localizacao = ?, fornecedor_id = ?,
+            data_validade = ?, localizacao = ?, fornecedor_id = ?, categoria = ?,
             fracionado = ?, unidade_medida = ?, qtd_por_embalagem = ?, 
             preco_unitario_fracao = ?, estoque_fracionado = ?
         WHERE id = ?
         ''', (
             codigo_barras, nome, descricao, quantidade, estoque_minimo,
             preco_compra, margem_lucro, preco_venda,
-            data_validade, localizacao, fornecedor_id,
+            data_validade, localizacao, fornecedor_id, categoria,
             1 if fracionado else 0, unidade_medida, qtd_por_embalagem, 
             preco_unitario_fracao, estoque_fracionado, id
         ))
@@ -278,6 +279,25 @@ class DatabaseManager:
     def obter_produto(self, id):
         self.cursor.execute('SELECT * FROM produtos WHERE id = ?', (id,))
         return self.cursor.fetchone()
+
+    def listar_produtos(self, filtro=None):
+        query = 'SELECT p.*, f.empresa as fornecedor_nome FROM produtos p LEFT JOIN fornecedores f ON p.fornecedor_id = f.id'
+        
+        if filtro:
+            query += f" WHERE p.nome LIKE '%{filtro}%' OR p.descricao LIKE '%{filtro}%' OR p.codigo_barras LIKE '%{filtro}%'"
+        
+        self.cursor.execute(query)
+        return self.cursor.fetchall()
+    
+    def listar_categorias_unicas(self):
+        """Retorna lista de categorias únicas dos produtos."""
+        self.cursor.execute('''
+        SELECT DISTINCT categoria 
+        FROM produtos 
+        WHERE categoria IS NOT NULL AND categoria != ''
+        ORDER BY categoria
+        ''')
+        return [row[0] for row in self.cursor.fetchall()]
 
     def verificar_produtos_vencidos(self):
         data_hoje = datetime.now().strftime('%Y-%m-%d')
@@ -302,15 +322,6 @@ class DatabaseManager:
         ORDER BY p.nome
         ''')
         
-        return self.cursor.fetchall()
-
-    def listar_produtos(self, filtro=None):
-        query = 'SELECT p.*, f.empresa as fornecedor_nome FROM produtos p LEFT JOIN fornecedores f ON p.fornecedor_id = f.id'
-        
-        if filtro:
-            query += f" WHERE p.nome LIKE '%{filtro}%' OR p.descricao LIKE '%{filtro}%' OR p.codigo_barras LIKE '%{filtro}%'"
-        
-        self.cursor.execute(query)
         return self.cursor.fetchall()
 
     def verificar_produtos_vencendo(self, dias=30):

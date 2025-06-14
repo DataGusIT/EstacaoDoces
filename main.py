@@ -39,6 +39,171 @@ class SessionManager:
         
         return False
 
+class AlertDialog(QDialog):
+    """Dialog customizado com efeitos visuais para alertas"""
+    
+    def __init__(self, parent, title, message, alert_type="info"):
+        super().__init__(parent)
+        self.alert_type = alert_type
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self.setup_ui(message)
+        self.setup_animation()
+        
+    def setup_ui(self, message):
+        from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit
+        
+        layout = QVBoxLayout()
+        
+        # Área de texto para a mensagem
+        self.text_area = QTextEdit()
+        self.text_area.setPlainText(message)
+        self.text_area.setReadOnly(True)
+        self.text_area.setMinimumSize(500, 300)
+        
+        # Definir cores baseadas no tipo de alerta
+        if self.alert_type == "critical":  # Produtos vencidos
+            self.bg_color = "#ffebee"  # Vermelho claro
+            self.border_color = "#f44336"  # Vermelho
+            self.pulse_color = "#ffcdd2"  # Vermelho mais claro
+        elif self.alert_type == "warning":  # Produtos vencendo
+            self.bg_color = "#fff8e1"  # Amarelo claro
+            self.border_color = "#ff9800"  # Laranja
+            self.pulse_color = "#ffe0b2"  # Laranja claro
+        elif self.alert_type == "stock":  # Estoque baixo
+            self.bg_color = "#e8f5e8"  # Verde claro
+            self.border_color = "#4caf50"  # Verde
+            self.pulse_color = "#c8e6c9"  # Verde mais claro
+        else:  # Info padrão
+            self.bg_color = "#e3f2fd"  # Azul claro
+            self.border_color = "#2196f3"  # Azul
+            self.pulse_color = "#bbdefb"  # Azul mais claro
+        
+        # Aplicar estilo inicial
+        self.apply_style(self.bg_color)
+        
+        layout.addWidget(self.text_area)
+        
+        # Botões
+        button_layout = QHBoxLayout()
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(self.accept)
+        ok_button.setMinimumHeight(35)
+        button_layout.addStretch()
+        button_layout.addWidget(ok_button)
+        
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+        
+    def apply_style(self, bg_color):
+        style = f"""
+        QDialog {{
+            background-color: {bg_color};
+            border: 3px solid {self.border_color};
+            border-radius: 10px;
+        }}
+        QTextEdit {{
+            background-color: white;
+            border: 2px solid {self.border_color};
+            border-radius: 5px;
+            padding: 10px;
+            font-size: 12px;
+            color: #333333;
+        }}
+        QPushButton {{
+            background-color: {self.border_color};
+            color: white;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 5px;
+            font-weight: bold;
+            font-size: 14px;
+        }}
+        QPushButton:hover {{
+            background-color: {self.pulse_color};
+            color: #333333;
+        }}
+        QDialog QLabel {{
+            color: #333333;
+        }}
+        """
+        self.setStyleSheet(style)
+    
+    def setup_animation(self):
+        # Só animar para alertas críticos e de aviso
+        if self.alert_type in ["critical", "warning"]:
+            self.timer = QTimer()
+            self.timer.timeout.connect(self.pulse_effect)
+            self.pulse_state = False
+            self.timer.start(800)  # Pulsar a cada 800ms
+    
+    def pulse_effect(self):
+        if self.pulse_state:
+            self.apply_style(self.bg_color)
+        else:
+            self.apply_style(self.pulse_color)
+        self.pulse_state = not self.pulse_state
+
+def verificar_produtos_alertas(window, db):
+    """Função separada para verificar produtos com problemas de validade e estoque"""
+    try:
+        # Verificar produtos vencidos
+        produtos_vencidos = db.verificar_produtos_vencidos()
+        produtos_vencendo = db.verificar_produtos_vencendo(dias=15)
+        produtos_estoque_baixo = db.verificar_produtos_estoque_baixo()
+        
+        # Debug: Verificar se há produtos para alertar
+        print(f"Produtos vencidos encontrados: {len(produtos_vencidos) if produtos_vencidos else 0}")
+        print(f"Produtos vencendo encontrados: {len(produtos_vencendo) if produtos_vencendo else 0}")
+        print(f"Produtos com estoque baixo: {len(produtos_estoque_baixo) if produtos_estoque_baixo else 0}")
+        
+        # Alertar produtos vencidos (CRÍTICO - vermelho piscando)
+        if produtos_vencidos:
+            msg = "🚨 ATENÇÃO: Os seguintes produtos estão VENCIDOS:\n\n"
+            for produto in produtos_vencidos:
+                msg += f"• {produto['nome']} - Vencimento: {produto['data_validade']}\n"
+            
+            msg += "\n⚠️ AÇÃO NECESSÁRIA: Remova estes produtos do estoque IMEDIATAMENTE!"
+            msg += "\n💀 Produtos vencidos podem causar problemas de saúde!"
+            
+            dialog = AlertDialog(window, "🚨 PRODUTOS VENCIDOS - AÇÃO URGENTE", msg, "critical")
+            dialog.exec_()
+        
+        # Alertar produtos vencendo (WARNING - amarelo piscando)
+        if produtos_vencendo:
+            msg = "⏰ Os seguintes produtos estão próximos do vencimento (15 dias):\n\n"
+            for produto in produtos_vencendo:
+                msg += f"• {produto['nome']} - Vencimento: {produto['data_validade']}\n"
+            
+            msg += "\n💡 SUGESTÃO: Considere fazer promoção destes produtos!"
+            msg += "\n📢 Ofereça desconto para evitar perdas!"
+            
+            dialog = AlertDialog(window, "⏰ Produtos Próximos do Vencimento", msg, "warning")
+            dialog.exec_()
+        
+        # Alertar estoque baixo (INFO - verde suave)
+        if produtos_estoque_baixo:
+            msg = "📦 Os seguintes produtos estão com estoque baixo:\n\n"
+            for produto in produtos_estoque_baixo:
+                # Corrigir acesso aos dados do sqlite3.Row
+                try:
+                    fornecedor = produto['fornecedor_nome'] if produto['fornecedor_nome'] else 'Não informado'
+                except (KeyError, TypeError):
+                    fornecedor = 'Não informado'
+                
+                msg += f"• {produto['nome']} - Estoque: {produto['quantidade']} (Mín: {produto['estoque_minimo']})\n"
+                msg += f"  Fornecedor: {fornecedor}\n\n"
+            
+            msg += "🛒 AÇÃO RECOMENDADA: Realizar pedido de reposição!"
+            msg += "\n📞 Entre em contato com os fornecedores listados."
+            
+            dialog = AlertDialog(window, "📦 Produtos com Estoque Baixo", msg, "stock")
+            dialog.exec_()
+            
+    except Exception as e:
+        print(f"Erro ao verificar produtos: {str(e)}")
+        QMessageBox.critical(window, "Erro", f"Erro ao verificar produtos: {str(e)}")
+
 def on_login_success(usuario):
     """Função para lidar com o login bem-sucedido"""
     # Salvar informações do usuário logado
@@ -51,23 +216,9 @@ def on_login_success(usuario):
     window.setup_for_user(usuario)  # Configurar interface para o usuário
     window.show()
     
-    # Verificar produtos vencidos ou prestes a vencer ao iniciar
-    produtos_vencidos = db.verificar_produtos_vencidos()
-    produtos_vencendo = db.verificar_produtos_vencendo(dias=15)
-    
-    if produtos_vencidos:
-        msg = "Os seguintes produtos estão vencidos:\n\n"
-        for produto in produtos_vencidos:
-            msg += f"• {produto['nome']} - Vencimento: {produto['data_validade']}\n"
-        
-        QMessageBox.warning(window, "Produtos Vencidos", msg)
-    
-    if produtos_vencendo:
-        msg = "Os seguintes produtos estão próximos do vencimento:\n\n"
-        for produto in produtos_vencendo:
-            msg += f"• {produto['nome']} - Vencimento: {produto['data_validade']}\n"
-        
-        QMessageBox.information(window, "Produtos Próximos do Vencimento", msg)
+    # Aguardar um pouco para a janela ser totalmente carregada
+    # antes de mostrar os alertas
+    QTimer.singleShot(500, lambda: verificar_produtos_alertas(window, db))
 
 if __name__ == "__main__":
     # Iniciar aplicação
