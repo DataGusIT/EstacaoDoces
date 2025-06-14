@@ -1,8 +1,9 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                              QPushButton, QMessageBox, QCheckBox, QFormLayout, QFrame,
                              QGraphicsDropShadowEffect, QSizePolicy)
-from PyQt5.QtCore import Qt, pyqtSignal, QSize
+from PyQt5.QtCore import Qt, pyqtSignal, QSize, QSettings
 from PyQt5.QtGui import QIcon, QPixmap, QColor, QFont
+import base64
 
 class LoginWindow(QDialog):
     # Definir sinal para login bem-sucedido
@@ -14,7 +15,12 @@ class LoginWindow(QDialog):
         self.db = db_manager
         self.usuario = None
         self.offset = None
+        
+        # Configurações para salvar dados do usuário
+        self.settings = QSettings("SuaEmpresa", "SeuERP")
+        
         self.init_ui()
+        self.load_saved_credentials()
     
     def init_ui(self):
         """Inicializa a interface de usuário"""
@@ -243,6 +249,51 @@ class LoginWindow(QDialog):
         # Focar no campo de login
         self.login_edit.setFocus()
     
+    def load_saved_credentials(self):
+        """Carrega as credenciais salvas se existirem"""
+        # Verifica se há credenciais salvas
+        if self.settings.value("remember_user", False, type=bool):
+            saved_username = self.settings.value("username", "")
+            saved_password = self.settings.value("password", "")
+            
+            if saved_username and saved_password:
+                # Decodifica a senha (simples codificação base64)
+                try:
+                    decoded_password = base64.b64decode(saved_password.encode()).decode()
+                    
+                    # Preenche os campos
+                    self.login_edit.setText(saved_username)
+                    self.senha_edit.setText(decoded_password)
+                    self.remember_checkbox.setChecked(True)
+                    
+                    # Atualiza o estado do botão
+                    self.validate_inputs()
+                    
+                    # Se há credenciais salvas, foca no botão de login
+                    self.login_button.setFocus()
+                    
+                except Exception as e:
+                    # Se houver erro na decodificação, limpa as credenciais salvas
+                    self.clear_saved_credentials()
+    
+    def save_credentials(self, username, password):
+        """Salva as credenciais do usuário"""
+        if self.remember_checkbox.isChecked():
+            # Codifica a senha (simples codificação base64)
+            encoded_password = base64.b64encode(password.encode()).decode()
+            
+            self.settings.setValue("remember_user", True)
+            self.settings.setValue("username", username)
+            self.settings.setValue("password", encoded_password)
+        else:
+            self.clear_saved_credentials()
+    
+    def clear_saved_credentials(self):
+        """Remove as credenciais salvas"""
+        self.settings.setValue("remember_user", False)
+        self.settings.remove("username")
+        self.settings.remove("password")
+    
     # Implementar função para permitir arrastar a janela
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -278,13 +329,20 @@ class LoginWindow(QDialog):
             # Login bem-sucedido
             self.usuario = usuario
             
+            # Salvar credenciais se solicitado
+            self.save_credentials(login, senha)
+            
             # Emitir sinal de login bem-sucedido
             self.login_success_signal.emit(usuario)
             
             # Aceitar o diálogo (fecha com status de sucesso)
             self.accept()
         else:
-            # Login falhou
+            # Login falhou - limpar credenciais salvas se houver
+            if self.settings.value("remember_user", False, type=bool):
+                self.clear_saved_credentials()
+                self.remember_checkbox.setChecked(False)
+            
             error_dialog = QMessageBox(self)
             error_dialog.setWindowTitle("Não foi possível entrar")
             error_dialog.setText("Usuário ou senha incorretos.")
