@@ -2,7 +2,6 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdi
                              QPushButton, QMessageBox, QFormLayout, QComboBox,
                              QCheckBox, QGroupBox, QRadioButton, QButtonGroup)
 from PyQt5.QtCore import Qt
-import hashlib
 
 class UserDialogWindow(QDialog):
     """Diálogo para adicionar ou editar usuários"""
@@ -199,11 +198,10 @@ class UserDialogWindow(QDialog):
                 if not senha_result:
                     QMessageBox.warning(self, "Aviso", f"Dados salvos, mas houve um erro ao alterar a senha: {senha_message}")
         else:
-            # Adicionar novo usuário
+            # Adicionar novo usuário - senha sem hash
             senha = self.senha_edit.text()
-            senha_hash = hashlib.sha256(senha.encode()).hexdigest()
             
-            result, message = self.db.cadastrar_usuario(nome, login, senha_hash, email, tipo)
+            result, message = self.db.cadastrar_usuario(nome, login, senha, email, tipo)
         
         if result:
             QMessageBox.information(self, "Sucesso", message)

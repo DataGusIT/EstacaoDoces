@@ -55,13 +55,15 @@ class DatabaseManager:
     
     def buscar_produto_por_codigo_barras(self, codigo_barras):
         """Busca produto por código de barras."""
-        cursor = self.conexao.cursor()
+        # CORREÇÃO: usar self.conn ao invés de self.conexao
+        cursor = self.conn.cursor()
         cursor.execute("SELECT * FROM produtos WHERE codigo_barras = ?", (codigo_barras,))
         return cursor.fetchone()
 
     def buscar_produto_por_nome_exato(self, nome):
         """Busca produto por nome exato."""
-        cursor = self.conexao.cursor()
+        # CORREÇÃO: usar self.conn ao invés de self.conexao
+        cursor = self.conn.cursor()
         cursor.execute("SELECT * FROM produtos WHERE LOWER(nome) = LOWER(?)", (nome,))
         return cursor.fetchone()
     

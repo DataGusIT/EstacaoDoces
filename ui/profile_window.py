@@ -1,41 +1,47 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
                              QLineEdit, QPushButton, QMessageBox, QWidget, 
-                             QSizePolicy, QSpacerItem, QScrollArea)
+                             QSizePolicy, QSpacerItem, QScrollArea, QFrame)
 from PyQt5.QtGui import QFont, QPainter, QColor, QBrush, QRegExpValidator, QLinearGradient
 from PyQt5.QtCore import Qt, QRegExp
 
-class ModernLineEdit(QLineEdit):
-    """Campo de texto moderno estilo Apple"""
+class MinimalLineEdit(QLineEdit):
+    """Campo de texto minimalista"""
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setup_style()
         
     def setup_style(self):
-        self.setFixedHeight(48)
+        self.setFixedHeight(56)
         self.setStyleSheet("""
             QLineEdit {
-                padding: 12px 16px;
-                border: none;
-                border-radius: 12px;
-                background-color: #f5f5f7;
+                padding: 16px 20px;
+                border: 1px solid #e8e8ed;
+                border-radius: 16px;
+                background-color: #ffffff;
                 color: #1d1d1f;
                 font-size: 16px;
+                font-weight: 400;
                 font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
-                selection-background-color: #06c;
+                selection-background-color: #007AFF;
             }
             QLineEdit:focus {
-                background-color: #ebebeb;
+                border: 2px solid #007AFF;
+                background-color: #ffffff;
                 outline: none;
             }
             QLineEdit:read-only {
-                background-color: #f0f0f0;
-                color: #86868b;
+                background-color: #fbfbfd;
+                border: 1px solid #f2f2f7;
+                color: #8e8e93;
+            }
+            QLineEdit::placeholder {
+                color: #c7c7cc;
             }
         """)
 
-class FieldGroup(QWidget):
-    """Grupo de campo com label estilo Apple"""
+class MinimalFieldGroup(QWidget):
+    """Grupo de campo minimalista"""
     
     def __init__(self, label_text, input_widget):
         super().__init__()
@@ -44,25 +50,29 @@ class FieldGroup(QWidget):
     def setup_ui(self, label_text, input_widget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(10)  # Aumentado de 8 para 10
         
         # Label
         label = QLabel(label_text)
         label.setStyleSheet("""
             QLabel {
-                color: #86868b;
-                font-size: 14px;
+                color: #1d1d1f;
+                font-size: 15px;
                 font-weight: 500;
                 padding-left: 4px;
+                padding-top: 4px;
+                padding-bottom: 6px;
                 font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
             }
         """)
+        label.setMinimumHeight(28)  # Aumentado de 24 para 28
+        label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         
         layout.addWidget(label)
         layout.addWidget(input_widget)
 
-class ModernButton(QPushButton):
-    """Botão moderno estilo Apple"""
+class MinimalButton(QPushButton):
+    """Botão minimalista"""
     
     def __init__(self, text, button_type="primary"):
         super().__init__(text)
@@ -70,59 +80,61 @@ class ModernButton(QPushButton):
         self.setup_style()
         
     def setup_style(self):
-        self.setFixedHeight(50)
+        self.setFixedHeight(56)
         self.setCursor(Qt.PointingHandCursor)
         
         if self.button_type == "primary":
             self.setStyleSheet("""
                 QPushButton {
-                    background-color: #007AFF;
+                    background-color: #1d1d1f;
                     color: white;
                     border: none;
-                    border-radius: 12px;
-                    font-weight: 600;
-                    font-size: 16px;
-                    font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
-                }
-                QPushButton:hover {
-                    background-color: #0056b3;
-                }
-                QPushButton:pressed {
-                    background-color: #004494;
-                }
-                QPushButton:disabled {
-                    background-color: #c7c7cc;
-                    color: #ffffff;
-                }
-            """)
-        elif self.button_type == "secondary":
-            self.setStyleSheet("""
-                QPushButton {
-                    background-color: #f2f2f7;
-                    color: #007AFF;
-                    border: none;
-                    border-radius: 12px;
+                    border-radius: 16px;
                     font-weight: 500;
                     font-size: 16px;
                     font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
                 }
                 QPushButton:hover {
-                    background-color: #e5e5ea;
+                    background-color: #2c2c2e;
                 }
                 QPushButton:pressed {
-                    background-color: #d1d1d6;
+                    background-color: #48484a;
+                }
+                QPushButton:disabled {
+                    background-color: #f2f2f7;
+                    color: #c7c7cc;
+                }
+            """)
+        elif self.button_type == "secondary":
+            self.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    color: #8e8e93;
+                    border: 1px solid #e8e8ed;
+                    border-radius: 16px;
+                    font-weight: 500;
+                    font-size: 16px;
+                    font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+                }
+                QPushButton:hover {
+                    background-color: #f9f9f9;
+                    color: #1d1d1f;
+                    border: 1px solid #d1d1d6;
+                }
+                QPushButton:pressed {
+                    background-color: #f2f2f7;
                 }
             """)
         elif self.button_type == "close":
-            self.setFixedSize(32, 32)
+            self.setFixedSize(40, 40)
             self.setStyleSheet("""
                 QPushButton {
                     background-color: transparent;
                     color: #8e8e93;
                     border: none;
-                    border-radius: 16px;
-                    font-size: 18px;
-                    font-weight: 400;
+                    border-radius: 20px;
+                    font-size: 16px;
+                    font-weight: 300;
                     font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
                 }
                 QPushButton:hover {
@@ -131,8 +143,8 @@ class ModernButton(QPushButton):
                 }
             """)
 
-class ProfileCard(QWidget):
-    """Card do perfil do usuário"""
+class MinimalAvatar(QWidget):
+    """Avatar minimalista"""
     
     def __init__(self, usuario):
         super().__init__()
@@ -140,78 +152,38 @@ class ProfileCard(QWidget):
         self.setup_ui()
         
     def setup_ui(self):
-        self.setFixedHeight(80)
+        self.setFixedSize(80, 80)
         
-        layout = QHBoxLayout(self)
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(16)
+        layout.setAlignment(Qt.AlignCenter)
         
-        # Avatar
-        avatar_container = self.create_avatar()
-        
-        # Informações do usuário
-        info_container = self.create_user_info()
-        
-        layout.addWidget(avatar_container)
-        layout.addWidget(info_container, 1)
-        
-    def create_avatar(self):
+        # Container do avatar
         avatar_container = QWidget()
-        avatar_container.setFixedSize(64, 64)
-        
-        # Círculo do avatar
-        avatar_circle = QWidget(avatar_container)
-        avatar_circle.setFixedSize(64, 64)
-        avatar_circle.setStyleSheet("""
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
-                                      stop:0 #007AFF, stop:1 #0056b3);
-            border-radius: 32px;
+        avatar_container.setFixedSize(80, 80)
+        avatar_container.setStyleSheet("""
+            background-color: #f2f2f7;
+            border-radius: 40px;
+            border: 3px solid #ffffff;
         """)
         
         # Iniciais
         iniciais = "".join([nome[0].upper() for nome in self.usuario['nome'].split()[:2]])
-        iniciais_label = QLabel(iniciais, avatar_circle)
-        iniciais_label.setFont(QFont("SF Pro Display", 20, QFont.Bold))
+        iniciais_label = QLabel(iniciais, avatar_container)
+        iniciais_label.setFont(QFont("SF Pro Display", 24, QFont.Medium))
         iniciais_label.setStyleSheet("""
-            color: white;
+            color: #8e8e93;
+            background-color: transparent;
+            border: none;
             font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
         """)
         iniciais_label.setAlignment(Qt.AlignCenter)
-        iniciais_label.resize(avatar_circle.size())
+        iniciais_label.resize(avatar_container.size())
         
-        return avatar_container
-        
-    def create_user_info(self):
-        info_container = QWidget()
-        layout = QVBoxLayout(info_container)
-        layout.setContentsMargins(0, 8, 0, 8)
-        layout.setSpacing(4)
-        
-        # Nome
-        nome_label = QLabel(self.usuario['nome'])
-        nome_label.setStyleSheet("""
-            font-size: 20px;
-            font-weight: 600;
-            color: #1d1d1f;
-            font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
-        """)
-        
-        # Tipo de usuário
-        tipo_label = QLabel(f"{self.usuario['tipo'].capitalize()} • @{self.usuario['login']}")
-        tipo_label.setStyleSheet("""
-            font-size: 14px;
-            color: #8e8e93;
-            font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
-        """)
-        
-        layout.addWidget(nome_label)
-        layout.addWidget(tipo_label)
-        layout.addStretch()
-        
-        return info_container
+        layout.addWidget(avatar_container)
 
 class ProfileWindow(QDialog):
-    """Janela de perfil com design limpo e moderno"""
+    """Janela de perfil minimalista"""
     
     def __init__(self, db, usuario):
         super().__init__()
@@ -222,18 +194,15 @@ class ProfileWindow(QDialog):
         
     def setup_window(self):
         self.setWindowTitle("Perfil")
-        self.setFixedSize(480, 720)
+        self.setFixedSize(520, 740)  # Aumentado de 720 para 740
         self.setModal(True)
         
         # Estilo da janela
         self.setStyleSheet("""
             QDialog {
                 background-color: #ffffff;
-                border-radius: 16px;
-            }
-            QLabel {
-                color: #1d1d1f;
-                font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+                border: 1px solid #e8e8ed;
+                border-radius: 20px;
             }
         """)
         
@@ -243,60 +212,34 @@ class ProfileWindow(QDialog):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
-        # Header com botão de fechar
+        # Header
         header_widget = self.create_header()
         main_layout.addWidget(header_widget)
         
-        # Scroll area para o conteúdo
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setStyleSheet("""
-            QScrollArea {
-                border: none;
-                background-color: transparent;
-            }
-            QScrollBar:vertical {
-                background-color: transparent;
-                width: 8px;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:vertical {
-                background-color: #c7c7cc;
-                border-radius: 4px;
-                min-height: 20px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background-color: #aeaeb2;
-            }
-        """)
-        
         # Conteúdo principal
         content_widget = self.create_content()
-        scroll_area.setWidget(content_widget)
-        
-        main_layout.addWidget(scroll_area)
+        main_layout.addWidget(content_widget)
         
     def create_header(self):
         header_widget = QWidget()
-        header_widget.setFixedHeight(60)
-        header_widget.setStyleSheet("background-color: #ffffff; border-bottom: 1px solid #f2f2f7;")
+        header_widget.setFixedHeight(80)
+        header_widget.setStyleSheet("background-color: transparent;")
         
         layout = QHBoxLayout(header_widget)
-        layout.setContentsMargins(20, 14, 20, 14)
+        layout.setContentsMargins(32, 20, 32, 20)
         
-        # Título do header
-        title_label = QLabel("Meu Perfil")
+        # Título minimalista
+        title_label = QLabel("Perfil")
         title_label.setStyleSheet("""
-            font-size: 18px;
+            font-size: 28px;
             font-weight: 600;
             color: #1d1d1f;
+            background-color: transparent;
             font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
         """)
         
-        # Botão de fechar
-        close_button = ModernButton("✕", "close")
+        # Botão de fechar minimalista
+        close_button = MinimalButton("✕", "close")
         close_button.clicked.connect(self.reject)
         
         layout.addWidget(title_label)
@@ -308,68 +251,81 @@ class ProfileWindow(QDialog):
     def create_content(self):
         content_widget = QWidget()
         layout = QVBoxLayout(content_widget)
-        layout.setContentsMargins(24, 32, 24, 32)
+        layout.setContentsMargins(32, 0, 32, 32)
         layout.setSpacing(0)
         
-        # Subtítulo
-        subtitle_label = QLabel("Gerencie suas informações pessoais")
-        subtitle_label.setStyleSheet("""
-            font-size: 16px;
-            color: #8e8e93;
+        # Avatar centralizado
+        avatar_layout = QHBoxLayout()
+        avatar_layout.setAlignment(Qt.AlignCenter)
+        avatar = MinimalAvatar(self.usuario)
+        avatar_layout.addWidget(avatar)
+        layout.addLayout(avatar_layout)
+        
+        # Espaçamento
+        layout.addItem(QSpacerItem(20, 16, QSizePolicy.Minimum, QSizePolicy.Fixed))
+        
+        # Nome do usuário centralizado
+        name_label = QLabel(self.usuario['nome'])
+        name_label.setStyleSheet("""
+            font-size: 24px;
+            font-weight: 600;
+            color: #1d1d1f;
+            background-color: transparent;
             font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
         """)
-        subtitle_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(subtitle_label)
+        name_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(name_label)
+        
+        # Tipo de usuário
+        tipo_label = QLabel(f"{self.usuario['tipo'].capitalize()}")
+        tipo_label.setStyleSheet("""
+            font-size: 16px;
+            color: #8e8e93;
+            background-color: transparent;
+            font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
+        """)
+        tipo_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(tipo_label)
         
         # Espaçamento
-        layout.addItem(QSpacerItem(20, 32, QSizePolicy.Minimum, QSizePolicy.Fixed))
-        
-        # Card do perfil
-        profile_card = ProfileCard(self.usuario)
-        layout.addWidget(profile_card)
-        
-        # Espaçamento
-        layout.addItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Fixed))
+        layout.addItem(QSpacerItem(20, 32, QSizePolicy.Minimum, QSizePolicy.Fixed))  # Reduzido de 48 para 32
         
         # Formulário
         form_layout = self.create_form()
         layout.addLayout(form_layout)
         
         # Espaçamento
-        layout.addItem(QSpacerItem(20, 32, QSizePolicy.Minimum, QSizePolicy.Fixed))
+        layout.addItem(QSpacerItem(20, 24, QSizePolicy.Minimum, QSizePolicy.Fixed))  # Reduzido de 32 para 24
         
         # Botões
         buttons_layout = self.create_buttons()
         layout.addLayout(buttons_layout)
         
-        # Espaçamento final
-        layout.addItem(QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Fixed))
-        
         return content_widget
         
     def create_form(self):
         layout = QVBoxLayout()
-        layout.setSpacing(24)
+        layout.setSpacing(28)  # Aumentado de 24 para 28
         
         # Campo Nome
-        self.name_edit = ModernLineEdit(self.usuario['nome'])
+        self.name_edit = MinimalLineEdit(self.usuario['nome'])
         self.name_edit.setPlaceholderText("Digite seu nome completo")
-        name_field = FieldGroup("Nome", self.name_edit)
+        name_field = MinimalFieldGroup("Nome", self.name_edit)
         
         # Campo Login (somente leitura)
-        self.login_edit = ModernLineEdit(self.usuario['login'])
+        self.login_edit = MinimalLineEdit(f"@{self.usuario['login']}")
         self.login_edit.setReadOnly(True)
-        login_field = FieldGroup("Nome de usuário", self.login_edit)
+        login_field = MinimalFieldGroup("Nome de usuário", self.login_edit)
         
         # Campo Email
-        self.email_edit = ModernLineEdit(self.usuario.get('email', ''))
+        self.email_edit = MinimalLineEdit(self.usuario.get('email', ''))
         self.email_edit.setPlaceholderText("seu.email@exemplo.com")
         
         # Validação do email
         email_regex = QRegExp(r"[^@]+@[^@]+\.[a-zA-Z]{2,}")
         email_validator = QRegExpValidator(email_regex)
         self.email_edit.setValidator(email_validator)
-        email_field = FieldGroup("E-mail", self.email_edit)
+        email_field = MinimalFieldGroup("E-mail", self.email_edit)
         
         layout.addWidget(name_field)
         layout.addWidget(login_field)
@@ -379,23 +335,29 @@ class ProfileWindow(QDialog):
         
     def create_buttons(self):
         layout = QVBoxLayout()
-        layout.setSpacing(12)
+        layout.setSpacing(16)
         
         # Botão salvar (primário)
-        self.save_button = ModernButton("Salvar Alterações", "primary")
+        self.save_button = MinimalButton("Salvar", "primary")
         self.save_button.clicked.connect(self.save_profile)
         
-        # Botão alterar senha (secundário)
-        self.change_password_button = ModernButton("Alterar Senha", "secondary")
+        # Layout horizontal para botões secundários
+        secondary_layout = QHBoxLayout()
+        secondary_layout.setSpacing(16)
+        
+        # Botão alterar senha
+        self.change_password_button = MinimalButton("Alterar Senha", "secondary")
         self.change_password_button.clicked.connect(self.open_change_password)
         
-        # Botão cancelar (secundário)
-        self.cancel_button = ModernButton("Cancelar", "secondary")
+        # Botão cancelar
+        self.cancel_button = MinimalButton("Cancelar", "secondary")
         self.cancel_button.clicked.connect(self.reject)
         
+        secondary_layout.addWidget(self.change_password_button)
+        secondary_layout.addWidget(self.cancel_button)
+        
         layout.addWidget(self.save_button)
-        layout.addWidget(self.change_password_button)
-        layout.addWidget(self.cancel_button)
+        layout.addLayout(secondary_layout)
         
         return layout
         
@@ -437,7 +399,7 @@ class ProfileWindow(QDialog):
         password_dialog.exec_()
     
     def show_message(self, title, message, icon=QMessageBox.Information):
-        """Exibir mensagem personalizada"""
+        """Exibir mensagem minimalista"""
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle(title)
         msg_box.setText(message)
@@ -446,22 +408,23 @@ class ProfileWindow(QDialog):
             QMessageBox {
                 background-color: #ffffff;
                 color: #1d1d1f;
-                border-radius: 12px;
+                border: 1px solid #e8e8ed;
+                border-radius: 16px;
                 font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
             }
             QMessageBox QPushButton {
-                background-color: #007AFF;
+                background-color: #1d1d1f;
                 color: white;
                 border: none;
-                border-radius: 8px;
-                padding: 8px 16px;
+                border-radius: 12px;
+                padding: 12px 24px;
                 min-width: 80px;
                 font-weight: 500;
                 font-size: 14px;
                 font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue";
             }
             QMessageBox QPushButton:hover {
-                background-color: #0056b3;
+                background-color: #2c2c2e;
             }
         """)
         msg_box.exec_()

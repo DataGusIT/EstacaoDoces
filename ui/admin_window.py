@@ -156,12 +156,26 @@ class AdminWindow(QDialog):
     
     def adicionar_usuario(self):
         """Abre o diálogo para adicionar um novo usuário"""
-        from ui.user_dialog_window import UserDialogWindow
+        try:
+            # Tenta importar primeiro com o nome correto
+            from ui.user_dialog_window import UserDialogWindow
+            dialog = UserDialogWindow(self.db)
+        except ImportError:
+            try:
+                # Se não funcionar, tenta com nome alternativo
+                from ui.user_dialog_window import UserDialog
+                dialog = UserDialog(self.db)
+            except ImportError:
+                QMessageBox.critical(self, "Erro", 
+                    "Não foi possível encontrar o diálogo de usuário.\n"
+                    "Verifique se o arquivo ui/user_dialog_window.py existe e "
+                    "contém a classe UserDialogWindow ou UserDialog.")
+                return
         
-        dialog = UserDialogWindow(self.db)
-        if dialog.exec_():
-            # Se usuário foi adicionado, atualizar lista
+        if dialog.exec_() == QDialog.Accepted:
+            # Se usuário foi adicionado com sucesso, atualizar lista
             self.carregar_usuarios()
+            QMessageBox.information(self, "Sucesso", "Usuário adicionado com sucesso!")
     
     def editar_usuario(self):
         """Edita o usuário selecionado"""
@@ -176,12 +190,25 @@ class AdminWindow(QDialog):
         user_id = int(self.usuarios_table.item(row, 0).text())
         
         # Abrir diálogo de edição
-        from ui.user_dialog_window import UserDialog
+        try:
+            # Tenta importar primeiro com o nome correto
+            from ui.user_dialog_window import UserDialogWindow
+            dialog = UserDialogWindow(self.db, user_id)
+        except ImportError:
+            try:
+                # Se não funcionar, tenta com nome alternativo
+                from ui.user_dialog_window import UserDialog
+                dialog = UserDialog(self.db, user_id)
+            except ImportError:
+                QMessageBox.critical(self, "Erro", 
+                    "Não foi possível encontrar o diálogo de usuário.\n"
+                    "Verifique se o arquivo ui/user_dialog_window.py existe.")
+                return
         
-        dialog = UserDialog(self.db, user_id)
-        if dialog.exec_():
+        if dialog.exec_() == QDialog.Accepted:
             # Se usuário foi editado, atualizar lista
             self.carregar_usuarios()
+            QMessageBox.information(self, "Sucesso", "Usuário atualizado com sucesso!")
     
     def excluir_usuario(self):
         """Exclui o usuário selecionado"""
@@ -196,17 +223,25 @@ class AdminWindow(QDialog):
         user_id = int(self.usuarios_table.item(row, 0).text())
         user_name = self.usuarios_table.item(row, 1).text()
         
+        # Não permitir exclusão do próprio usuário admin
+        if user_id == self.usuario['id']:
+            QMessageBox.warning(self, "Aviso", "Você não pode excluir seu próprio usuário.")
+            return
+        
         # Confirmar exclusão
         reply = QMessageBox.question(self, "Confirmar Exclusão", 
                                     f"Deseja realmente excluir o usuário '{user_name}'?",
                                     QMessageBox.Yes | QMessageBox.No)
         
         if reply == QMessageBox.Yes:
-            # Excluir o usuário
-            resultado, mensagem = self.db.excluir_usuario(user_id)
-            
-            if resultado:
-                QMessageBox.information(self, "Sucesso", mensagem)
-                self.carregar_usuarios()
-            else:
-                QMessageBox.critical(self, "Erro", mensagem)
+            try:
+                # Excluir o usuário
+                resultado, mensagem = self.db.excluir_usuario(user_id)
+                
+                if resultado:
+                    QMessageBox.information(self, "Sucesso", mensagem)
+                    self.carregar_usuarios()
+                else:
+                    QMessageBox.critical(self, "Erro", mensagem)
+            except Exception as e:
+                QMessageBox.critical(self, "Erro", f"Erro ao excluir usuário: {str(e)}")

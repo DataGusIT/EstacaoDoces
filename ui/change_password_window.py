@@ -12,7 +12,7 @@ class ChangePasswordWindow(QDialog):
         self.usuario_id = usuario_id
         self.dark_mode = dark_mode
         self.setWindowTitle("Alterar Senha")
-        self.setFixedSize(460, 380)  # Aumentei o tamanho da janela
+        self.setFixedSize(480, 420)  # Tamanho ajustado para comportar melhor o conteúdo
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         
         # Definir cores conforme o tema
@@ -41,8 +41,8 @@ class ChangePasswordWindow(QDialog):
     def setup_ui(self):
         # Layout principal
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(18)  # Reduzi um pouco o espaçamento
-        main_layout.setContentsMargins(30, 30, 30, 30)
+        main_layout.setSpacing(12)  # Reduzir espaçamento geral
+        main_layout.setContentsMargins(25, 25, 25, 25)  # Margens menores
         
         # Estilo geral da janela
         self.setStyleSheet(f"""
@@ -56,24 +56,26 @@ class ChangePasswordWindow(QDialog):
         
         # Título
         title_label = QLabel("Alterar Senha")
-        title_label.setFont(QFont("SF Pro Display", 22, QFont.DemiBold))
+        title_label.setFont(QFont("SF Pro Display", 20, QFont.DemiBold))  # Fonte menor
         title_label.setAlignment(Qt.AlignLeft)
-        title_label.setStyleSheet(f"color: {self.text_color}; margin-bottom: 5px;")
+        title_label.setStyleSheet(f"color: {self.text_color}; margin-bottom: 2px;")
         main_layout.addWidget(title_label)
         
         # Subtítulo
         subtitle = QLabel("Configure uma nova senha para sua conta")
-        subtitle.setFont(QFont("SF Pro Text", 13))
+        subtitle.setFont(QFont("SF Pro Text", 12))  # Fonte menor
         subtitle.setStyleSheet(f"color: {self.text_secondary};")
+        subtitle.setWordWrap(True)  # Permitir quebra de linha
         main_layout.addWidget(subtitle)
         
-        # Espaçador
-        main_layout.addSpacing(8)
+        # Espaçador menor
+        main_layout.addSpacing(10)
         
         # Usar Grid Layout em vez de Form Layout para maior controle
         grid_layout = QGridLayout()
-        grid_layout.setSpacing(12)  # Espaçamento menor
+        grid_layout.setSpacing(10)  # Espaçamento reduzido
         grid_layout.setContentsMargins(0, 0, 0, 0)
+        grid_layout.setVerticalSpacing(12)  # Espaçamento vertical menor
         
         # Estilo para os campos - reduzindo o padding para evitar cortes
         input_style = f"""
@@ -92,37 +94,38 @@ class ChangePasswordWindow(QDialog):
             }}
         """
         
-        # Estilo para as labels do formulário
+        # Estilo para as labels do formulário com espaçamento reduzido
         form_label_style = f"""
             QLabel {{
-                font-size: 14px;
+                font-size: 13px;
                 font-weight: normal;
                 color: {self.text_color};
-                padding-right: 10px;
+                padding-right: 8px;
+                margin-bottom: 4px;
             }}
         """
         
-        # Campos de senha
+        # Campos de senha com altura menor
         self.current_password = QLineEdit()
         self.current_password.setPlaceholderText("Digite sua senha atual")
         self.current_password.setEchoMode(QLineEdit.Password)
         self.current_password.setStyleSheet(input_style)
-        self.current_password.setMinimumHeight(42)  # Ligeiramente menor
-        self.current_password.setFixedHeight(42)    # Fixar altura
+        self.current_password.setMinimumHeight(38)  # Altura menor
+        self.current_password.setFixedHeight(38)
         
         self.new_password = QLineEdit()
         self.new_password.setPlaceholderText("Digite a nova senha")
         self.new_password.setEchoMode(QLineEdit.Password)
         self.new_password.setStyleSheet(input_style)
-        self.new_password.setMinimumHeight(42)
-        self.new_password.setFixedHeight(42)
+        self.new_password.setMinimumHeight(38)
+        self.new_password.setFixedHeight(38)
         
         self.confirm_password = QLineEdit()
         self.confirm_password.setPlaceholderText("Confirme a nova senha")
         self.confirm_password.setEchoMode(QLineEdit.Password)
         self.confirm_password.setStyleSheet(input_style)
-        self.confirm_password.setMinimumHeight(42)
-        self.confirm_password.setFixedHeight(42)
+        self.confirm_password.setMinimumHeight(38)
+        self.confirm_password.setFixedHeight(38)
         
         # Labels do formulário
         current_label = QLabel("Senha atual")
@@ -150,30 +153,30 @@ class ChangePasswordWindow(QDialog):
         
         main_layout.addLayout(grid_layout)
         
-        # Informação sobre senha
+        # Informação sobre senha com fonte menor
         password_info = QLabel("A senha deve ter pelo menos 6 caracteres, incluindo letras e números.")
-        password_info.setFont(QFont("SF Pro Text", 12))
-        password_info.setStyleSheet(f"color: {self.text_secondary}; margin-top: 2px;")
+        password_info.setFont(QFont("SF Pro Text", 11))  # Fonte menor
+        password_info.setStyleSheet(f"color: {self.text_secondary}; margin-top: 8px;")
         password_info.setWordWrap(True)
         main_layout.addWidget(password_info)
         
-        # Espaçador expansível
-        main_layout.addSpacerItem(QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Expanding))
+        # Espaçador menor
+        main_layout.addSpacing(15)
         
-        # Botões
+        # Botões com tamanho menor
         buttons_layout = QHBoxLayout()
-        buttons_layout.setSpacing(15)
+        buttons_layout.setSpacing(12)
         
         self.cancel_button = QPushButton("Cancelar")
-        self.cancel_button.setFixedSize(130, 42)  # Fixar tamanho
+        self.cancel_button.setFixedSize(120, 38)  # Botões menores
         self.cancel_button.setCursor(Qt.PointingHandCursor)
-        self.cancel_button.setFont(QFont("SF Pro Text", 14))
+        self.cancel_button.setFont(QFont("SF Pro Text", 13))  # Fonte menor
         self.cancel_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {self.surface_color};
                 color: {self.accent_color};
                 border: none;
-                border-radius: 21px;
+                border-radius: 19px;
                 font-weight: medium;
                 padding: 0 15px;
             }}
@@ -187,15 +190,15 @@ class ChangePasswordWindow(QDialog):
         """)
         
         self.save_button = QPushButton("Salvar")
-        self.save_button.setFixedSize(130, 42)  # Fixar tamanho
+        self.save_button.setFixedSize(120, 38)  # Botão menor
         self.save_button.setCursor(Qt.PointingHandCursor)
-        self.save_button.setFont(QFont("SF Pro Text", 14))
+        self.save_button.setFont(QFont("SF Pro Text", 13))  # Fonte menor
         self.save_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {self.accent_color};
                 color: white;
                 border: none;
-                border-radius: 21px;
+                border-radius: 19px;
                 font-weight: medium;
                 padding: 0 15px;
             }}
@@ -237,25 +240,20 @@ class ChangePasswordWindow(QDialog):
             self.show_message("Senha diferente", "As senhas não coincidem.")
             return
         
-        # Verificar senha atual
-        import hashlib
-        senha_hash = hashlib.sha256(current.encode()).hexdigest()
-        
+        # Verificar senha atual (sem hash)
         self.db.cursor.execute('''
         SELECT id FROM usuarios WHERE id = ? AND senha = ?
-        ''', (self.usuario_id, senha_hash))
+        ''', (self.usuario_id, current))
         
         if not self.db.cursor.fetchone():
             self.show_message("Senha incorreta", "A senha atual está incorreta.", icon=QMessageBox.Critical)
             return
         
-        # Atualizar senha
-        nova_senha_hash = hashlib.sha256(new_password.encode()).hexdigest()
-        
+        # Atualizar senha (sem hash)
         try:
             self.db.cursor.execute('''
             UPDATE usuarios SET senha = ? WHERE id = ?
-            ''', (nova_senha_hash, self.usuario_id))
+            ''', (new_password, self.usuario_id))
             
             self.db.conn.commit()
             self.show_message("Senha atualizada", "Sua senha foi alterada com sucesso.", icon=QMessageBox.Information)
