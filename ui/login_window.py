@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                              QPushButton, QMessageBox, QCheckBox, QFormLayout, QFrame,
-                             QGraphicsDropShadowEffect, QSizePolicy)
+                             QGraphicsDropShadowEffect, QSizePolicy, QToolButton)
 from PyQt5.QtCore import Qt, pyqtSignal, QSize, QSettings
 from PyQt5.QtGui import QIcon, QPixmap, QColor, QFont
 import base64
@@ -59,29 +59,31 @@ class LoginWindow(QDialog):
                 font-size: 14px;
             }
             QPushButton#loginButton {
-                background-color: #06c;
+                background-color: #1d1d1f;
                 color: white;
                 min-height: 44px;
             }
             QPushButton#loginButton:hover {
-                background-color: #005bb5;
+                background-color: #333333;
             }
             QPushButton#loginButton:pressed {
-                background-color: #004c99;
+                background-color: #000000;
             }
             QPushButton#loginButton:disabled {
                 background-color: #ccc;
                 color: #f5f5f7;
             }
-            QPushButton#closeButton {
+            QToolButton#closeButton {
                 background-color: transparent;
-                color: #86868b;
                 border: none;
-                font-size: 16px;
-                font-weight: bold;
+                border-radius: 15px;
+                padding: 5px;
             }
-            QPushButton#closeButton:hover {
-                color: #1d1d1f;
+            QToolButton#closeButton:hover {
+                background-color: #f0f0f0;
+            }
+            QToolButton#closeButton:pressed {
+                background-color: #e0e0e0;
             }
             QCheckBox {
                 color: #86868b;
@@ -131,11 +133,41 @@ class LoginWindow(QDialog):
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 10)
         
-        # Botão de fechar
-        close_button = QPushButton("×")
+        # Botão de fechar com ícone personalizado
+        close_button = QToolButton()
         close_button.setObjectName("closeButton")
         close_button.setFixedSize(30, 30)
         close_button.clicked.connect(self.reject)
+        
+        # Carregar e configurar o ícone
+        close_icon = QPixmap("assets/icons/marca-x.png")
+        if not close_icon.isNull():
+            # Redimensionar o ícone para tamanho adequado
+            close_icon = close_icon.scaled(16, 16, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            close_button.setIcon(QIcon(close_icon))
+            close_button.setIconSize(QSize(16, 16))
+        else:
+            # Fallback para texto se o ícone não for encontrado
+            close_button.setText("×")
+            close_button.setStyleSheet("""
+                QToolButton#closeButton {
+                    background-color: transparent;
+                    border: none;
+                    border-radius: 15px;
+                    padding: 5px;
+                    color: #86868b;
+                    font-size: 16px;
+                    font-weight: bold;
+                }
+                QToolButton#closeButton:hover {
+                    background-color: #f0f0f0;
+                    color: #1d1d1f;
+                }
+                QToolButton#closeButton:pressed {
+                    background-color: #e0e0e0;
+                }
+            """)
+        
         header_layout.addStretch()
         header_layout.addWidget(close_button)
         
@@ -145,10 +177,10 @@ class LoginWindow(QDialog):
         logo_layout.setContentsMargins(0, 20, 0, 30)  # Espaçamento superior e inferior
         
         logo_label = QLabel()
-        logo_pixmap = QPixmap("assets/logo.png")
+        logo_pixmap = QPixmap("assets/img/GestorX.png")
         if not logo_pixmap.isNull():
             # Redimensionar para tamanho adequado
-            logo_pixmap = logo_pixmap.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            logo_pixmap = logo_pixmap.scaled(120, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             logo_label.setPixmap(logo_pixmap)
             logo_label.setAlignment(Qt.AlignCenter)
         else:
@@ -176,22 +208,115 @@ class LoginWindow(QDialog):
         form_layout.setSpacing(20)
         form_layout.setContentsMargins(0, 0, 0, 30)
         
-        # Campo de usuário
-        user_label = QLabel("USUÁRIO")
-        user_label.setObjectName("fieldLabel")
+        # Campo de usuário com ícone
+        user_icon = QPixmap("assets/icons/usuario.png")
+        if not user_icon.isNull():
+            user_icon = user_icon.scaled(16, 16, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            # Criar um layout horizontal para ícone + texto
+            user_label_layout = QHBoxLayout()
+            user_label_layout.setContentsMargins(0, 0, 0, 0)
+            user_label_layout.setSpacing(5)
+            
+            icon_label = QLabel()
+            icon_label.setPixmap(user_icon)
+            text_label = QLabel("USUÁRIO")
+            text_label.setStyleSheet("color: #86868b; font-size: 13px; font-weight: 500;")
+            
+            user_label_layout.addWidget(icon_label)
+            user_label_layout.addWidget(text_label)
+            user_label_layout.addStretch()
+            
+            user_label_widget = QFrame()
+            user_label_widget.setLayout(user_label_layout)
+        else:
+            user_label_widget = QLabel("USUÁRIO")
+            user_label_widget.setObjectName("fieldLabel")
+
         self.login_edit = QLineEdit()
         self.login_edit.setPlaceholderText("Digite seu usuário")
         self.login_edit.setMinimumHeight(44)
         self.login_edit.textChanged.connect(self.validate_inputs)
-        
-        # Campo de senha
-        senha_label = QLabel("SENHA")
-        senha_label.setObjectName("fieldLabel")
+
+        # Campo de senha com ícone
+        senha_icon = QPixmap("assets/icons/cadeado.png")
+        if not senha_icon.isNull():
+            senha_icon = senha_icon.scaled(16, 16, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            # Criar um layout horizontal para ícone + texto
+            senha_label_layout = QHBoxLayout()
+            senha_label_layout.setContentsMargins(0, 0, 0, 0)
+            senha_label_layout.setSpacing(5)
+            
+            icon_label = QLabel()
+            icon_label.setPixmap(senha_icon)
+            text_label = QLabel("SENHA")
+            text_label.setStyleSheet("color: #86868b; font-size: 13px; font-weight: 500;")
+            
+            senha_label_layout.addWidget(icon_label)
+            senha_label_layout.addWidget(text_label)
+            senha_label_layout.addStretch()
+            
+            senha_label_widget = QFrame()
+            senha_label_widget.setLayout(senha_label_layout)
+        else:
+            senha_label_widget = QLabel("SENHA")
+            senha_label_widget.setObjectName("fieldLabel")
+
+        # Container da senha com botão toggle
+        senha_input_container = QHBoxLayout()
+        senha_input_container.setContentsMargins(0, 0, 0, 0)
+        senha_input_container.setSpacing(0)
+
         self.senha_edit = QLineEdit()
         self.senha_edit.setPlaceholderText("Digite sua senha")
         self.senha_edit.setEchoMode(QLineEdit.Password)
         self.senha_edit.setMinimumHeight(44)
         self.senha_edit.textChanged.connect(self.validate_inputs)
+
+        # Botão toggle para mostrar/ocultar senha
+        self.toggle_password_button = QToolButton()
+        self.toggle_password_button.setFixedSize(44, 44)
+        self.toggle_password_button.clicked.connect(self.toggle_password_visibility)
+        self.password_visible = False
+        self.update_password_toggle_icon()
+
+        # Estilo do botão toggle
+        self.toggle_password_button.setStyleSheet("""
+            QToolButton {
+                border: none;
+                background-color: #f5f5f7;
+                border-top-right-radius: 8px;
+                border-bottom-right-radius: 8px;
+                padding: 8px;
+            }
+            QToolButton:hover {
+                background-color: #ebebeb;
+            }
+        """)
+
+        # Ajustar o QLineEdit para não ter borda direita
+        self.senha_edit.setStyleSheet("""
+            QLineEdit {
+                padding: 14px;
+                border: none;
+                border-top-left-radius: 8px;
+                border-bottom-left-radius: 8px;
+                background-color: #f5f5f7;
+                color: #1d1d1f;
+                font-size: 14px;
+                selection-background-color: #06c;
+            }
+            QLineEdit:focus {
+                background-color: #ebebeb;
+            }
+        """)
+
+        senha_input_container.addWidget(self.senha_edit)
+        senha_input_container.addWidget(self.toggle_password_button)
+
+        # Widget container para o layout
+        senha_input_widget = QFrame()
+        senha_input_widget.setLayout(senha_input_container)
+        senha_input_widget.setStyleSheet("QFrame { border-radius: 8px; }")
         
         # Lembrar senha com layout específico
         remember_layout = QHBoxLayout()
@@ -202,14 +327,14 @@ class LoginWindow(QDialog):
         # Adicionar campos ao formulário
         user_field_layout = QVBoxLayout()
         user_field_layout.setSpacing(5)
-        user_field_layout.addWidget(user_label)
+        user_field_layout.addWidget(user_label_widget)
         user_field_layout.addWidget(self.login_edit)
         
         senha_field_layout = QVBoxLayout()
         senha_field_layout.setSpacing(5)
-        senha_field_layout.addWidget(senha_label)
-        senha_field_layout.addWidget(self.senha_edit)
-        
+        senha_field_layout.addWidget(senha_label_widget)
+        senha_field_layout.addWidget(senha_input_widget)
+
         form_layout.addLayout(user_field_layout)
         form_layout.addLayout(senha_field_layout)
         form_layout.addLayout(remember_layout)
@@ -366,3 +491,28 @@ class LoginWindow(QDialog):
                 }
             """)
             error_dialog.exec_()
+
+    def update_password_toggle_icon(self):
+        """Atualiza o ícone do botão toggle de senha"""
+        if self.password_visible:
+            icon_path = "assets/icons/olho_fechado.png"
+        else:
+            icon_path = "assets/icons/olho.png"
+        
+        pixmap = QPixmap(icon_path)
+        if not pixmap.isNull():
+            pixmap = pixmap.scaled(20, 20, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            icon = QIcon(pixmap)
+            self.toggle_password_button.setIcon(icon)
+            self.toggle_password_button.setIconSize(QSize(20, 20))
+
+    def toggle_password_visibility(self):
+        """Alterna a visibilidade da senha"""
+        self.password_visible = not self.password_visible
+        
+        if self.password_visible:
+            self.senha_edit.setEchoMode(QLineEdit.Normal)
+        else:
+            self.senha_edit.setEchoMode(QLineEdit.Password)
+        
+        self.update_password_toggle_icon()

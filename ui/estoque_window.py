@@ -117,6 +117,7 @@ class EstoqueWindow(QWidget):
         ])
         self.tabela.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.tabela.verticalHeader().setVisible(False)
+        self.tabela.setSortingEnabled(True)
         layout.addWidget(self.tabela)
         
         # Botões de ação
@@ -268,7 +269,9 @@ class EstoqueWindow(QWidget):
             self.tabela.insertRow(row)
             
             # Adicionar dados às células
-            self.tabela.setItem(row, 0, QTableWidgetItem(str(produto['id'])))
+            id_item = QTableWidgetItem()
+            id_item.setData(Qt.DisplayRole, produto['id'])  # Usar dados numéricos para ordenação correta
+            self.tabela.setItem(row, 0, id_item)
             self.tabela.setItem(row, 1, QTableWidgetItem(produto['codigo_barras'] or ""))
             
             # Nome do produto - incluir indicador se é fracionado

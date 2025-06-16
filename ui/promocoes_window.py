@@ -1,10 +1,12 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                            QPushButton, QTableWidget, QTableWidgetItem, QFormLayout,
                            QDateEdit, QComboBox, QMessageBox, QHeaderView, QDoubleSpinBox,
-                           QDialog, QFrame, QTabWidget, QRadioButton, QButtonGroup)
+                           QDialog, QFrame, QTabWidget, QRadioButton, QButtonGroup, QFileDialog)
 from PyQt5.QtCore import Qt, QDate
 from PyQt5.QtGui import QFont
 from datetime import datetime, timedelta
+import csv
+import os
 
 class PromocoesWindow(QWidget):
     def __init__(self, db):
@@ -43,14 +45,24 @@ class PromocoesWindow(QWidget):
         
         # Botões de ação
         action_layout = QHBoxLayout()
+    
         self.add_button = QPushButton("Adicionar Promoção")
         self.add_button.clicked.connect(self.abrir_formulario_promocao)
         
         self.produtos_especiais_button = QPushButton("Gerenciar Promoções Especiais")
         self.produtos_especiais_button.clicked.connect(self.abrir_promocoes_especiais)
         
+        # Novos botões de importar/exportar
+        self.exportar_button = QPushButton("Exportar CSV")
+        self.exportar_button.clicked.connect(self.exportar_csv)
+        
+        self.importar_button = QPushButton("Importar CSV")
+        self.importar_button.clicked.connect(self.importar_csv)
+        
         action_layout.addWidget(self.add_button)
         action_layout.addWidget(self.produtos_especiais_button)
+        action_layout.addWidget(self.exportar_button)
+        action_layout.addWidget(self.importar_button)
         layout.addLayout(action_layout)
     
     def carregar_dados(self):
@@ -134,7 +146,194 @@ class PromocoesWindow(QWidget):
                 self.carregar_dados()
             else:
                 QMessageBox.warning(self, "Erro", "Não foi possível excluir a promoção.")
+    
+    def exportar_csv(self):
+        """Exporta as promoções para um arquivo CSV."""
+        try:
+            # Obter dados das promoções
+            promocoes = self.db.listar_promocoes()
+            
+            if not promocoes:
+                QMessageBox.information(self, "Aviso", "Não há promoções para exportar!")
+                return
+            
+            # Abrir diálogo para salvar arquivo
+            arquivo, _ = QFileDialog.getSaveFileName(
+                self,
+                "Exportar Promoções",
+                "promocoes.csv",
+                "Arquivos CSV (*.csv)"
+            )
+            
+            if arquivo:
+                with open(arquivo, 'w', newline='', encoding='utf-8') as csvfile:
+                    fieldnames = ['ID', 'Produto', 'Preço Antigo', 'Preço Promocional', 
+                                'Taxa de Desconto (%)', 'Data Início', 'Data Fim', 'Descrição']
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    
+                    # Escrever cabeçalho
+                    writer.writeheader()
+                    
+                    # Escrever dados
+                    for promocao in promocoes:
+                        # Calcular taxa de desconto
+                        taxa_desconto = 0
+                        if promocao['preco_antigo'] > 0:
+                            taxa_desconto = ((promocao['preco_antigo'] - promocao['preco_promocional']) / promocao['preco_antigo']) * 100
+                        
+                        writer.writerow({
+                            'ID': promocao['id'],
+                            'Produto': promocao['produto_nome'],
+                            'Preço Antigo': f"{promocao['preco_antigo']:.2f}",
+                            'Preço Promocional': f"{promocao['preco_promocional']:.2f}",
+                            'Taxa de Desconto (%)': f"{taxa_desconto:.1f}",
+                            'Data Início': promocao['data_inicio'],
+                            'Data Fim': promocao['data_fim'],
+                            'Descrição': promocao.get('descricao', '')
+                        })
+                
+                QMessageBox.information(self, "Sucesso", f"Promoções exportadas para:\n{arquivo}")
+        
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Erro ao exportar CSV:\n{str(e)}")
 
+    def importar_csv(self):
+        """Importa promoções de um arquivo CSV."""
+        try:
+            # Abrir diálogo para selecionar arquivo
+            arquivo, _ = QFileDialog.getOpenFileName(
+                self,
+                "Importar Promoções",
+                "",
+                "Arquivos CSV (*.csv)"
+            )
+            
+            if not arquivo:
+                return
+            
+            # Confirmar importação
+            confirmacao = QMessageBox.question(
+                self,
+                "Confirmar Importação",
+                "Esta operação irá adicionar novas promoções.\nDeseja continuar?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            
+            if confirmacao != QMessageBox.Yes:
+                return
+            
+            promocoes_importadas = 0
+            erros = []
+            
+            with open(arquivo, 'r', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                
+                for linha_num, row in enumerate(reader, start=2):  # linha 2 porque linha 1 é o cabeçalho
+                    try:
+                        # Validar campos obrigatórios
+                        if not all(key in row for key in ['Produto', 'Preço Antigo', 'Preço Promocional', 'Data Início', 'Data Fim']):
+                            erros.append(f"Linha {linha_num}: Campos obrigatórios faltando")
+                            continue
+                        
+                        # Buscar produto pelo nome
+                        produto_result = self.db.buscar_produto_por_nome_exato(row['Produto'].strip())
+                        if not produto_result:
+                            erros.append(f"Linha {linha_num}: Produto '{row['Produto']}' não encontrado")
+                            continue
+                        
+                        # Converter resultado para dicionário (assumindo que retorna uma tupla)
+                        # Ajuste conforme a estrutura da sua tabela produtos
+                        produto = {
+                            'id': produto_result[0],
+                            'nome': produto_result[1]
+                            # adicione outros campos conforme necessário
+                        }
+                        
+                        # Converter valores
+                        try:
+                            preco_antigo = float(row['Preço Antigo'].replace(',', '.'))
+                            preco_promocional = float(row['Preço Promocional'].replace(',', '.'))
+                        except ValueError:
+                            erros.append(f"Linha {linha_num}: Preços inválidos")
+                            continue
+                        
+                        # Validar preços
+                        if preco_antigo <= 0 or preco_promocional <= 0:
+                            erros.append(f"Linha {linha_num}: Preços devem ser maiores que zero")
+                            continue
+                        
+                        if preco_promocional >= preco_antigo:
+                            erros.append(f"Linha {linha_num}: Preço promocional deve ser menor que o preço antigo")
+                            continue
+                        
+                        # Validar e converter datas
+                        try:
+                            data_inicio = row['Data Início'].strip()
+                            data_fim = row['Data Fim'].strip()
+                            
+                            # Tentar diferentes formatos de data
+                            for formato in ['%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y']:
+                                try:
+                                    datetime.strptime(data_inicio, formato)
+                                    datetime.strptime(data_fim, formato)
+                                    # Se chegou aqui, o formato está correto
+                                    if formato != '%Y-%m-%d':
+                                        # Converter para formato padrão do banco
+                                        data_inicio_obj = datetime.strptime(data_inicio, formato)
+                                        data_fim_obj = datetime.strptime(data_fim, formato)
+                                        data_inicio = data_inicio_obj.strftime('%Y-%m-%d')
+                                        data_fim = data_fim_obj.strftime('%Y-%m-%d')
+                                    break
+                                except ValueError:
+                                    continue
+                            else:
+                                erros.append(f"Linha {linha_num}: Formato de data inválido")
+                                continue
+                            
+                        except Exception:
+                            erros.append(f"Linha {linha_num}: Erro ao processar datas")
+                            continue
+                        
+                        # Obter descrição (opcional)
+                        descricao = row.get('Descrição', '').strip()
+                        
+                        # Adicionar promoção
+                        resultado = self.db.adicionar_promocao(
+                            produto['id'],
+                            preco_antigo,
+                            preco_promocional,
+                            data_inicio,
+                            data_fim,
+                            descricao
+                        )
+                        
+                        if resultado:
+                            promocoes_importadas += 1
+                        else:
+                            erros.append(f"Linha {linha_num}: Erro ao salvar no banco de dados")
+                    
+                    except Exception as e:
+                        erros.append(f"Linha {linha_num}: Erro inesperado - {str(e)}")
+            
+            # Atualizar tabela
+            self.carregar_dados()
+            
+            # Mostrar resultado
+            mensagem = f"Importação concluída!\n"
+            mensagem += f"Promoções importadas: {promocoes_importadas}\n"
+            
+            if erros:
+                mensagem += f"Erros encontrados: {len(erros)}\n\n"
+                mensagem += "Primeiros 10 erros:\n" + "\n".join(erros[:10])
+                if len(erros) > 10:
+                    mensagem += f"\n... e mais {len(erros) - 10} erros."
+                
+                QMessageBox.warning(self, "Importação com Erros", mensagem)
+            else:
+                QMessageBox.information(self, "Sucesso", mensagem)
+        
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Erro ao importar CSV:\n{str(e)}")
 
 class PromocoesEspeciaisDialog(QDialog):
     def __init__(self, db):

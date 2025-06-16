@@ -6,6 +6,7 @@ from PyQt5.QtGui import QFont, QIcon, QPixmap, QCursor, QPainter, QColor, QBrush
 from PyQt5.QtCore import Qt, QDate, QSize, QByteArray, QPropertyAnimation, QEasingCurve, pyqtSignal
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication
+import os
 
 from ui.estoque_window import EstoqueWindow
 from ui.fornecedor_window import FornecedorWindow
@@ -27,8 +28,11 @@ class MainWindow(QMainWindow):
     
     def initUI(self):
         # Configurar janela principal
-        self.setWindowTitle("Sistema de Estoque")
+        self.setWindowTitle("Sistema de Estoque - GestorX")
         self.setGeometry(100, 100, 1200, 700)
+        
+        # Definir ícone da janela
+        self.setWindowIcon(self.carregar_logo())
         
         # Widget central
         central_widget = QWidget()
@@ -45,12 +49,23 @@ class MainWindow(QMainWindow):
         header_layout.setContentsMargins(10, 0, 10, 0)
         header_layout.setSpacing(10)
         
-        # Título da aplicação (à esquerda)
-        app_icon = QLabel("📦")
-        app_icon.setFont(QFont("Segoe UI", 14))
-        app_icon.setObjectName("appIcon")
+        # Logo da aplicação (substituindo o ícone emoji)
+        self.app_logo = QLabel()
+        self.app_logo.setObjectName("appLogo")
+        self.app_logo.setFixedSize(32, 32)
+        self.app_logo.setScaledContents(True)
         
-        app_title = QLabel("Sistema de Estoque")
+        # Carregar e definir a logo
+        logo_pixmap = self.carregar_logo_pixmap()
+        if logo_pixmap:
+            self.app_logo.setPixmap(logo_pixmap)
+        else:
+            # Fallback se a logo não for encontrada
+            self.app_logo.setText("📦")
+            self.app_logo.setFont(QFont("Segoe UI", 14))
+            self.app_logo.setAlignment(Qt.AlignCenter)
+        
+        app_title = QLabel("Sistema de Estoque - GestorX")
         app_title.setFont(QFont("Segoe UI", 12, QFont.Bold))
         app_title.setObjectName("appTitle")
         
@@ -110,7 +125,7 @@ class MainWindow(QMainWindow):
         menu_layout.addWidget(ajuda_btn)
         
         # Adicionar stretch para separar os menus do restante
-        header_layout.addWidget(app_icon)
+        header_layout.addWidget(self.app_logo)
         header_layout.addWidget(app_title)
         header_layout.addWidget(menu_frame)
         header_layout.addStretch()
@@ -217,12 +232,12 @@ class MainWindow(QMainWindow):
         menu_widget_layout.setContentsMargins(10, 20, 10, 20)
         
         # Botões do menu
-        self.btn_dashboard = self.criar_botao_menu("Dashboard", "🏠")
-        self.btn_estoque = self.criar_botao_menu("Controle de Estoque", "📦")
-        self.btn_fornecedor = self.criar_botao_menu("Fornecedores", "🚚")
-        self.btn_promocoes = self.criar_botao_menu("Promoções", "🏷️")
-        self.btn_clientes = self.criar_botao_menu("Clientes", "👥")
-        self.btn_caixa = self.criar_botao_menu("Controle de Caixa", "💰")
+        self.btn_dashboard = self.criar_botao_menu("Dashboard", "dashboard.png")
+        self.btn_estoque = self.criar_botao_menu("Controle de Estoque", "estoque-pronto.png")
+        self.btn_fornecedor = self.criar_botao_menu("Fornecedores", "entregador.png")
+        self.btn_promocoes = self.criar_botao_menu("Promoções", "distintivo-de-desconto.png")
+        self.btn_clientes = self.criar_botao_menu("Clientes", "negocios.png")
+        self.btn_caixa = self.criar_botao_menu("Controle de Caixa", "dinheiro.png")
         
         # Lista de botões para facilitar a manipulação
         self.menu_buttons = [
@@ -248,7 +263,7 @@ class MainWindow(QMainWindow):
         menu_widget_layout.addWidget(separador)
         
         # Botão de configurações
-        self.btn_config = self.criar_botao_menu("Configurações", "⚙️")
+        self.btn_config = self.criar_botao_menu("Configurações", "engrenagem.png")
         self.btn_config.clicked.connect(self.abrir_configuracoes)
         menu_widget_layout.addWidget(self.btn_config)
         
@@ -339,6 +354,26 @@ class MainWindow(QMainWindow):
         header_frame.mouseMoveEvent = self.window_drag
         self.drag_position = None
     
+    def carregar_logo(self):
+        """Carrega a logo como QIcon para uso na barra de título"""
+        logo_path = os.path.join("assets", "img", "GestorX_logo.png")
+        if os.path.exists(logo_path):
+            return QIcon(logo_path)
+        else:
+            # Retorna um ícone padrão se a logo não for encontrada
+            return QIcon()
+    
+    def carregar_logo_pixmap(self):
+        """Carrega a logo como QPixmap para uso no cabeçalho"""
+        logo_path = os.path.join("assets", "img", "GestorX_logo.png")
+        if os.path.exists(logo_path):
+            pixmap = QPixmap(logo_path)
+            # Redimensiona a logo mantendo a proporção
+            return pixmap.scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        else:
+            print(f"Logo não encontrada em: {logo_path}")
+            return None
+    
     def criar_botao_menu(self, texto, icone=None):
         """Cria um botão estilizado para o menu lateral."""
         btn = QPushButton()
@@ -351,13 +386,30 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(15, 8, 15, 8)
         layout.setSpacing(10)
         
-        # Ícone (emoji ou símbolo)
+        # Ícone (arquivo de imagem)
         if icone:
-            icon_label = QLabel(icone)
-            icon_label.setFont(QFont("Segoe UI", 16))
-            icon_label.setFixedSize(24, 24)
+            icon_label = QLabel()
+            icon_label.setFixedSize(28, 28)
             icon_label.setAlignment(Qt.AlignCenter)
             icon_label.setObjectName("buttonIcon")
+            
+            # Carregar ícone do arquivo
+            try:
+                pixmap = QPixmap(f"assets/icons/{icone}")
+                if not pixmap.isNull():
+                    # Redimensionar o ícone mantendo proporção
+                    scaled_pixmap = pixmap.scaled(20, 20, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    icon_label.setPixmap(scaled_pixmap)
+                else:
+                    # Fallback: usar texto se o ícone não carregar
+                    icon_label.setText("📁")
+                    icon_label.setFont(QFont("Segoe UI", 16))
+            except Exception as e:
+                print(f"Erro ao carregar ícone {icone}: {e}")
+                # Fallback: usar emoji padrão
+                icon_label.setText("📁")
+                icon_label.setFont(QFont("Segoe UI", 16))
+            
             layout.addWidget(icon_label)
             # Guardar referência ao ícone no botão
             btn.icon_label = icon_label
@@ -695,8 +747,17 @@ class MainWindow(QMainWindow):
                 self.promocoes_page, self.clientes_page, self.caixa_page]
         
         if current_index < len(pages):
-            pages[current_index].carregar_dados()
-            self.statusBar.showMessage("Dados atualizados com sucesso!", 3000)
+            page = pages[current_index]
+            
+            # Verificar se a página tem o método carregar_dados
+            if hasattr(page, 'carregar_dados'):
+                page.carregar_dados()
+                self.statusBar.showMessage("Dados atualizados com sucesso!", 3000)
+            elif hasattr(page, 'carregar_produtos'):  # Para CaixaWindow
+                page.carregar_produtos()
+                self.statusBar.showMessage("Dados atualizados com sucesso!", 3000)
+            else:
+                self.statusBar.showMessage("Página não possui método de atualização.", 3000)
     
     def check_promocoes_ativas(self):
         """Verifica e exibe promoções ativas na barra de status."""

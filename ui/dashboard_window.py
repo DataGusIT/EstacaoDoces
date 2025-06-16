@@ -105,7 +105,7 @@ class DashboardWindow(QWidget):
         
         frame_filtros_layout.addWidget(QLabel("Período:"))
         self.cb_periodo = QComboBox()
-        self.cb_periodo.addItems(["Hoje", "Última Semana", "Último Mês", "Último Ano", "Personalizado"])
+        self.cb_periodo.addItems(["Hoje", "Última Semana", "Último Mês", "Personalizado"])
         self.cb_periodo.currentIndexChanged.connect(self.periodo_alterado)
         frame_filtros_layout.addWidget(self.cb_periodo)
         
