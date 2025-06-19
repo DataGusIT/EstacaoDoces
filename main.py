@@ -1,5 +1,6 @@
 import sys
 import os
+from pathlib import Path
 from PyQt5.QtWidgets import QApplication, QMessageBox, QSplashScreen, QDialog, QLabel
 from PyQt5.QtGui import QIcon, QPixmap, QFont
 from PyQt5.QtCore import Qt, QTimer
@@ -9,10 +10,61 @@ from ui.login_window import LoginWindow  # Importar a janela de login
 from database.db_manager import DatabaseManager
 from config.settings import Settings
 
-# Garantir que os diretórios necessários existam
-os.makedirs("database", exist_ok=True)
-os.makedirs("assets/icons", exist_ok=True)
-os.makedirs("config", exist_ok=True)
+def get_app_data_dir():
+    """Retorna o diretório apropriado para dados do aplicativo"""
+    if sys.platform == "win32":
+        # Windows: usar AppData/Local
+        base_dir = os.environ.get('LOCALAPPDATA', os.path.expanduser('~'))
+        app_dir = os.path.join(base_dir, 'SeuNomeDoApp')  # Substitua pelo nome do seu app
+    elif sys.platform == "darwin":
+        # macOS: usar Library/Application Support
+        app_dir = os.path.expanduser('~/Library/Application Support/SeuNomeDoApp')
+    else:
+        # Linux: usar .config
+        app_dir = os.path.expanduser('~/.config/SeuNomeDoApp')
+    
+    return app_dir
+
+def get_app_dirs():
+    """Retorna os diretórios necessários para o aplicativo"""
+    app_data_dir = get_app_data_dir()
+    
+    return {
+        'app_data': app_data_dir,
+        'database': os.path.join(app_data_dir, 'database'),
+        'config': os.path.join(app_data_dir, 'config'),
+        'assets': os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets')
+    }
+
+def setup_directories():
+    """Cria os diretórios necessários no local apropriado"""
+    dirs = get_app_dirs()
+    
+    try:
+        # Criar diretórios no AppData do usuário
+        os.makedirs(dirs['app_data'], exist_ok=True)
+        os.makedirs(dirs['database'], exist_ok=True)
+        os.makedirs(dirs['config'], exist_ok=True)
+        
+        # Assets ficam no diretório de instalação (somente leitura)
+        # Se não existir, criar no AppData também
+        if not os.path.exists(dirs['assets']):
+            assets_fallback = os.path.join(dirs['app_data'], 'assets')
+            os.makedirs(assets_fallback, exist_ok=True)
+            os.makedirs(os.path.join(assets_fallback, 'icons'), exist_ok=True)
+            dirs['assets'] = assets_fallback
+        
+        return dirs
+        
+    except PermissionError as e:
+        QMessageBox.critical(None, "Erro", 
+                           f"Erro ao criar diretórios necessários:\n{str(e)}\n\n"
+                           f"Verifique as permissões ou execute como administrador.")
+        sys.exit(1)
+    except Exception as e:
+        QMessageBox.critical(None, "Erro", 
+                           f"Erro inesperado ao configurar diretórios:\n{str(e)}")
+        sys.exit(1)
 
 class SessionManager:
     """Gerencia a sessão do usuário logado"""
@@ -225,25 +277,35 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyle("Fusion")  # Estilo consistente entre plataformas
     
-    # Aplicar configurações
-    settings = Settings()
-    settings.apply_theme(app)
+    # Configurar diretórios necessários
+    app_dirs = setup_directories()
     
-    # Definir fonte global
-    font = QFont("Arial", settings.get_font_size())
-    app.setFont(font)
+    # Definir variáveis de ambiente para que outros módulos usem os caminhos corretos
+    os.environ['APP_DATA_DIR'] = app_dirs['app_data']
+    os.environ['DATABASE_DIR'] = app_dirs['database']
+    os.environ['CONFIG_DIR'] = app_dirs['config']
+    os.environ['ASSETS_DIR'] = app_dirs['assets']
     
-    # Splash Screen (opcional)
-    splash_pixmap = QPixmap("assets/splash.png")
-    if not splash_pixmap.isNull():
-        splash = QSplashScreen(splash_pixmap)
-        splash.show()
-        app.processEvents()
-    else:
-        splash = None
-    
-    # Criar conexão com o banco de dados
     try:
+        # Aplicar configurações (agora usando o diretório correto)
+        settings = Settings()
+        settings.apply_theme(app)
+        
+        # Definir fonte global
+        font = QFont("Arial", settings.get_font_size())
+        app.setFont(font)
+        
+        # Splash Screen (procurar no diretório correto)
+        splash_path = os.path.join(app_dirs['assets'], 'splash.png')
+        splash_pixmap = QPixmap(splash_path)
+        if not splash_pixmap.isNull():
+            splash = QSplashScreen(splash_pixmap)
+            splash.show()
+            app.processEvents()
+        else:
+            splash = None
+        
+        # Criar conexão com o banco de dados (usando o diretório correto)
         db = DatabaseManager()
         session = SessionManager()  # Criar gerenciador de sessão
         
