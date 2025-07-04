@@ -53,6 +53,10 @@ class DatabaseManager:
             return self.connect_to_database()
         return True
     
+    def fechar(self):
+        if self.conn:
+            self.conn.close()
+    
     def buscar_produto_por_codigo_barras(self, codigo_barras):
         """Busca produto por código de barras."""
         # CORREÇÃO: usar self.conn ao invés de self.conexao
@@ -412,56 +416,41 @@ class DatabaseManager:
             print(f"Erro ao calcular estoque total: {e}")
             return 0
         
-    def atualizar_estoque_fracionado(self, produto_id, quantidade_vendida, tipo_venda="fracao"):
+    def atualizar_estoque_venda(self, produto_id, quantidade_vendida, is_embalagem):
         """
-        Atualiza o estoque considerando venda fracionada
-        tipo_venda: "embalagem" ou "fracao"
+        Atualiza o estoque de um produto após a venda.
+        Retorna (True, "Mensagem de Sucesso") ou (False, "Mensagem de Erro").
         """
         try:
             produto = self.obter_produto(produto_id)
             if not produto:
-                return False
-            
-            if not produto['fracionado']:
-                # Produto não fracionado, desconta normalmente
+                return False, "Produto não encontrado."
+
+            if is_embalagem:
+                # Venda de embalagem inteira
+                if produto['quantidade'] < quantidade_vendida:
+                    return False, "Estoque de embalagens insuficiente."
+                
                 self.cursor.execute('''
                     UPDATE produtos SET quantidade = quantidade - ? WHERE id = ?
                 ''', (quantidade_vendida, produto_id))
             else:
-                if tipo_venda == "embalagem":
-                    # Vendeu embalagem inteira
-                    self.cursor.execute('''
-                        UPDATE produtos SET quantidade = quantidade - ? WHERE id = ?
-                    ''', (quantidade_vendida, produto_id))
-                else:
-                    # Vendeu por fração
-                    estoque_fracionado_atual = produto['estoque_fracionado']
-                    qtd_por_embalagem = produto['qtd_por_embalagem']
-                    
-                    # Se tem estoque fracionado suficiente
-                    if estoque_fracionado_atual >= quantidade_vendida:
-                        self.cursor.execute('''
-                            UPDATE produtos SET estoque_fracionado = estoque_fracionado - ? WHERE id = ?
-                        ''', (quantidade_vendida, produto_id))
-                    else:
-                        # Precisa quebrar embalagens
-                        falta = quantidade_vendida - estoque_fracionado_atual
-                        embalagens_para_quebrar = int(falta / qtd_por_embalagem) + (1 if falta % qtd_por_embalagem > 0 else 0)
-                        
-                        # Quebra as embalagens necessárias
-                        novo_estoque_fracionado = (embalagens_para_quebrar * qtd_por_embalagem) + estoque_fracionado_atual - quantidade_vendida
-                        
-                        self.cursor.execute('''
-                            UPDATE produtos 
-                            SET quantidade = quantidade - ?, estoque_fracionado = ?
-                            WHERE id = ?
-                        ''', (embalagens_para_quebrar, novo_estoque_fracionado, produto_id))
-            
+                # Venda de unidade fracionada
+                if not produto['fracionado']:
+                    return False, "Este produto não é vendido de forma fracionada."
+
+                if produto['estoque_fracionado'] < quantidade_vendida:
+                    return False, f"Estoque fracionado insuficiente ({produto['estoque_fracionado']} unidades). Quebre uma embalagem na tela de estoque."
+                
+                self.cursor.execute('''
+                    UPDATE produtos SET estoque_fracionado = estoque_fracionado - ? WHERE id = ?
+                ''', (quantidade_vendida, produto_id))
+
             self.conn.commit()
-            return True
+            return True, "Estoque atualizado com sucesso."
         except Exception as e:
-            print(f"Erro ao atualizar estoque fracionado: {e}")
-            return False
+            print(f"Erro ao atualizar estoque de venda: {e}")
+            return False, f"Erro interno ao atualizar estoque: {e}"
 
     def quebrar_embalagem(self, produto_id, quantidade_embalagens=1):
         """Quebra embalagens para criar estoque fracionado"""
@@ -1258,16 +1247,15 @@ class DatabaseManager:
             print(f"Erro ao registrar venda: {e}")
             return False
     
-    def registrar_item_venda(self, venda_id, produto_id, quantidade, preco_unitario, subtotal, tipo_venda="embalagem"):
+    def registrar_item_venda(self, venda_id, produto_id, quantidade, preco_unitario, subtotal):
         """
-        Registra item de venda considerando se é embalagem ou fração
-        tipo_venda: "embalagem" ou "fracao"
+        Registra um item na tabela itens_venda. A atualização de estoque
+        deve ser feita separadamente.
         """
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Registrar item na tabela itens_venda
             cursor.execute("""
                 INSERT INTO itens_venda 
                 (venda_id, produto_id, quantidade, preco_unitario, subtotal)
@@ -1276,99 +1264,135 @@ class DatabaseManager:
             
             conn.commit()
             conn.close()
-            
-            # Atualizar estoque usando o método específico para fracionados
-            return self.atualizar_estoque_fracionado(produto_id, quantidade, tipo_venda)
+            return True
             
         except Exception as e:
             print(f"Erro ao registrar item de venda: {e}")
             return False
     
+
     def obter_dados_dashboard(self, data_inicio, data_fim):
         try:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
-            # Faturamento e número de vendas
+            # --- CORREÇÃO: Passo 1 - Obter os IDs das vendas no período ---
             cursor.execute("""
-                SELECT COUNT(*) as num_vendas, SUM(valor_total) as faturamento
-                FROM vendas
-                WHERE date(data_hora) BETWEEN ? AND ?
+                SELECT id FROM vendas WHERE date(data_hora) BETWEEN ? AND ?
             """, (data_inicio, data_fim))
             
-            vendas_resumo = cursor.fetchone()
+            # Cria uma tupla de IDs de vendas. Ex: (1, 2, 5, 8)
+            venda_ids = tuple(row['id'] for row in cursor.fetchall())
             
-            # Lucro (com base na diferença entre preço de venda e preço de compra)
-            cursor.execute("""
-                SELECT SUM((i.preco_unitario - p.preco_compra) * i.quantidade) as lucro
+            # Se não houver vendas no período, retorna dados vazios para evitar erros.
+            if not venda_ids:
+                conn.close()
+                return {
+                    'faturamento': 0, 'num_vendas': 0, 'lucro': 0,
+                    'produtos': [], 'pagamentos': [], 'clientes': [], 'vendas_diarias': []
+                }
+            
+            # --- Fim da Correção ---
+
+            # Faturamento e número de vendas (agora usando os IDs)
+            # O placeholder '?' não funciona para listas/tuplas, então formatamos a string.
+            # É seguro aqui porque 'venda_ids' é gerado por nós e contém apenas números.
+            query_in_ids = f"IN {venda_ids}" if len(venda_ids) > 1 else f"= {venda_ids[0]}"
+            
+            cursor.execute(f"""
+                SELECT 
+                    COUNT(*) as num_vendas, 
+                    SUM(valor_total) as faturamento
+                FROM vendas
+                WHERE id {query_in_ids}
+            """)
+            vendas_resumo = cursor.fetchone()
+
+            # --- NOVA LÓGICA DE LUCRO (agora usando os IDs) ---
+            cursor.execute(f"""
+                SELECT 
+                    SUM(
+                        i.subtotal - (i.quantidade * 
+                            CASE 
+                                WHEN i.preco_unitario = p.preco_venda THEN p.preco_compra
+                                ELSE (p.preco_compra / p.qtd_por_embalagem)
+                            END
+                        )
+                    ) as lucro
                 FROM itens_venda i
                 JOIN produtos p ON i.produto_id = p.id
-                JOIN vendas v ON i.venda_id = v.id
-                WHERE date(v.data_hora) BETWEEN ? AND ?
-            """, (data_inicio, data_fim))
+                WHERE i.venda_id {query_in_ids} AND p.preco_compra > 0 AND p.qtd_por_embalagem > 0
+            """)
             
-            # Aqui está o problema: É necessário atribuir o resultado a variável lucro
             lucro_resultado = cursor.fetchone()
-            lucro = lucro_resultado['lucro'] if lucro_resultado['lucro'] is not None else 0
+            lucro = lucro_resultado['lucro'] if lucro_resultado and lucro_resultado['lucro'] is not None else 0
             
-            # Produtos mais vendidos
-            cursor.execute("""
+            # Produtos mais vendidos (por valor, usando os IDs)
+            cursor.execute(f"""
                 SELECT p.nome, SUM(i.quantidade) as quantidade, SUM(i.subtotal) as valor_total
                 FROM itens_venda i
                 JOIN produtos p ON i.produto_id = p.id
-                JOIN vendas v ON i.venda_id = v.id
-                WHERE date(v.data_hora) BETWEEN ? AND ?
+                WHERE i.venda_id {query_in_ids}
                 GROUP BY p.id, p.nome
-                ORDER BY quantidade DESC
+                ORDER BY valor_total DESC
                 LIMIT 10
-            """, (data_inicio, data_fim))
-            
+            """)
             produtos = [dict(row) for row in cursor.fetchall()]
             
-            # Formas de pagamento
-            cursor.execute("""
+            # Formas de pagamento (usando os IDs)
+            cursor.execute(f"""
                 SELECT forma_pagamento as forma, SUM(valor_total) as valor_total
                 FROM vendas
-                WHERE date(data_hora) BETWEEN ? AND ?
+                WHERE id {query_in_ids}
                 GROUP BY forma_pagamento
                 ORDER BY valor_total DESC
-            """, (data_inicio, data_fim))
-            
+            """)
             pagamentos = [dict(row) for row in cursor.fetchall()]
             
-            # Melhores clientes
-            cursor.execute("""
+            # Melhores clientes (usando os IDs)
+            cursor.execute(f"""
                 SELECT 
                     COALESCE(c.nome, 'Cliente Não Identificado') as nome,
                     COUNT(*) as compras,
                     SUM(v.valor_total) as valor_total
                 FROM vendas v
                 LEFT JOIN clientes c ON v.cliente_id = c.id
-                WHERE date(v.data_hora) BETWEEN ? AND ?
+                WHERE v.id {query_in_ids}
                 GROUP BY v.cliente_id
                 ORDER BY valor_total DESC
                 LIMIT 10
-            """, (data_inicio, data_fim))
-            
+            """)
             clientes = [dict(row) for row in cursor.fetchall()]
+
+            # Vendas por dia (pode continuar usando o período de data, é mais simples)
+            cursor.execute("""
+                SELECT 
+                    date(data_hora) as data,
+                    SUM(valor_total) as valor
+                FROM vendas
+                WHERE date(data_hora) BETWEEN ? AND ?
+                GROUP BY date(data_hora)
+                ORDER BY date(data_hora)
+            """, (data_inicio, data_fim))
+            vendas_diarias = [dict(row) for row in cursor.fetchall()]
             
             conn.close()
             
-            # Montar resultado
+            # Montar resultado final
             resultado = {
                 'faturamento': vendas_resumo['faturamento'] or 0,
                 'num_vendas': vendas_resumo['num_vendas'] or 0,
-                'lucro': lucro,  # Agora a variável lucro está definida
+                'lucro': lucro,
                 'produtos': produtos,
                 'pagamentos': pagamentos,
-                'clientes': clientes
+                'clientes': clientes,
+                'vendas_diarias': vendas_diarias
             }
 
             return resultado
         except Exception as e:
-            print(f"Erro ao obter dados para dashboard: {e}")
+            # Imprime o erro no console para facilitar a depuração
+            print(f"Erro detalhado ao obter dados para dashboard: {e}")
+            # Retorna None para que a interface possa lidar com o erro
             return None
-    
-    def fechar(self):
-        self.conn.close()

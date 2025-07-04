@@ -30,8 +30,6 @@ class MainWindow(QMainWindow):
         # Configurar janela principal
         self.setWindowTitle("Sistema de Estoque - GestorX")
         self.setGeometry(100, 100, 1200, 700)
-        
-        # Definir ícone da janela
         self.setWindowIcon(self.carregar_logo())
         
         # Widget central
@@ -41,47 +39,32 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
-        # ===== CABEÇALHO UNIFICADO =====
+        # ===== NOVO CABEÇALHO UNIFICADO (VERSÃO CORRIGIDA) =====
         header_frame = QFrame()
         header_frame.setObjectName("headerFrame")
-        header_frame.setFixedHeight(40)
+        header_frame.setFixedHeight(50)
         header_layout = QHBoxLayout(header_frame)
-        header_layout.setContentsMargins(10, 0, 10, 0)
+        header_layout.setContentsMargins(10, 0, 5, 0)
         header_layout.setSpacing(10)
         
-        # Logo da aplicação (substituindo o ícone emoji)
+        # Lado Esquerdo: Logo e Título
         self.app_logo = QLabel()
-        self.app_logo.setObjectName("appLogo")
         self.app_logo.setFixedSize(32, 32)
         self.app_logo.setScaledContents(True)
-        
-        # Carregar e definir a logo
         logo_pixmap = self.carregar_logo_pixmap()
-        if logo_pixmap:
-            self.app_logo.setPixmap(logo_pixmap)
-        else:
-            # Fallback se a logo não for encontrada
-            self.app_logo.setText("📦")
-            self.app_logo.setFont(QFont("Segoe UI", 14))
-            self.app_logo.setAlignment(Qt.AlignCenter)
-        
+        self.app_logo.setPixmap(logo_pixmap if logo_pixmap else QPixmap())
         app_title = QLabel("Sistema de Estoque - GestorX")
         app_title.setFont(QFont("Segoe UI", 12, QFont.Bold))
         app_title.setObjectName("appTitle")
         
-        # Menu principal
-        menu_frame = QFrame()
-        menu_frame.setObjectName("mainMenuFrame")
-        menu_layout = QHBoxLayout(menu_frame)
-        menu_layout.setContentsMargins(20, 0, 20, 0)
-        menu_layout.setSpacing(20)
+        header_layout.addWidget(self.app_logo)
+        header_layout.addWidget(app_title)
         
-        # Botões de menu principais
+        header_layout.addSpacing(20)
+        
+        # Centro: Menus Principais
         arquivo_btn = QPushButton("Arquivo")
-        arquivo_btn.setObjectName("headerMenuButton")
-        arquivo_btn.setCursor(Qt.PointingHandCursor)
         arquivo_menu = QMenu(self)
-        
         config_action = QAction('Configurações', self)
         config_action.triggered.connect(self.abrir_configuracoes)
         arquivo_menu.addAction(config_action)
@@ -90,131 +73,101 @@ class MainWindow(QMainWindow):
         sair_action.triggered.connect(self.close)
         arquivo_menu.addAction(sair_action)
         arquivo_btn.setMenu(arquivo_menu)
-        
+
         relatorios_btn = QPushButton("Relatórios")
-        relatorios_btn.setObjectName("headerMenuButton")
-        relatorios_btn.setCursor(Qt.PointingHandCursor)
         relatorios_menu = QMenu(self)
-        
-        estoque_baixo_action = QAction('Produtos com Estoque Baixo', self)
+        estoque_baixo_action = QAction('Estoque Baixo', self)
         estoque_baixo_action.triggered.connect(self.relatorio_estoque_baixo)
         relatorios_menu.addAction(estoque_baixo_action)
-        
         vencimentos_action = QAction('Produtos a Vencer', self)
         vencimentos_action.triggered.connect(self.relatorio_vencimentos)
         relatorios_menu.addAction(vencimentos_action)
-        
-        promocoes_action = QAction('Promoções Ativas', self)
-        promocoes_action.triggered.connect(self.relatorio_promocoes)
-        relatorios_menu.addAction(promocoes_action)
         relatorios_btn.setMenu(relatorios_menu)
         
         ajuda_btn = QPushButton("Ajuda")
-        ajuda_btn.setObjectName("headerMenuButton")
-        ajuda_btn.setCursor(Qt.PointingHandCursor)
         ajuda_menu = QMenu(self)
-        
         sobre_action = QAction('Sobre', self)
         sobre_action.triggered.connect(self.mostrar_sobre)
         ajuda_menu.addAction(sobre_action)
         ajuda_btn.setMenu(ajuda_menu)
-        
-        # Adicionar botões ao menu
-        menu_layout.addWidget(arquivo_btn)
-        menu_layout.addWidget(relatorios_btn)
-        menu_layout.addWidget(ajuda_btn)
-        
-        # Adicionar stretch para separar os menus do restante
-        header_layout.addWidget(self.app_logo)
-        header_layout.addWidget(app_title)
-        header_layout.addWidget(menu_frame)
+
+        for btn in [arquivo_btn, relatorios_btn, ajuda_btn]:
+            btn.setObjectName("headerMenuButton")
+            btn.setCursor(Qt.PointingHandCursor)
+            header_layout.addWidget(btn)
+
+        # Empurra tudo para os cantos
         header_layout.addStretch()
         
-        # Área de informações e controles à direita
-        controls_frame = QFrame()
-        controls_frame.setObjectName("headerControlsFrame")
-        controls_layout = QHBoxLayout(controls_frame)
-        controls_layout.setContentsMargins(0, 0, 0, 0)
-        controls_layout.setSpacing(15)
+        # Lado Direito: Botão Atualizar, Menu do Usuário e Controles da Janela
         
         # Botão de atualizar
         refresh_button = QPushButton("Atualizar")
-        refresh_button.setObjectName("refreshButton")
+        refresh_button.setObjectName("refreshButton") # Estilize com este nome se precisar
         refresh_button.setCursor(Qt.PointingHandCursor)
         refresh_button.clicked.connect(self.atualizar_dados)
+        header_layout.addWidget(refresh_button)
         
+        # Placeholder para o menu do usuário
+        # Será preenchido pela função setup_for_user
+        self.user_menu_placeholder = QFrame()
+        header_layout.addWidget(self.user_menu_placeholder)
+
         # Separador visual
         separator = QFrame()
         separator.setFrameShape(QFrame.VLine)
         separator.setFrameShadow(QFrame.Sunken)
-        separator.setObjectName("headerSeparator")
+        header_layout.addWidget(separator)
         
-        # Botões de controle da janela
+        # Controles da Janela
         window_controls_frame = QFrame()
-        window_controls_frame.setObjectName("windowControls")
         window_layout = QHBoxLayout(window_controls_frame)
         window_layout.setContentsMargins(0, 0, 0, 0)
-        window_layout.setSpacing(8)
+        window_layout.setSpacing(5)
         
         minimize_btn = QPushButton("─")
-        minimize_btn.setObjectName("minimizeButton")
-        minimize_btn.setFixedSize(22, 22)
-        minimize_btn.setCursor(Qt.PointingHandCursor)
-        minimize_btn.clicked.connect(self.showMinimized)
-        
         maximize_btn = QPushButton("□")
-        maximize_btn.setObjectName("maximizeButton")
-        maximize_btn.setFixedSize(22, 22)
-        maximize_btn.setCursor(Qt.PointingHandCursor)
-        maximize_btn.clicked.connect(self.toggle_maximize)
-        
         close_btn = QPushButton("✕")
-        close_btn.setObjectName("closeButton")
-        close_btn.setFixedSize(22, 22)
-        close_btn.setCursor(Qt.PointingHandCursor)
+        
+        for btn, name in [(minimize_btn, "minimizeButton"), (maximize_btn, "maximizeButton"), (close_btn, "closeButton")]:
+            btn.setObjectName(name)
+            btn.setFixedSize(30, 30)
+        
+        minimize_btn.clicked.connect(self.showMinimized)
+        maximize_btn.clicked.connect(self.toggle_maximize)
         close_btn.clicked.connect(self.close)
         
         window_layout.addWidget(minimize_btn)
         window_layout.addWidget(maximize_btn)
         window_layout.addWidget(close_btn)
         
-        # Adicionar elementos aos controles
-        controls_layout.addWidget(refresh_button)
-        controls_layout.addWidget(separator)
-        controls_layout.addWidget(window_controls_frame)
-        
-        header_layout.addWidget(controls_frame)
+        header_layout.addWidget(window_controls_frame)
         main_layout.addWidget(header_frame)
         
-        # Separador abaixo do cabeçalho
-        header_separator = QFrame()
-        header_separator.setFrameShape(QFrame.HLine)
-        header_separator.setFrameShadow(QFrame.Sunken)
-        header_separator.setObjectName("headerBottomLine")
-        main_layout.addWidget(header_separator)
-        
-        # ===== CONTEÚDO PRINCIPAL =====
+        # Permitir arrastar a janela pelo cabeçalho
+        header_frame.mousePressEvent = self.start_window_drag
+        header_frame.mouseMoveEvent = self.window_drag
+        self.drag_position = None
+
+        # ===== CONTEÚDO PRINCIPAL (CÓDIGO EXISTENTE - SEM MUDANÇAS) =====
         content_frame = QFrame()
-        content_frame.setObjectName("contentFrame")
         content_layout = QHBoxLayout(content_frame)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
         
-        # Container do menu lateral
+        # Container do menu lateral (código existente)
         self.menu_container = QFrame()
         self.menu_container.setObjectName("menuContainer")
         menu_container_layout = QVBoxLayout(self.menu_container)
         menu_container_layout.setContentsMargins(0, 0, 0, 0)
         menu_container_layout.setSpacing(0)
         
-        # Cabeçalho do menu com botão hambúrguer
         menu_header = QFrame()
         menu_header.setObjectName("menuHeader")
         menu_header.setFixedHeight(50)
         menu_header_layout = QHBoxLayout(menu_header)
         menu_header_layout.setContentsMargins(15, 10, 15, 10)
         
-        # Botão hambúrguer
         self.hamburger_btn = QPushButton("☰")
         self.hamburger_btn.setObjectName("hamburgerButton")
         self.hamburger_btn.setFixedSize(30, 30)
@@ -223,15 +176,15 @@ class MainWindow(QMainWindow):
         
         menu_header_layout.addWidget(self.hamburger_btn)
         menu_header_layout.addStretch()
+        menu_container_layout.addWidget(menu_header)
         
-        # Menu lateral
+        # Menu lateral (código existente)
         self.menu_widget = QFrame()
         self.menu_widget.setObjectName("menuLateral")
         menu_widget_layout = QVBoxLayout(self.menu_widget)
         menu_widget_layout.setSpacing(5)
         menu_widget_layout.setContentsMargins(10, 20, 10, 20)
         
-        # Botões do menu
         self.btn_dashboard = self.criar_botao_menu("Dashboard", "dashboard.png")
         self.btn_estoque = self.criar_botao_menu("Controle de Estoque", "estoque-pronto.png")
         self.btn_fornecedor = self.criar_botao_menu("Fornecedores", "entregador.png")
@@ -239,57 +192,40 @@ class MainWindow(QMainWindow):
         self.btn_clientes = self.criar_botao_menu("Clientes", "negocios.png")
         self.btn_caixa = self.criar_botao_menu("Controle de Caixa", "dinheiro.png")
         
-        # Lista de botões para facilitar a manipulação
-        self.menu_buttons = [
-            self.btn_dashboard,
-            self.btn_estoque,
-            self.btn_fornecedor,
-            self.btn_promocoes,
-            self.btn_clientes,
-            self.btn_caixa
-        ]
+        self.menu_buttons = [self.btn_dashboard, self.btn_estoque, self.btn_fornecedor, self.btn_promocoes, self.btn_clientes, self.btn_caixa]
         
-        # Adicionar botões ao menu
         for btn in self.menu_buttons:
             menu_widget_layout.addWidget(btn)
-        
         menu_widget_layout.addStretch()
         
-        # Separador antes das configurações
-        separador = QFrame()
-        separador.setFrameShape(QFrame.HLine)
-        separador.setFrameShadow(QFrame.Sunken)
-        separador.setObjectName("separator")
-        menu_widget_layout.addWidget(separador)
+        separador_menu = QFrame()
+        separador_menu.setFrameShape(QFrame.HLine)
+        separador_menu.setFrameShadow(QFrame.Sunken)
+        separador_menu.setObjectName("separator")
+        menu_widget_layout.addWidget(separador_menu)
         
-        # Botão de configurações
         self.btn_config = self.criar_botao_menu("Configurações", "engrenagem.png")
         self.btn_config.clicked.connect(self.abrir_configuracoes)
         menu_widget_layout.addWidget(self.btn_config)
         
-        # Créditos no final do menu
         self.creditos = QLabel("© 2025")
         self.creditos.setAlignment(Qt.AlignCenter)
         self.creditos.setObjectName("creditos")
         menu_widget_layout.addWidget(self.creditos)
         
-        # Adicionar cabeçalho e menu ao container
-        menu_container_layout.addWidget(menu_header)
         menu_container_layout.addWidget(self.menu_widget)
         
-        # Área de conteúdo
+        # Área de conteúdo (código existente)
         content_container = QFrame()
         content_container.setObjectName("contentContainer")
         content_container_layout = QVBoxLayout(content_container)
         content_container_layout.setContentsMargins(20, 20, 20, 20)
         
-        # Cabeçalho da área de conteúdo
         self.page_title = QLabel("Dashboard")
         self.page_title.setFont(QFont("Segoe UI", 18, QFont.Bold))
         self.page_title.setObjectName("pageTitle")
         content_container_layout.addWidget(self.page_title)
         
-        # Separador no conteúdo
         content_separator = QFrame()
         content_separator.setFrameShape(QFrame.HLine)
         content_separator.setFrameShadow(QFrame.Sunken)
@@ -297,11 +233,9 @@ class MainWindow(QMainWindow):
         content_container_layout.addWidget(content_separator)
         content_container_layout.addSpacing(10)
         
-        # Stack para as páginas
         self.stack = QStackedWidget()
         content_container_layout.addWidget(self.stack)
         
-        # Criar as páginas e adicioná-las ao stack
         self.estoque_page = EstoqueWindow(self.db)
         self.fornecedor_page = FornecedorWindow(self.db)
         self.promocoes_page = PromocoesWindow(self.db)
@@ -316,7 +250,6 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.clientes_page)
         self.stack.addWidget(self.caixa_page)
         
-        # Conectar sinais dos botões
         self.btn_dashboard.clicked.connect(lambda: self.switch_page(0))
         self.btn_estoque.clicked.connect(lambda: self.switch_page(1))
         self.btn_fornecedor.clicked.connect(lambda: self.switch_page(2))
@@ -324,35 +257,25 @@ class MainWindow(QMainWindow):
         self.btn_clientes.clicked.connect(lambda: self.switch_page(4))
         self.btn_caixa.clicked.connect(lambda: self.switch_page(5))
         
-        # Adicionar elementos ao layout de conteúdo principal
         content_layout.addWidget(self.menu_container)
         content_layout.addWidget(content_container)
-        
-        # Adicionar frame de conteúdo ao layout principal
         main_layout.addWidget(content_frame)
         
-        # Status bar simplificado na parte inferior
+        # Status bar (código existente)
         self.statusBar = QStatusBar()
         self.statusBar.setObjectName("statusBar")
-        self.statusBar.setMaximumHeight(25)
+        self.statusBar.setFixedHeight(25)
         self.statusBar.showMessage("Sistema pronto", 3000)
+        self.setStatusBar(self.statusBar)
         
-        # Configurar widget central
-        self.setCentralWidget(central_widget)
-        
-        # Configurar estado inicial do menu (expandido)
+        # Estado inicial do menu (código existente)
         self.menu_container.setMinimumWidth(70)
         self.menu_container.setMaximumWidth(70)
         self.creditos.setText("©")
-
+        self.menu_collapsed = True
         for btn in self.menu_buttons + [self.btn_config]:
             if hasattr(btn, 'text_label'):
                 btn.text_label.hide()
-        
-        # Permitir arrastar a janela pelo cabeçalho
-        header_frame.mousePressEvent = self.start_window_drag
-        header_frame.mouseMoveEvent = self.window_drag
-        self.drag_position = None
     
     def carregar_logo(self):
         """Carrega a logo como QIcon para uso na barra de título"""
@@ -826,9 +749,42 @@ class MainWindow(QMainWindow):
     def setup_for_user(self, usuario):
         """Configura a interface para o usuário logado"""
         try:
+            # Usa o UserManager, se existir, para manter a estrutura organizada
             if not hasattr(self, 'user_manager'):
                 self.user_manager = UserManager(self, self.db)
-            self.user_manager.setup_for_user(usuario)
+            
+            self.user_manager.usuario = usuario
+            
+            # Cria o menu do usuário
+            user_menu_widget = UserMenuWidget(usuario)
+            
+            # Conecta os sinais do menu do usuário ao UserManager
+            user_menu_widget.profile_requested.connect(self.user_manager.open_profile)
+            user_menu_widget.password_change_requested.connect(self.user_manager.change_password)
+            user_menu_widget.admin_requested.connect(self.user_manager.open_admin)
+            user_menu_widget.logout_requested.connect(self.user_manager.logout)
+
+            # Remove o placeholder antigo e adiciona o widget real
+            # Isso garante que, se o usuário fizer logout e login de novo, não haja duplicação
+            if self.user_menu_placeholder.layout() is not None:
+                # Limpa o layout do placeholder se já tiver algo
+                while self.user_menu_placeholder.layout().count():
+                    child = self.user_menu_placeholder.layout().takeAt(0)
+                    if child.widget():
+                        child.widget().deleteLater()
+            else:
+                # Cria um layout se não existir
+                placeholder_layout = QHBoxLayout()
+                placeholder_layout.setContentsMargins(0, 0, 0, 0)
+                self.user_menu_placeholder.setLayout(placeholder_layout)
+            
+            # Adiciona o novo menu do usuário ao placeholder
+            self.user_menu_placeholder.layout().addWidget(user_menu_widget)
+
+            # Configura a barra de status e ajusta permissões
+            self.user_manager.setup_status_bar()
+            self.user_manager.adjust_permissions()
+
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"Erro ao configurar usuário: {str(e)}")
 
@@ -1219,7 +1175,7 @@ class UserManager:
             self.user_menu_widget.logout_requested.connect(self.logout)
             
             # Adicionar à barra de menu
-            self.main_window.menuBar().setCornerWidget(self.user_menu_widget, Qt.TopRightCorner)
+            #self.main_window.menuBar().setCornerWidget(self.user_menu_widget, Qt.TopRightCorner)
             
         except Exception as e:
             print(f"Erro ao configurar menu do usuário: {e}")

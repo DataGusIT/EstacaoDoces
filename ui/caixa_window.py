@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLab
                             QPushButton, QTableWidget, QTableWidgetItem, QComboBox, QDateEdit,
                             QMessageBox, QDialog, QFormLayout, QTextEdit, QDoubleSpinBox,
                             QSpinBox, QHeaderView, QCheckBox, QGroupBox, QGridLayout, QFrame,
-                            QSplitter, QApplication,  QFileDialog, QMessageBox, QHBoxLayout, QLayout)
+                            QSplitter, QApplication,  QFileDialog, QMessageBox, QHBoxLayout, QLayout, QRadioButton)
 from PyQt5.QtCore import Qt, QDate, QDateTime, QMarginsF
 from PyQt5.QtGui import QIcon, QColor, QFont, QTextDocument, QPageSize, QPageLayout, QIcon
 from PyQt5.QtPrintSupport import QPrinter
@@ -188,81 +188,33 @@ class CaixaWindow(QWidget):
         layout.addWidget(frame_total)
     
     def buscar_produto(self):
-        """Buscar produto pelo nome ou código de barras"""
-        texto = self.cb_produto.currentText().strip()
-        if not texto:
+        """
+        Busca um produto pelo código de barras digitado e o adiciona ao carrinho.
+        Este método é acionado ao pressionar Enter no campo de produto.
+        """
+        codigo_barras = self.cb_produto.currentText().strip()
+        if not codigo_barras:
             return
-        
-        # Tenta buscar como código de barras primeiro
-        codigo_barras = texto.strip()
-        produto = self.db.buscar_produto_por_codigo_barras(codigo_barras)
-        
-        if produto:
-            # Verificar se é produto fracionado e mostrar opções
-            if produto['fracionado'] and produto['preco_unitario_fracao']:
-                self.mostrar_opcoes_produto_fracionado(produto)
-            else:
-                # Produto normal - buscar no combobox
-                self.selecionar_produto_no_combo(produto)
-        else:
-            # Tenta buscar pelo nome do produto
-            produtos = self.db.buscar_produtos_por_nome(texto)
-            if produtos and len(produtos) > 0:
-                produto = produtos[0]
-                if produto['fracionado'] and produto['preco_unitario_fracao']:
-                    self.mostrar_opcoes_produto_fracionado(produto)
-                else:
-                    self.selecionar_produto_no_combo(produto)
-            else:
-                QMessageBox.warning(self, "Produto não encontrado", f"Nenhum produto com código/nome: {texto}")
-        
-        # Limpar o campo e focar novamente
-        self.cb_produto.setCurrentText("")
-        self.cb_produto.setFocus()
-    
-    def mostrar_opcoes_produto_fracionado(self, produto):
-        """Mostra diálogo para escolher entre embalagem ou fração"""
-        dialog = DialogOpcoesFracionado(produto, self)
-        if dialog.exec_() == QDialog.Accepted:
-            opcao_escolhida = dialog.get_opcao_selecionada()
-            
-            # Buscar a opção correspondente no combobox
-            for i in range(self.cb_produto.count()):
-                item_data = self.cb_produto.itemData(i)
-                if (item_data and 
-                    item_data.get('id') == produto['id'] and 
-                    item_data.get('tipo_venda') == opcao_escolhida):
-                    
-                    self.cb_produto.setCurrentIndex(i)
-                    self.spin_quantidade.setValue(1)
-                    self.spin_preco.setValue(item_data['preco_venda'])
-                    
-                    # Verificar promoções
-                    self.verificar_promocoes(item_data)
-                    
-                    # Adicionar automaticamente
-                    self.adicionar_item()
-                    break
-    
-    def selecionar_produto_no_combo(self, produto):
-        """Seleciona produto normal no combobox"""
-        index = -1
+
+        # Procura o produto no ComboBox pelo código de barras
+        index_encontrado = -1
         for i in range(self.cb_produto.count()):
-            item_data = self.cb_produto.itemData(i)
-            if item_data and item_data['id'] == produto['id']:
-                index = i
+            produto_data = self.cb_produto.itemData(i)
+            if produto_data and produto_data.get('codigo_barras') == codigo_barras:
+                index_encontrado = i
                 break
         
-        if index >= 0:
-            self.cb_produto.setCurrentIndex(index)
-            self.spin_quantidade.setValue(1)
-            self.spin_preco.setValue(produto['preco_venda'] if produto['preco_venda'] else 0)
-            
-            # Verificar promoções
-            self.verificar_promocoes(produto)
-            
-            # Adicionar automaticamente
+        if index_encontrado != -1:
+            # Seleciona o produto encontrado no ComboBox
+            self.cb_produto.setCurrentIndex(index_encontrado)
+            # Chama imediatamente a função de adicionar, simulando "scan and add"
             self.adicionar_item()
+        else:
+            QMessageBox.warning(self, "Produto não encontrado", f"Nenhum produto com o código de barras '{codigo_barras}' foi encontrado.")
+            # Limpa o campo para a próxima leitura
+            self.cb_produto.setCurrentText("")
+            self.cb_produto.setFocus()
+    
     
     def verificar_promocoes(self, produto):
         """Verifica e aplica promoções ativas"""
@@ -442,50 +394,20 @@ class CaixaWindow(QWidget):
             self.cb_cliente.addItem(cliente['nome'], cliente['id'])
     
     def carregar_produtos(self):
-        # Salvar o texto atual do campo
         texto_atual = self.cb_produto.currentText()
         
-        # Limpar o combobox
         self.cb_produto.clear()
+        self.cb_produto.addItem("", None) # Item vazio para placeholder
         
-        # Adicionar um item vazio como primeiro item
-        self.cb_produto.addItem("", None)
-        
-        # Carregar produtos do banco de dados usando o novo método
         produtos = self.db.listar_produtos_com_fracionamento()
         for produto_row in produtos:
-            # Converter Row para dicionário comum
             produto = dict(produto_row)
             
-            # Para produtos fracionados, adicionar duas opções: embalagem e fração
-            if produto['fracionado'] and produto['preco_unitario_fracao']:
-                # Opção para venda da embalagem completa
-                nome_embalagem = f"{produto['nome']} (Embalagem - {produto['qtd_por_embalagem']} {produto['unidade_medida']})"
-                produto_embalagem = produto.copy()
-                produto_embalagem['tipo_venda'] = 'embalagem'
-                produto_embalagem['nome_display'] = nome_embalagem
-                self.cb_produto.addItem(nome_embalagem, produto_embalagem)
-                
-                # Opção para venda fracionada (apenas se houver estoque fracionado)
-                if produto['estoque_fracionado'] > 0:
-                    nome_fracao = f"{produto['nome']} (Fração - {produto['unidade_medida']})"
-                    produto_fracao = produto.copy()
-                    produto_fracao['tipo_venda'] = 'fracao'
-                    produto_fracao['nome_display'] = nome_fracao
-                    produto_fracao['preco_venda'] = produto['preco_unitario_fracao']
-                    produto_fracao['quantidade_disponivel'] = produto['estoque_fracionado']
-                    self.cb_produto.addItem(nome_fracao, produto_fracao)
-            else:
-                # Produto normal
-                produto['tipo_venda'] = 'normal'
-                produto['nome_display'] = produto['nome']
-                produto['quantidade_disponivel'] = produto['quantidade']
-                self.cb_produto.addItem(produto['nome'], produto)
-        
-        # Restaurar o texto que estava sendo digitado
+            # Adiciona apenas UMA entrada por produto
+            # O itemData agora contém toda a informação do produto
+            self.cb_produto.addItem(produto['nome'], produto)
+
         self.cb_produto.setCurrentText(texto_atual)
-        
-        # Focar no campo de produto
         self.cb_produto.setFocus()
     
     def produto_selecionado(self, index):
@@ -511,47 +433,70 @@ class CaixaWindow(QWidget):
     
     def adicionar_item(self):
         index = self.cb_produto.currentIndex()
-        if index < 0:
-            QMessageBox.warning(self, "Erro", "Selecione um produto")
+        if index <= 0:  # Ignora o item vazio
+            QMessageBox.warning(self, "Seleção Inválida", "Selecione um produto válido.")
             return
-        
+
         produto = self.cb_produto.itemData(index)
-        if not produto:
-            QMessageBox.warning(self, "Erro", "Produto inválido")
+        
+        sale_details = None
+        
+        # Se o produto é fracionado, abre o diálogo de escolha
+        if produto['fracionado']:
+            dialog = DialogVendaFracionada(produto, self)
+            if dialog.exec_() == QDialog.Accepted:
+                sale_details = dialog.get_sale_details()
+            else:
+                return # Usuário cancelou
+        else:
+            # Lógica para produto não fracionado (normal)
+            quantidade = self.spin_quantidade.value()
+            preco_unitario = self.spin_preco.value()
+            
+            if quantidade > produto['quantidade']:
+                QMessageBox.warning(self, "Estoque Insuficiente", f"Estoque disponível: {produto['quantidade']} unidades.")
+                return
+
+            sale_details = {
+                "quantidade": quantidade,
+                "preco_unitario": preco_unitario,
+                "is_embalagem": True, # Todo produto não fracionado é tratado como "embalagem"
+                "produto_nome": produto['nome']
+            }
+
+        if not sale_details:
             return
-        
-        quantidade = self.spin_quantidade.value()
-        preco = self.spin_preco.value()
-        subtotal = quantidade * preco
-        
-        # Verificar estoque baseado no tipo de venda
-        estoque_disponivel = self.obter_estoque_disponivel(produto)
-        
-        if quantidade > estoque_disponivel:
-            unidade = produto.get('unidade_medida', 'unidades') if produto.get('tipo_venda') == 'fracao' else 'unidades'
-            QMessageBox.warning(self, "Estoque Insuficiente", 
-                            f"Estoque disponível: {estoque_disponivel} {unidade}")
+
+        # 1. Tenta atualizar o estoque PRIMEIRO
+        sucesso, mensagem = self.db.atualizar_estoque_venda(
+            produto['id'],
+            sale_details['quantidade'],
+            sale_details['is_embalagem']
+        )
+
+        if not sucesso:
+            QMessageBox.critical(self, "Erro de Estoque", mensagem)
             return
-        
-        # Adicionar à lista de itens
-        item = {
+
+        # 2. Se o estoque foi atualizado, adiciona o item ao carrinho
+        item_carrinho = {
             'produto_id': produto['id'],
-            'produto_nome': produto.get('nome_display', produto['nome']),
-            'quantidade': quantidade,
-            'preco_unitario': preco,
-            'subtotal': subtotal,
-            'tipo_venda': produto.get('tipo_venda', 'normal'),
-            'unidade_medida': produto.get('unidade_medida', 'unidade')
+            'produto_nome': sale_details['produto_nome'],
+            'quantidade': sale_details['quantidade'],
+            'preco_unitario': sale_details['preco_unitario'],
+            'subtotal': sale_details['quantidade'] * sale_details['preco_unitario'],
+            'is_embalagem': sale_details['is_embalagem']
         }
         
-        self.itens_venda.append(item)
+        self.itens_venda.append(item_carrinho)
         self.atualizar_tabela_itens()
         self.calcular_total()
         
-        # Limpar seleção
+        # Limpar campos para a próxima adição
         self.cb_produto.setCurrentIndex(0)
         self.spin_quantidade.setValue(1)
         self.spin_preco.setValue(0)
+        self.cb_produto.setFocus()
     
     def atualizar_tabela_itens(self):
         self.tabela_itens.setRowCount(0)
@@ -762,16 +707,19 @@ class CaixaWindow(QWidget):
             
             # Registrar venda
             venda_id = self.db.registrar_venda(
-                cliente_id, total_final, desconto, forma_pagamento, 
-                parcelas, observacao, "Concluída", "Sistema"
+            cliente_id, total_final, desconto, forma_pagamento, 
+            parcelas, observacao, "Concluída", "Sistema"
             )
             
             if venda_id:
-                # Registrar itens da venda
+                # Registrar itens da venda (o estoque JÁ FOI ATUALIZADO)
                 for item in self.itens_venda:
                     self.db.registrar_item_venda(
-                        venda_id, item['produto_id'], item['quantidade'], 
-                        item['preco_unitario'], item['subtotal']
+                        venda_id, 
+                        item['produto_id'], 
+                        item['quantidade'], 
+                        item['preco_unitario'], 
+                        item['subtotal']
                     )
                 
                 # Registrar entrada no caixa
@@ -1673,3 +1621,95 @@ class DialogOpcoesFracionado(QDialog):
     
     def get_opcao_selecionada(self):
         return self.opcao_selecionada
+
+class DialogVendaFracionada(QDialog):
+    def __init__(self, produto, parent=None):
+        super().__init__(parent)
+        self.produto = produto
+        self.sale_details = None
+
+        self.setWindowTitle("Opção de Venda")
+        self.setFixedWidth(400)
+        
+        layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+
+        titulo = QLabel(f"<b>{produto['nome']}</b>")
+        titulo.setAlignment(Qt.AlignCenter)
+        layout.addWidget(titulo)
+
+        # Opções de Venda
+        self.radio_embalagem = QRadioButton("Vender Embalagem Inteira")
+        self.radio_unidade = QRadioButton("Vender Unidade Avulsa")
+        self.radio_embalagem.toggled.connect(self.update_info)
+        
+        btn_group_layout = QHBoxLayout()
+        btn_group_layout.addWidget(self.radio_embalagem)
+        btn_group_layout.addWidget(self.radio_unidade)
+        form_layout.addRow("Tipo de Venda:", btn_group_layout)
+
+        # Informações
+        self.lbl_info_preco = QLabel()
+        self.lbl_info_estoque = QLabel()
+        form_layout.addRow("Preço Unitário:", self.lbl_info_preco)
+        form_layout.addRow("Estoque Disponível:", self.lbl_info_estoque)
+
+        # Quantidade - CORRIGIDO PARA QDoubleSpinBox
+        self.spin_quantidade = QDoubleSpinBox()
+        self.spin_quantidade.setMinimum(0.001) # Mínimo para venda fracionada
+        self.spin_quantidade.setDecimals(3) # Para kg (ex: 0.250)
+        self.spin_quantidade.setSingleStep(0.1)
+        form_layout.addRow("Quantidade:", self.spin_quantidade)
+
+        layout.addLayout(form_layout)
+
+        # Botões de confirmação
+        button_box = QHBoxLayout()
+        self.confirmar_btn = QPushButton("Confirmar")
+        self.confirmar_btn.clicked.connect(self.confirmar)
+        cancelar_btn = QPushButton("Cancelar")
+        cancelar_btn.clicked.connect(self.reject)
+        button_box.addStretch()
+        button_box.addWidget(cancelar_btn)
+        button_box.addWidget(self.confirmar_btn)
+        layout.addLayout(button_box)
+
+        self.radio_embalagem.setChecked(True)
+
+    def update_info(self):
+        if self.radio_embalagem.isChecked():
+            self.spin_quantidade.setDecimals(0) # Embalagem é inteira
+            self.spin_quantidade.setMinimum(1)
+            self.spin_quantidade.setValue(1)
+            self.lbl_info_preco.setText(f"R$ {self.produto['preco_venda']:.2f}")
+            self.lbl_info_estoque.setText(f"{self.produto['quantidade']} embalagens")
+            self.spin_quantidade.setMaximum(self.produto['quantidade'])
+        else:
+            self.spin_quantidade.setDecimals(3) # Fração pode ter decimais
+            self.spin_quantidade.setMinimum(0.001)
+            self.spin_quantidade.setValue(1)
+            self.lbl_info_preco.setText(f"R$ {self.produto['preco_unitario_fracao']:.2f}")
+            self.lbl_info_estoque.setText(f"{self.produto['estoque_fracionado']} {self.produto['unidade_medida']}")
+            # estoque_fracionado é float, setMaximum aceita float em QDoubleSpinBox
+            self.spin_quantidade.setMaximum(self.produto['estoque_fracionado'])
+
+    def confirmar(self):
+        quantidade = self.spin_quantidade.value()
+        if quantidade > self.spin_quantidade.maximum() or quantidade == 0:
+            QMessageBox.warning(self, "Estoque Insuficiente", "A quantidade solicitada excede o estoque disponível.")
+            return
+
+        is_embalagem = self.radio_embalagem.isChecked()
+        preco_unitario = self.produto['preco_venda'] if is_embalagem else self.produto['preco_unitario_fracao']
+        unidade = "emb." if is_embalagem else self.produto['unidade_medida']
+        
+        self.sale_details = {
+            "quantidade": quantidade,
+            "preco_unitario": preco_unitario,
+            "is_embalagem": is_embalagem,
+            "produto_nome": f"{self.produto['nome']} ({unidade})"
+        }
+        self.accept()
+
+    def get_sale_details(self):
+        return self.sale_details

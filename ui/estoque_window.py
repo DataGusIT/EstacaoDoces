@@ -1145,6 +1145,7 @@ class FormularioProduto(QDialog):
         self.qtd_por_embalagem_input = QSpinBox()
         self.qtd_por_embalagem_input.setRange(1, 9999)
         self.qtd_por_embalagem_input.setValue(1)
+        # self.qtd_por_embalagem_input.valueChanged.connect(self.calcular_preco_venda) # ADICIONE ESTA LINHA
         
         self.preco_unitario_fracao_input = QDoubleSpinBox()
         self.preco_unitario_fracao_input.setRange(0, 99999.99)
@@ -1229,27 +1230,51 @@ class FormularioProduto(QDialog):
             self.estoque_fracionado_input.setValue(0)
     
     def calcular_preco_venda(self):
-        """Calcula o preço de venda com base no preço de compra e margem de lucro."""
+        """
+        Calcula o preço de venda da EMBALAGEM e SUGERE o preço da FRAÇÃO.
+        Não sobrescreve o preço da fração se já foi definido manualmente.
+        """
+        # Bloqueia os sinais para evitar chamadas recursivas
+        self.preco_venda_input.blockSignals(True)
+        
         preco_compra = self.preco_compra_input.value()
         margem = self.margem_lucro_input.value() / 100
         
-        # Evitar sinal de mudança recursivo
-        self.preco_venda_input.blockSignals(True)
-        self.preco_venda_input.setValue(preco_compra * (1 + margem))
+        # 1. Calcula e define o preço de venda da embalagem inteira
+        preco_venda_embalagem = preco_compra * (1 + margem)
+        self.preco_venda_input.setValue(preco_venda_embalagem)
+        
+        # 2. SUGERE o preço de venda para a fração
+        # Apenas se o campo de preço da fração estiver zerado, para não sobrescrever a entrada manual.
+        if self.preco_unitario_fracao_input.value() == 0.0:
+            self.preco_unitario_fracao_input.blockSignals(True)
+            
+            qtd_por_embalagem = self.qtd_por_embalagem_input.value()
+            if qtd_por_embalagem > 0:
+                custo_fracao = preco_compra / qtd_por_embalagem
+                preco_venda_fracao_sugerido = custo_fracao * (1 + margem)
+                self.preco_unitario_fracao_input.setValue(preco_venda_fracao_sugerido)
+                
+            self.preco_unitario_fracao_input.blockSignals(False)
+            
+        # Desbloqueia os sinais
         self.preco_venda_input.blockSignals(False)
     
     def calcular_margem_lucro(self):
-        """Calcula a margem de lucro com base no preço de compra e preço de venda."""
+        """Calcula a margem de lucro com base no preço de compra e preço de venda da EMBALAGEM."""
         preco_compra = self.preco_compra_input.value()
-        preco_venda = self.preco_venda_input.value()
+        preco_venda_embalagem = self.preco_venda_input.value()
         
         if preco_compra > 0:
-            margem = ((preco_venda / preco_compra) - 1) * 100
+            margem = ((preco_venda_embalagem / preco_compra) - 1) * 100
             
             # Evitar sinal de mudança recursivo
             self.margem_lucro_input.blockSignals(True)
             self.margem_lucro_input.setValue(margem)
             self.margem_lucro_input.blockSignals(False)
+            
+            # Note que não chamamos mais self.calcular_preco_venda() aqui,
+            # para não sobrescrever o preço da fração definido pelo usuário.
     
     def carregar_fornecedores(self):
         """Carrega a lista de fornecedores para o combobox."""
