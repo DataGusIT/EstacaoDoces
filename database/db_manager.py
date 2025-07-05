@@ -222,6 +222,26 @@ class DatabaseManager:
             ultimo_acesso TIMESTAMP
         )
         ''')
+
+        # Tabela de Configurações do Sistema (NOVA)
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS configuracoes (
+            chave TEXT PRIMARY KEY,
+            valor TEXT NOT NULL
+        )
+        ''')
+
+        # Tabela de Logs de Atividades (NOVA)
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            level TEXT NOT NULL, -- ex: INFO, WARNING, ERROR, ADMIN
+            usuario_login TEXT,
+            action TEXT NOT NULL,
+            details TEXT
+        )
+        ''')
         
         # Verificar se existe pelo menos um usuário admin
         self.cursor.execute("SELECT COUNT(*) FROM usuarios WHERE tipo='admin'")
@@ -739,15 +759,18 @@ class DatabaseManager:
     
     # Métodos para Usuários
     def obter_usuario_por_id(self, usuario_id):
-        """Retorna os dados de um usuário pelo ID"""
+        """Retorna os dados de um usuário pelo ID, incluindo o status."""
+        self.ensure_connection()
         self.cursor.execute('''
-        SELECT id, nome, login, email, tipo, data_cadastro, ultimo_acesso
-        FROM usuarios WHERE id = ?
+            SELECT id, nome, login, email, tipo, ativo, data_cadastro, ultimo_acesso
+            FROM usuarios WHERE id = ?
         ''', (usuario_id,))
         
         usuario = self.cursor.fetchone()
         
         if usuario:
+            # A conversão para dict(usuario) já inclui a coluna 'ativo'
+            # pois ela está no SELECT.
             return dict(usuario)
         else:
             return None
@@ -1396,3 +1419,57 @@ class DatabaseManager:
             print(f"Erro detalhado ao obter dados para dashboard: {e}")
             # Retorna None para que a interface possa lidar com o erro
             return None
+        
+    
+    # --- Métodos para Configurações do Sistema ---
+
+    def obter_configuracao(self, chave, padrao=None):
+        """Busca o valor de uma chave de configuração."""
+        self.cursor.execute("SELECT valor FROM configuracoes WHERE chave = ?", (chave,))
+        resultado = self.cursor.fetchone()
+        return resultado['valor'] if resultado else padrao
+
+    def definir_configuracao(self, chave, valor):
+        """Define ou atualiza o valor de uma chave de configuração."""
+        self.cursor.execute('''
+            INSERT INTO configuracoes (chave, valor) VALUES (?, ?)
+            ON CONFLICT(chave) DO UPDATE SET valor = EXCLUDED.valor
+        ''', (chave, str(valor)))
+        self.conn.commit()
+        return self.cursor.rowcount > 0
+
+    # --- Métodos para Logs do Sistema ---
+
+    def registrar_log(self, level, usuario_login, action, details=""):
+        """Registra uma nova entrada de log."""
+        try:
+            self.cursor.execute('''
+                INSERT INTO logs (level, usuario_login, action, details)
+                VALUES (?, ?, ?, ?)
+            ''', (level, usuario_login, action, details))
+            self.conn.commit()
+        except Exception as e:
+            print(f"Erro ao registrar log: {e}")
+
+    def listar_logs(self, data_inicio=None, data_fim=None, usuario=None, level=None):
+        """Lista os logs com base em filtros."""
+        query = "SELECT * FROM logs WHERE 1=1"
+        params = []
+
+        if data_inicio:
+            query += " AND date(timestamp) >= ?"
+            params.append(data_inicio)
+        if data_fim:
+            query += " AND date(timestamp) <= ?"
+            params.append(data_fim)
+        if usuario:
+            query += " AND usuario_login LIKE ?"
+            params.append(f"%{usuario}%")
+        if level and level != "Todos":
+            query += " AND level = ?"
+            params.append(level)
+            
+        query += " ORDER BY timestamp DESC"
+        
+        self.cursor.execute(query, params)
+        return self.cursor.fetchall()

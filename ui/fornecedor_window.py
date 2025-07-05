@@ -20,6 +20,36 @@ class FornecedorWindow(QWidget):
         self.initUI()
         self.carregar_dados()
     
+    # NOVO MÉTODO: Centraliza a estilização dos botões (copiado da outra classe)
+    def _get_button_style(self, style_type):
+        """Retorna uma string de estilo CSS para um tipo de botão específico."""
+        base_style = """
+            QPushButton {{
+                color: {text_color};
+                background-color: {bg_color};
+                border: none;
+                padding: 8px 12px;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {hover_color};
+            }}
+            QPushButton:pressed {{
+                background-color: {pressed_color};
+            }}
+        """
+        styles = {
+            "add":      ("white", "#28a745", "#218838", "#1e7e34"),  # Verde (Sucesso)
+            "report":   ("white", "#007bff", "#0069d9", "#0062cc"),  # Azul (Informativo)
+            "data":     ("white", "#17a2b8", "#138496", "#117a8b"),  # Azul-petróleo (Import/Export)
+            "edit":     ("black", "#ffc107", "#e0a800", "#d39e00"),  # Amarelo (Aviso/Edição)
+            "delete":   ("white", "#dc3545", "#c82333", "#bd2130"),  # Vermelho (Perigo/Exclusão)
+            "action":   ("white", "#fd7e14", "#e67311", "#da6d10")   # Laranja (Ação especial)
+        }
+        text, bg, hover, pressed = styles.get(style_type, ("black", "#f0f0f0", "#e0e0e0", "#d0d0d0"))
+        return base_style.format(text_color=text, bg_color=bg, hover_color=hover, pressed_color=pressed)
+    
     def initUI(self):
         # Layout principal
         layout = QVBoxLayout(self)
@@ -48,11 +78,12 @@ class FornecedorWindow(QWidget):
         self.tabela.verticalHeader().setVisible(False)
         layout.addWidget(self.tabela)
         
-        # Botões de ação
+        # Botões de ação - AGORA COM ESTILOS
         action_layout = QHBoxLayout()
         
         # Grupo de botões principais
         self.add_button = QPushButton("Adicionar Fornecedor")
+        self.add_button.setStyleSheet(self._get_button_style("add")) # Estilo adicionado
         self.add_button.clicked.connect(self.abrir_formulario_fornecedor)
         action_layout.addWidget(self.add_button)
         
@@ -61,10 +92,12 @@ class FornecedorWindow(QWidget):
         csv_layout = QHBoxLayout(csv_group)
         
         self.importar_csv_btn = QPushButton("Importar CSV")
+        self.importar_csv_btn.setStyleSheet(self._get_button_style("data")) # Estilo adicionado
         self.importar_csv_btn.clicked.connect(self.importar_csv)
         csv_layout.addWidget(self.importar_csv_btn)
         
         self.exportar_csv_btn = QPushButton("Exportar CSV")
+        self.exportar_csv_btn.setStyleSheet(self._get_button_style("data")) # Estilo adicionado
         self.exportar_csv_btn.clicked.connect(self.exportar_csv)
         csv_layout.addWidget(self.exportar_csv_btn)
         
@@ -72,6 +105,7 @@ class FornecedorWindow(QWidget):
         
         # Botão de verificar estoque baixo
         self.verificar_estoque_btn = QPushButton("Verificar Estoque Baixo")
+        self.verificar_estoque_btn.setStyleSheet(self._get_button_style("action")) # Estilo adicionado
         self.verificar_estoque_btn.clicked.connect(self.verificar_estoque_baixo)
         action_layout.addWidget(self.verificar_estoque_btn)
         
@@ -85,11 +119,7 @@ class FornecedorWindow(QWidget):
     def pesquisar_fornecedores(self):
         """Pesquisa fornecedores pelo termo digitado."""
         termo = self.search_input.text()
-        if termo:
-            fornecedores = self.db.listar_fornecedores(filtro=termo)
-        else:
-            fornecedores = self.db.listar_fornecedores()
-        
+        fornecedores = self.db.listar_fornecedores(filtro=termo) if termo else self.db.listar_fornecedores()
         self.atualizar_tabela(fornecedores)
     
     def atualizar_tabela(self, fornecedores):
@@ -99,7 +129,6 @@ class FornecedorWindow(QWidget):
         for row, fornecedor in enumerate(fornecedores):
             self.tabela.insertRow(row)
             
-            # Adicionar dados às células
             self.tabela.setItem(row, 0, QTableWidgetItem(str(fornecedor['id'])))
             self.tabela.setItem(row, 1, QTableWidgetItem(fornecedor['empresa']))
             self.tabela.setItem(row, 2, QTableWidgetItem(fornecedor['representante'] or ""))
@@ -107,15 +136,18 @@ class FornecedorWindow(QWidget):
             self.tabela.setItem(row, 4, QTableWidgetItem(fornecedor['telefone'] or ""))
             self.tabela.setItem(row, 5, QTableWidgetItem(fornecedor['email'] or ""))
             
-            # Botões de ação
+            # Botões de ação - AGORA COM ESTILOS
             acoes_widget = QWidget()
             acoes_layout = QHBoxLayout(acoes_widget)
             acoes_layout.setContentsMargins(0, 0, 0, 0)
+            acoes_layout.setSpacing(5) # Espaçamento adicionado
             
             editar_btn = QPushButton("Editar")
+            editar_btn.setStyleSheet(self._get_button_style("edit")) # Estilo adicionado
             editar_btn.clicked.connect(lambda _, f_id=fornecedor['id']: self.abrir_formulario_fornecedor(f_id))
             
             excluir_btn = QPushButton("Excluir")
+            excluir_btn.setStyleSheet(self._get_button_style("delete")) # Estilo adicionado
             excluir_btn.clicked.connect(lambda _, f_id=fornecedor['id']: self.excluir_fornecedor(f_id))
             
             acoes_layout.addWidget(editar_btn)
@@ -137,14 +169,14 @@ class FornecedorWindow(QWidget):
             "Tem certeza que deseja excluir este fornecedor? Isso pode afetar produtos associados.",
             QMessageBox.Yes | QMessageBox.No
         )
-        
         if confirmacao == QMessageBox.Yes:
             if self.db.excluir_fornecedor(fornecedor_id):
                 QMessageBox.information(self, "Sucesso", "Fornecedor excluído com sucesso!")
                 self.carregar_dados()
             else:
                 QMessageBox.warning(self, "Erro", "Não foi possível excluir o fornecedor.")
-    
+
+    # ... O restante do código de FornecedorWindow permanece o mesmo (importar, exportar, etc.) ...
     def importar_csv(self):
         """Importa fornecedores de um arquivo CSV."""
         arquivo, _ = QFileDialog.getOpenFileName(
@@ -262,16 +294,13 @@ class DialogEstoqueBaixo(QDialog):
         
         layout = QVBoxLayout(self)
         
-        # Título
         titulo = QLabel("Produtos com Estoque Baixo")
         titulo.setFont(QFont("Arial", 12, QFont.Bold))
         layout.addWidget(titulo)
         
-        # Área de produtos
         self.produtos_text = QTextEdit()
         self.produtos_text.setReadOnly(True)
         
-        # Montar texto dos produtos
         texto_produtos = ""
         for fornecedor, produtos in self.produtos_por_fornecedor.items():
             texto_produtos += f"\n--- {fornecedor} ---\n"
@@ -281,7 +310,6 @@ class DialogEstoqueBaixo(QDialog):
         self.produtos_text.setPlainText(texto_produtos)
         layout.addWidget(self.produtos_text)
         
-        # Configurações de email
         email_group = QGroupBox("Configurações de Email")
         email_layout = QFormLayout(email_group)
         
@@ -289,10 +317,8 @@ class DialogEstoqueBaixo(QDialog):
         self.smtp_port = QSpinBox()
         self.smtp_port.setRange(1, 65535)
         self.smtp_port.setValue(587)
-        
         self.email_usuario = QLineEdit()
         self.email_usuario.setPlaceholderText("seu.email@gmail.com")
-        
         self.email_senha = QLineEdit()
         self.email_senha.setEchoMode(QLineEdit.Password)
         self.email_senha.setPlaceholderText("senha do app ou senha do email")
@@ -304,13 +330,29 @@ class DialogEstoqueBaixo(QDialog):
         
         layout.addWidget(email_group)
         
-        # Botões
+        # Botões com estilo adicionado
         button_layout = QHBoxLayout()
         
         self.enviar_emails_btn = QPushButton("Enviar Emails para Fornecedores")
+        # Estilo para ação principal (verde)
+        self.enviar_emails_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #28a745; color: white; border: none;
+                padding: 8px 12px; border-radius: 4px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #218838; }
+        """)
         self.enviar_emails_btn.clicked.connect(self.enviar_emails)
         
         self.fechar_btn = QPushButton("Fechar")
+        # Estilo para ação secundária (cinza)
+        self.fechar_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6c757d; color: white; border: none;
+                padding: 8px 12px; border-radius: 4px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #5a6268; }
+        """)
         self.fechar_btn.clicked.connect(self.accept)
         
         button_layout.addWidget(self.enviar_emails_btn)
@@ -318,22 +360,20 @@ class DialogEstoqueBaixo(QDialog):
         
         layout.addLayout(button_layout)
     
+    # ... O resto da classe DialogEstoqueBaixo permanece o mesmo ...
     def enviar_emails(self):
         """Envia emails para os fornecedores com produtos em estoque baixo."""
         if not self.email_usuario.text() or not self.email_senha.text():
             QMessageBox.warning(self, "Erro", "Preencha suas credenciais de email!")
             return
         
-        # Criar progress bar
         progress = QProgressBar()
         progress.setRange(0, len(self.produtos_por_fornecedor))
         progress.setValue(0)
         
-        # Adicionar temporariamente à janela
         self.layout().addWidget(progress)
         
         try:
-            # Conectar ao servidor SMTP
             server = smtplib.SMTP(self.smtp_server.text(), self.smtp_port.value())
             server.starttls()
             server.login(self.email_usuario.text(), self.email_senha.text())
@@ -342,7 +382,6 @@ class DialogEstoqueBaixo(QDialog):
             emails_falharam = 0
             
             for i, (fornecedor_nome, produtos) in enumerate(self.produtos_por_fornecedor.items()):
-                # Buscar email do fornecedor
                 fornecedor_email = self.obter_email_fornecedor(fornecedor_nome)
                 
                 if not fornecedor_email:
@@ -350,13 +389,11 @@ class DialogEstoqueBaixo(QDialog):
                     progress.setValue(i + 1)
                     continue
                 
-                # Criar email
                 msg = MIMEMultipart()
                 msg['From'] = self.email_usuario.text()
                 msg['To'] = fornecedor_email
                 msg['Subject'] = f"Solicitação de Reposição de Estoque - {fornecedor_nome}"
                 
-                # Corpo do email
                 corpo = f"""
 Prezado(a) {fornecedor_nome},
 
@@ -365,10 +402,8 @@ Espero que esta mensagem o(a) encontre bem.
 Gostaríamos de solicitar a reposição dos seguintes produtos que estão com estoque baixo:
 
 """
-                
                 for produto in produtos:
                     corpo += f"• {produto['nome']} - Estoque atual: {produto['quantidade']} unidades (Mínimo: {produto['estoque_minimo']})\n"
-                
                 corpo += """
 Por favor, entre em contato conosco para confirmar a disponibilidade e prazo de entrega.
 
@@ -377,10 +412,8 @@ Aguardamos seu retorno.
 Atenciosamente,
 Sistema de Gestão de Estoque
 """
-                
                 msg.attach(MIMEText(corpo, 'plain'))
                 
-                # Enviar email
                 try:
                     text = msg.as_string()
                     server.sendmail(self.email_usuario.text(), fornecedor_email, text)
@@ -393,11 +426,9 @@ Sistema de Gestão de Estoque
             
             server.quit()
             
-            # Remover progress bar
             self.layout().removeWidget(progress)
             progress.deleteLater()
             
-            # Mostrar resultado
             QMessageBox.information(
                 self, 
                 "Envio Concluído", 
@@ -406,7 +437,6 @@ Sistema de Gestão de Estoque
             
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"Erro ao enviar emails: {str(e)}")
-            # Remover progress bar em caso de erro
             try:
                 self.layout().removeWidget(progress)
                 progress.deleteLater()
@@ -444,32 +474,23 @@ class FormularioFornecedor(QDialog):
             self.carregar_dados_fornecedor()
     
     def initUI(self):
-        # Configurar janela
         self.setWindowTitle("Cadastro de Fornecedor")
         self.setFixedWidth(500)
         
-        # Layout principal
         layout = QVBoxLayout(self)
-        
-        # Formulário
         form_layout = QFormLayout()
         
-        # Campos do formulário
         self.empresa_input = QLineEdit()
         self.representante_input = QLineEdit()
         self.representante_input.setPlaceholderText("Nome do representante")
-        
-        # ComboBox para frequência de compra
         self.frequencia_input = QComboBox()
         self.frequencia_input.addItems(["Alta", "Média", "Baixa"])
-        
         self.telefone_input = QLineEdit()
         self.email_input = QLineEdit()
         self.endereco_input = QLineEdit()
         self.contato_input = QLineEdit()
         self.contato_input.setPlaceholderText("Nome do contato")
         
-        # Adicionar campos ao formulário
         form_layout.addRow("Empresa:", self.empresa_input)
         form_layout.addRow("Representante:", self.representante_input)
         form_layout.addRow("Frequência de Compra:", self.frequencia_input)
@@ -477,33 +498,47 @@ class FormularioFornecedor(QDialog):
         form_layout.addRow("Email:", self.email_input)
         form_layout.addRow("Endereço:", self.endereco_input)
         form_layout.addRow("Contato:", self.contato_input)
-        
         layout.addLayout(form_layout)
         
-        # Separador
         separador = QFrame()
         separador.setFrameShape(QFrame.HLine)
         separador.setFrameShadow(QFrame.Sunken)
         layout.addWidget(separador)
         
-        # Botões
+        # Botões com estilo adicionado
         button_layout = QHBoxLayout()
         self.salvar_btn = QPushButton("Salvar")
+        # Estilo para salvar (verde)
+        self.salvar_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #28a745; color: white; border: none;
+                padding: 8px 12px; border-radius: 4px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #218838; }
+        """)
         self.salvar_btn.clicked.connect(self.salvar_fornecedor)
+        
         self.cancelar_btn = QPushButton("Cancelar")
+        # Estilo para cancelar (cinza)
+        self.cancelar_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6c757d; color: white; border: none;
+                padding: 8px 12px; border-radius: 4px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #5a6268; }
+        """)
         self.cancelar_btn.clicked.connect(self.reject)
         
         button_layout.addWidget(self.salvar_btn)
         button_layout.addWidget(self.cancelar_btn)
-        
         layout.addLayout(button_layout)
     
+    # ... O resto da classe FormularioFornecedor permanece o mesmo ...
     def carregar_dados_fornecedor(self):
         """Carrega os dados do fornecedor nos campos do formulário."""
         self.empresa_input.setText(self.fornecedor['empresa'])
         self.representante_input.setText(self.fornecedor['representante'] or "")
         
-        # Definir o item selecionado no ComboBox
         frequencia = self.fornecedor['frequencia_compra']
         if frequencia:
             index = self.frequencia_input.findText(frequencia, Qt.MatchFixedString)
@@ -517,12 +552,10 @@ class FormularioFornecedor(QDialog):
     
     def salvar_fornecedor(self):
         """Salva os dados do fornecedor no banco de dados."""
-        # Validar campos obrigatórios
         if not self.empresa_input.text().strip():
             QMessageBox.warning(self, "Erro", "O nome da empresa é obrigatório!")
             return
         
-        # Coletar dados do formulário
         empresa = self.empresa_input.text().strip()
         representante = self.representante_input.text().strip()
         frequencia_compra = self.frequencia_input.currentText()
@@ -532,7 +565,6 @@ class FormularioFornecedor(QDialog):
         contato = self.contato_input.text().strip()
         
         try:
-            # Inserir ou atualizar fornecedor
             if self.fornecedor_id:
                 sucesso = self.db.atualizar_fornecedor(
                     self.fornecedor_id, empresa, representante, frequencia_compra, telefone, email, endereco, contato

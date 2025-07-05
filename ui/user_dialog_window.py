@@ -174,40 +174,54 @@ class UserDialogWindow(QDialog):
         """Salva o usuário no banco de dados"""
         if not self.validar_campos():
             return
-        
+
         nome = self.nome_edit.text().strip()
         login = self.login_edit.text().strip()
         email = self.email_edit.text().strip()
         tipo = self.tipo_combo.currentData()
         
-        # No modo de edição
-        if self.is_edit_mode:
-            # Determinar status
-            ativo = 1 if self.ativo_radio.isChecked() else 0
-            
-            # Atualizar dados básicos
-            result, message = self.db.atualizar_usuario(
-                self.usuario_id, nome, login, email, tipo, ativo
-            )
-            
-            # Se escolheu alterar senha
-            if result and hasattr(self, 'alterar_senha_check') and self.alterar_senha_check.isChecked():
-                senha = self.senha_edit.text()
-                senha_result, senha_message = self.db.alterar_senha_usuario(self.usuario_id, senha)
+        try:
+            if self.is_edit_mode:
+                # Determinar status
+                ativo = 1 if self.ativo_radio.isChecked() else 0
                 
-                if not senha_result:
-                    QMessageBox.warning(self, "Aviso", f"Dados salvos, mas houve um erro ao alterar a senha: {senha_message}")
-        else:
-            # Adicionar novo usuário - senha sem hash
-            senha = self.senha_edit.text()
-            
-            result, message = self.db.cadastrar_usuario(nome, login, senha, email, tipo)
-        
-        if result:
-            QMessageBox.information(self, "Sucesso", message)
+                # Atualizar dados básicos
+                result, message = self.db.atualizar_usuario(
+                    self.usuario_id, nome, login, email, tipo, ativo
+                )
+
+                if not result:
+                    QMessageBox.critical(self, "Erro", message)
+                    return
+                
+                # Se escolheu alterar senha
+                if hasattr(self, 'alterar_senha_check') and self.alterar_senha_check.isChecked():
+                    senha = self.senha_edit.text()
+                    # A função alterar_senha_usuario já faz o hash
+                    senha_result, senha_message = self.db.alterar_senha_usuario(self.usuario_id, senha)
+                    
+                    if not senha_result:
+                        QMessageBox.warning(self, "Aviso", f"Dados salvos, mas houve um erro ao alterar a senha: {senha_message}")
+            else:
+                # Adicionar novo usuário
+                senha = self.senha_edit.text()
+                # A função cadastrar_usuario já faz o hash internamente
+                result, message = self.db.cadastrar_usuario(nome, login, senha, email, tipo)
+                
+                if not result:
+                    QMessageBox.critical(self, "Erro", message)
+                    return
+
+            # Se tudo ocorreu bem (sem return antecipado)
+            QMessageBox.information(self, "Sucesso", "Operação realizada com sucesso!")
             self.accept()
-        else:
-            QMessageBox.critical(self, "Erro", message)
+
+        except Exception as e:
+            QMessageBox.critical(self, "Erro Inesperado", f"Ocorreu um erro: {str(e)}")
+    
+    def get_username(self):
+        """Função auxiliar para retornar o nome de usuário após o cadastro."""
+        return self.login_edit.text().strip()
             
 # Adicionar alias para compatibilidade
 UserDialog = UserDialogWindow

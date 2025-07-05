@@ -344,17 +344,19 @@ class DashboardWindow(QWidget):
         if not self._initialized:
             return
             
-        # Quando o usuário altera manualmente uma data, muda para o modo personalizado
-        if self.dt_inicio.isEnabled() and self.dt_fim.isEnabled():
-            # Verificar se data início é maior que data fim
-            if self.dt_inicio.date() > self.dt_fim.date():
-                self.dt_fim.setDate(self.dt_inicio.date())
+        # Bloquear sinais para evitar loop infinito
+        self.cb_periodo.blockSignals(True)
+        self.cb_periodo.setCurrentText("Personalizado")
+        self.cb_periodo.blockSignals(False)
+
+        # Verificar se data início é maior que data fim e corrigir se necessário
+        if self.dt_inicio.date() > self.dt_fim.date():
+            # Não bloquear sinais aqui, pois queremos que a mudança acione a atualização
+            self.dt_fim.setDate(self.dt_inicio.date())
         
-        # Se estivermos em modo não personalizado, mudar para personalizado
-        if self.cb_periodo.currentText() != "Personalizado":
-            self.cb_periodo.blockSignals(True)
-            self.cb_periodo.setCurrentText("Personalizado")
-            self.cb_periodo.blockSignals(False)
+        # ## CORREÇÃO PRINCIPAL ##
+        # Agendar a atualização dos dados sempre que uma data for alterada
+        self.schedule_update()
     
     def periodo_alterado(self, index):
         if not self._initialized:
@@ -363,7 +365,7 @@ class DashboardWindow(QWidget):
         periodo = self.cb_periodo.currentText()
         hoje = QDate.currentDate()
         
-        # Bloquear sinais para evitar recursão
+        # Bloquear sinais dos QDateEdit para evitar que data_alterada() seja chamada desnecessariamente
         self.dt_inicio.blockSignals(True)
         self.dt_fim.blockSignals(True)
         
@@ -376,12 +378,9 @@ class DashboardWindow(QWidget):
         elif periodo == "Último Mês":
             self.dt_inicio.setDate(hoje.addMonths(-1))
             self.dt_fim.setDate(hoje)
-        elif periodo == "Último Ano":
-            self.dt_inicio.setDate(hoje.addYears(-1))
-            self.dt_fim.setDate(hoje)
         
         # Ativar/desativar campos de data
-        personalizado = periodo == "Personalizado"
+        personalizado = (periodo == "Personalizado")
         self.dt_inicio.setEnabled(personalizado)
         self.dt_fim.setEnabled(personalizado)
         
@@ -389,9 +388,12 @@ class DashboardWindow(QWidget):
         self.dt_inicio.blockSignals(False)
         self.dt_fim.blockSignals(False)
         
-        # Carregar dados com o novo período
-        if not personalizado:
-            self.schedule_update()
+        # ## CORREÇÃO ##
+        # Agendar a atualização dos dados sempre que o período for alterado.
+        # Se o período for "Personalizado", o usuário ajustará as datas, e cada ajuste
+        # também chamará a atualização através de data_alterada().
+        self.schedule_update()
+
     
     def carregar_dados(self):
         if not self._initialized:
