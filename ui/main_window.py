@@ -103,13 +103,12 @@ class MainWindow(QMainWindow):
         
         # Botão de atualizar
         refresh_button = QPushButton("Atualizar")
-        refresh_button.setObjectName("refreshButton") # Estilize com este nome se precisar
+        refresh_button.setObjectName("headerActionButton") # NOVO NOME para estilo
         refresh_button.setCursor(Qt.PointingHandCursor)
         refresh_button.clicked.connect(self.atualizar_dados)
         header_layout.addWidget(refresh_button)
         
         # Placeholder para o menu do usuário
-        # Será preenchido pela função setup_for_user
         self.user_menu_placeholder = QFrame()
         header_layout.addWidget(self.user_menu_placeholder)
 
@@ -125,6 +124,7 @@ class MainWindow(QMainWindow):
         window_layout.setContentsMargins(0, 0, 0, 0)
         window_layout.setSpacing(5)
         
+        # Usando caracteres Unicode que funcionam bem como ícones
         minimize_btn = QPushButton("─")
         maximize_btn = QPushButton("□")
         close_btn = QPushButton("✕")
@@ -133,8 +133,9 @@ class MainWindow(QMainWindow):
             btn.setObjectName(name)
             btn.setFixedSize(30, 30)
         
-        minimize_btn.clicked.connect(self.showMinimized)
-        maximize_btn.clicked.connect(self.toggle_maximize)
+        # MUDANÇA PRINCIPAL AQUI: Conectar aos métodos com animação
+        minimize_btn.clicked.connect(self.showMinimizedAnimated)
+        maximize_btn.clicked.connect(self.toggleMaximizeAnimated)
         close_btn.clicked.connect(self.close)
         
         window_layout.addWidget(minimize_btn)
@@ -143,6 +144,13 @@ class MainWindow(QMainWindow):
         
         header_layout.addWidget(window_controls_frame)
         main_layout.addWidget(header_frame)
+        
+        # Aplique o StyleSheet que contém os efeitos de hover
+        self.setStyleSheet(self.get_main_stylesheet())
+        
+        # Aplicar o StyleSheet que contém os efeitos de hover
+        # Adicione ou modifique seu método aplicar_tema ou adicione o estilo aqui
+        self.setStyleSheet(self.get_main_stylesheet())
         
         # Permitir arrastar a janela pelo cabeçalho
         header_frame.mousePressEvent = self.start_window_drag
@@ -276,6 +284,14 @@ class MainWindow(QMainWindow):
         for btn in self.menu_buttons + [self.btn_config]:
             if hasattr(btn, 'text_label'):
                 btn.text_label.hide()
+        self.setWindowOpacity(0.0)
+        self.show() # Mostra a janela (invisível)
+        self.fade_in_animation = QPropertyAnimation(self, b"windowOpacity")
+        self.fade_in_animation.setDuration(500)
+        self.fade_in_animation.setStartValue(0.0)
+        self.fade_in_animation.setEndValue(1.0)
+        self.fade_in_animation.setEasingCurve(QEasingCurve.OutQuad)
+        self.fade_in_animation.start()
     
     def carregar_logo(self):
         """Carrega a logo como QIcon para uso na barra de título"""
@@ -423,7 +439,128 @@ class MainWindow(QMainWindow):
         if self.drag_position and event.buttons() == Qt.LeftButton:
             self.move(event.globalPos() - self.drag_position)
             event.accept()
+
+    def changeEvent(self, event):
+        """Captura eventos de mudança de estado da janela."""
+        if event.type() == event.WindowStateChange:
+            # Se a janela deixou de ser minimizada
+            if not (self.windowState() & Qt.WindowMinimized):
+                # Garante que a opacidade volte a 1.0 ao ser restaurada
+                self.setWindowOpacity(1.0)
+        super().changeEvent(event)
     
+    def showMinimizedAnimated(self):
+        """Minimiza a janela com uma animação de fade out."""
+        if self.isMinimized():
+            return
+            
+        self.animation = QPropertyAnimation(self, b"windowOpacity")
+        self.animation.setDuration(200)
+        self.animation.setStartValue(1.0)
+        self.animation.setEndValue(0.0)
+        self.animation.setEasingCurve(QEasingCurve.InQuad)
+        
+        # Conecta o término da animação à minimização real da janela
+        self.animation.finished.connect(self.showMinimized)
+        
+        self.animation.start()
+
+    def toggleMaximizeAnimated(self):
+        """Alterna entre maximizado e normal com uma animação sutil."""
+        if self.isMaximized():
+            # Animação para restaurar (fade out parcial e depois fade in)
+            self.animation_out = QPropertyAnimation(self, b"windowOpacity")
+            self.animation_out.setDuration(150)
+            self.animation_out.setStartValue(1.0)
+            self.animation_out.setEndValue(0.7)
+            self.animation_out.setEasingCurve(QEasingCurve.InQuad)
+            self.animation_out.finished.connect(self.showNormalAnimated)
+            self.animation_out.start()
+        else:
+            # Maximiza diretamente, pois o SO geralmente já anima isso
+            self.showMaximized()
+
+    def showNormalAnimated(self):
+        """Função auxiliar para restaurar a janela e aplicar fade in."""
+        self.showNormal()
+        self.setWindowOpacity(0.7) # Começa de onde a animação de saída parou
+        
+        self.animation_in = QPropertyAnimation(self, b"windowOpacity")
+        self.animation_in.setDuration(200)
+        self.animation_in.setStartValue(0.7)
+        self.animation_in.setEndValue(1.0)
+        self.animation_in.setEasingCurve(QEasingCurve.OutQuad)
+        self.animation_in.start()
+            
+        # Se quiser forçar o fade ao restaurar (pode não ficar ideal):
+        # if self.isMaximized():
+        #     self.animation = QPropertyAnimation(self, b"windowOpacity")
+        #     self.animation.setDuration(150)
+        #     self.animation.setStartValue(1.0)
+        #     self.animation.setEndValue(0.0)
+        #     self.animation.finished.connect(self.showNormalAnimated)
+        #     self.animation.start()
+        # else:
+        #     self.showMaximized()
+
+    def get_main_stylesheet(self):
+        """Retorna o stylesheet completo da aplicação com efeitos de hover."""
+        # Cores base para facilitar a troca de tema no futuro
+        bg_hover = "#4a4a4a"       # Cinza para hover nos botões de minimizar/maximizar
+        bg_pressed = "#5a5a5a"     # Cinza mais escuro para clique
+        close_hover = "#e81123"    # Vermelho para hover no botão de fechar
+        close_pressed = "#f1707a"  # Vermelho claro para clique no botão de fechar
+
+        return f"""
+            /* Estilo geral dos botões de controle da janela */
+            #minimizeButton, #maximizeButton, #closeButton {{
+                background-color: transparent;
+                border: none;
+                color: #ccc; /* Cor do ícone/texto */
+                font-family: "Segoe UI Symbol"; /* Fonte que garante a exibição dos símbolos */
+                font-size: 14px;
+            }}
+
+            /* Efeito de hover para minimizar e maximizar */
+            #minimizeButton:hover, #maximizeButton:hover {{
+                background-color: {bg_hover};
+            }}
+
+            /* EFEITO DE HOVER ESPECIAL PARA O BOTÃO FECHAR */
+            #closeButton:hover {{
+                background-color: {close_hover};
+                color: white; /* Cor do 'X' fica branca para contraste */
+            }}
+
+            /* Efeito de clique (pressionado) */
+            #minimizeButton:pressed, #maximizeButton:pressed {{
+                background-color: {bg_pressed};
+            }}
+
+            #closeButton:pressed {{
+                background-color: {close_pressed};
+            }}
+
+            /* ----- SEU OUTRO STYLESHEET PODE VIR AQUI ----- */
+            /* Exemplo: Estilo dos botões do menu do cabeçalho */
+            #headerMenuButton {{
+                background-color: transparent;
+                border: none;
+                padding: 8px 12px;
+                border-radius: 6px;
+                color: #ccc;
+            }}
+            #headerMenuButton:hover {{
+                background-color: {bg_hover};
+                color: white;
+            }}
+            #headerMenuButton:pressed {{
+                background-color: {bg_pressed};
+            }}
+            #headerMenuButton::menu-indicator {{
+                image: none;
+            }}
+        """
 
     def aplicar_tema(self):
         """Aplica o tema atual a todos os componentes."""
@@ -1243,7 +1380,9 @@ class UserManager:
     def open_admin(self):
         """Abre a janela de administração"""
         try:
-            if not self.user_menu_widget.is_admin():
+            # ## LINHA CORRIGIDA ABAIXO ##
+            # Em vez de perguntar ao widget, verificamos diretamente os dados do usuário.
+            if self.usuario.get('tipo', '').lower() != 'admin':
                 QMessageBox.warning(self.main_window, "Acesso Negado", 
                                   "Você não tem permissões de administrador.")
                 return
@@ -1252,6 +1391,7 @@ class UserManager:
                 self.active_dialogs['admin'].raise_()
                 return
             
+            # O import deve ser local para evitar dependência circular
             from ui.admin_window import AdminWindow
             
             admin_dialog = AdminWindow(self.db, self.usuario)
