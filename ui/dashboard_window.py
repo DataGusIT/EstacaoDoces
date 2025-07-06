@@ -351,10 +351,8 @@ class DashboardWindow(QWidget):
 
         # Verificar se data início é maior que data fim e corrigir se necessário
         if self.dt_inicio.date() > self.dt_fim.date():
-            # Não bloquear sinais aqui, pois queremos que a mudança acione a atualização
             self.dt_fim.setDate(self.dt_inicio.date())
         
-        # ## CORREÇÃO PRINCIPAL ##
         # Agendar a atualização dos dados sempre que uma data for alterada
         self.schedule_update()
     
@@ -365,7 +363,7 @@ class DashboardWindow(QWidget):
         periodo = self.cb_periodo.currentText()
         hoje = QDate.currentDate()
         
-        # Bloquear sinais dos QDateEdit para evitar que data_alterada() seja chamada desnecessariamente
+        # Bloquear sinais dos QDateEdit para evitar chamadas desnecessárias
         self.dt_inicio.blockSignals(True)
         self.dt_fim.blockSignals(True)
         
@@ -379,7 +377,6 @@ class DashboardWindow(QWidget):
             self.dt_inicio.setDate(hoje.addMonths(-1))
             self.dt_fim.setDate(hoje)
         
-        # Ativar/desativar campos de data
         personalizado = (periodo == "Personalizado")
         self.dt_inicio.setEnabled(personalizado)
         self.dt_fim.setEnabled(personalizado)
@@ -388,10 +385,7 @@ class DashboardWindow(QWidget):
         self.dt_inicio.blockSignals(False)
         self.dt_fim.blockSignals(False)
         
-        # ## CORREÇÃO ##
         # Agendar a atualização dos dados sempre que o período for alterado.
-        # Se o período for "Personalizado", o usuário ajustará as datas, e cada ajuste
-        # também chamará a atualização através de data_alterada().
         self.schedule_update()
 
     

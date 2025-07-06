@@ -248,18 +248,18 @@ class DatabaseManager:
         count = self.cursor.fetchone()[0]
 
         if count == 0:
-            # Criar um usuário admin padrão sem hash de senha (somente para desenvolvimento)
-            senha = "admin123"
+            # Criar um usuário admin padrão com hash de senha
+            senha_plana = "admin123"
+            senha_hash = hashlib.sha256(senha_plana.encode('utf-8')).hexdigest()
             
             self.cursor.execute('''
             INSERT INTO usuarios (nome, login, senha, email, tipo)
             VALUES (?, ?, ?, ?, ?)
-            ''', ("Administrador", "admin", senha, "admin@sistema.com", "admin"))
+            ''', ("Administrador", "admin", senha_hash, "admin@sistema.com", "admin"))
 
         # Commit das mudanças
         self.conn.commit()
 
-    
     # Métodos para Produtos (atualizados)
     def adicionar_produto(self, codigo_barras, nome, descricao, quantidade, estoque_minimo,
                 preco_compra, margem_lucro, preco_venda, 
@@ -776,12 +776,13 @@ class DatabaseManager:
             return None
 
     def autenticar_usuario(self, login, senha):
-        """Verifica se o usuário e senha estão corretos"""
-        senha_hash = hashlib.sha256(senha.encode()).hexdigest()
+        """Verifica se o usuário e senha estão corretos usando hash."""
+        # Cria o hash da senha fornecida pelo usuário
+        senha_hash = hashlib.sha256(senha.encode('utf-8')).hexdigest()
         
         self.cursor.execute('''
             SELECT * FROM usuarios WHERE login = ? AND senha = ? AND ativo = 1
-        ''', (login, senha))
+        ''', (login, senha_hash))
         
         usuario = self.cursor.fetchone()
         
@@ -795,14 +796,21 @@ class DatabaseManager:
         else:
             return None
 
-    def cadastrar_usuario(self, nome, login, senha, email, tipo):
+    def cadastrar_usuario(self, nome, login, senha_hash, email, tipo):
+        """
+        Cadastra um novo usuário.
+        Recebe a senha já em formato hash.
+        """
         try:
             self.cursor.execute("""
                 INSERT INTO usuarios (nome, login, senha, email, tipo)
                 VALUES (?, ?, ?, ?, ?)
-            """, (nome, login, senha, email, tipo))
+            """, (nome, login, senha_hash, email, tipo))
             self.conn.commit()
             return True, "Usuário cadastrado com sucesso!"
+        except sqlite3.IntegrityError:
+            # Erro específico para login ou email duplicado
+            return False, "Erro: Login ou e-mail já existem no sistema."
         except Exception as e:
             return False, f"Erro ao cadastrar usuário: {str(e)}"
         
@@ -878,8 +886,7 @@ class DatabaseManager:
     def alterar_senha_usuario(self, usuario_id, nova_senha):
         """Altera a senha de um usuário"""
         try:
-            import hashlib
-            senha_hash = hashlib.sha256(nova_senha.encode()).hexdigest()
+            senha_hash = hashlib.sha256(nova_senha.encode('utf-8')).hexdigest()
             
             self.cursor.execute('''
                 UPDATE usuarios SET senha = ? WHERE id = ?
@@ -889,6 +896,30 @@ class DatabaseManager:
             return True, "Senha alterada com sucesso."
         except Exception as e:
             return False, f"Erro ao alterar senha: {str(e)}"
+    
+    def verificar_usuario_por_login_ou_email(self, identificador):
+        """
+        Verifica se um usuário existe com base no login ou e-mail.
+        Retorna o login do usuário se encontrado, caso contrário, None.
+        """
+        self.cursor.execute('''
+            SELECT login FROM usuarios WHERE (login = ? OR email = ?) AND ativo = 1
+        ''', (identificador, identificador))
+        resultado = self.cursor.fetchone()
+        return resultado['login'] if resultado else None
+
+    def atualizar_senha_por_login(self, login, nova_senha):
+        """Atualiza a senha de um usuário com base no seu login."""
+        try:
+            nova_senha_hash = hashlib.sha256(nova_senha.encode('utf-8')).hexdigest()
+            self.cursor.execute('''
+                UPDATE usuarios SET senha = ? WHERE login = ?
+            ''', (nova_senha_hash, login))
+            self.conn.commit()
+            return self.cursor.rowcount > 0
+        except Exception as e:
+            print(f"Erro ao atualizar senha por login: {e}")
+            return False
 
 
     # Métodos para Caixas
@@ -1295,14 +1326,23 @@ class DatabaseManager:
     
 
     def obter_dados_dashboard(self, data_inicio, data_fim):
+        """
+        Obtém dados consolidados para o dashboard.
+        CORRIGIDO: Usa 'localtime' para datas, otimiza consultas e calcula o lucro corretamente.
+        """
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+            # Garante que a conexão esteja ativa e usa um cursor local para a função
+            if not self.ensure_connection():
+                raise Exception("Não foi possível conectar ao banco de dados.")
             
-            # --- CORREÇÃO: Passo 1 - Obter os IDs das vendas no período ---
+            cursor = self.conn.cursor()
+
+            # --- OTIMIZAÇÃO: Primeiro, obtemos os IDs das vendas no período ---
+            # Usamos o modificador 'localtime' para garantir que a data da venda seja
+            # comparada com a data local do sistema, e não UTC.
             cursor.execute("""
-                SELECT id FROM vendas WHERE date(data_hora) BETWEEN ? AND ?
+                SELECT id FROM vendas 
+                WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
             """, (data_inicio, data_fim))
             
             # Cria uma tupla de IDs de vendas. Ex: (1, 2, 5, 8)
@@ -1310,19 +1350,19 @@ class DatabaseManager:
             
             # Se não houver vendas no período, retorna dados vazios para evitar erros.
             if not venda_ids:
-                conn.close()
                 return {
                     'faturamento': 0, 'num_vendas': 0, 'lucro': 0,
                     'produtos': [], 'pagamentos': [], 'clientes': [], 'vendas_diarias': []
                 }
             
-            # --- Fim da Correção ---
+            # --- Fim da Otimização ---
 
-            # Faturamento e número de vendas (agora usando os IDs)
-            # O placeholder '?' não funciona para listas/tuplas, então formatamos a string.
-            # É seguro aqui porque 'venda_ids' é gerado por nós e contém apenas números.
-            query_in_ids = f"IN {venda_ids}" if len(venda_ids) > 1 else f"= {venda_ids[0]}"
+            # Para cláusulas IN, o placeholder '?' não funciona com tuplas.
+            # Formatamos a string de forma segura, pois 'venda_ids' contém apenas números.
+            # Isso evita que as consultas fiquem lentas em tabelas grandes.
+            query_in_ids = f"IN {venda_ids}"
             
+            # 1. Faturamento e número de vendas (agora usando os IDs)
             cursor.execute(f"""
                 SELECT 
                     COUNT(*) as num_vendas, 
@@ -1332,11 +1372,13 @@ class DatabaseManager:
             """)
             vendas_resumo = cursor.fetchone()
 
-            # --- NOVA LÓGICA DE LUCRO (agora usando os IDs) ---
+            # 2. Lucro (com cálculo corrigido para produtos fracionados)
             cursor.execute(f"""
                 SELECT 
                     SUM(
                         i.subtotal - (i.quantidade * 
+                            -- Se o preço unitário da venda for o preço da embalagem, o custo é o de compra da embalagem.
+                            -- Senão (é fracionado), o custo é o de compra dividido pela quantidade na embalagem.
                             CASE 
                                 WHEN i.preco_unitario = p.preco_venda THEN p.preco_compra
                                 ELSE (p.preco_compra / p.qtd_por_embalagem)
@@ -1351,7 +1393,7 @@ class DatabaseManager:
             lucro_resultado = cursor.fetchone()
             lucro = lucro_resultado['lucro'] if lucro_resultado and lucro_resultado['lucro'] is not None else 0
             
-            # Produtos mais vendidos (por valor, usando os IDs)
+            # 3. Produtos mais vendidos (por valor, usando os IDs)
             cursor.execute(f"""
                 SELECT p.nome, SUM(i.quantidade) as quantidade, SUM(i.subtotal) as valor_total
                 FROM itens_venda i
@@ -1363,7 +1405,7 @@ class DatabaseManager:
             """)
             produtos = [dict(row) for row in cursor.fetchall()]
             
-            # Formas de pagamento (usando os IDs)
+            # 4. Formas de pagamento (usando os IDs)
             cursor.execute(f"""
                 SELECT forma_pagamento as forma, SUM(valor_total) as valor_total
                 FROM vendas
@@ -1373,7 +1415,7 @@ class DatabaseManager:
             """)
             pagamentos = [dict(row) for row in cursor.fetchall()]
             
-            # Melhores clientes (usando os IDs)
+            # 5. Melhores clientes (usando os IDs)
             cursor.execute(f"""
                 SELECT 
                     COALESCE(c.nome, 'Cliente Não Identificado') as nome,
@@ -1388,19 +1430,17 @@ class DatabaseManager:
             """)
             clientes = [dict(row) for row in cursor.fetchall()]
 
-            # Vendas por dia (pode continuar usando o período de data, é mais simples)
+            # 6. Vendas por dia (pode continuar usando o período de data, é mais simples e já funciona)
             cursor.execute("""
                 SELECT 
-                    date(data_hora) as data,
+                    date(data_hora, 'localtime') as data,
                     SUM(valor_total) as valor
                 FROM vendas
-                WHERE date(data_hora) BETWEEN ? AND ?
-                GROUP BY date(data_hora)
-                ORDER BY date(data_hora)
+                WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
+                GROUP BY date(data_hora, 'localtime')
+                ORDER BY date(data_hora, 'localtime')
             """, (data_inicio, data_fim))
             vendas_diarias = [dict(row) for row in cursor.fetchall()]
-            
-            conn.close()
             
             # Montar resultado final
             resultado = {

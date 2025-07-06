@@ -2,6 +2,7 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdi
                              QPushButton, QMessageBox, QFormLayout, QComboBox,
                              QCheckBox, QGroupBox, QRadioButton, QButtonGroup)
 from PyQt5.QtCore import Qt
+import hashlib 
 
 class UserDialogWindow(QDialog):
     """Diálogo para adicionar ou editar usuários"""
@@ -182,37 +183,40 @@ class UserDialogWindow(QDialog):
         
         try:
             if self.is_edit_mode:
-                # Determinar status
+                # ... (a lógica de edição já está correta, pois chama `alterar_senha_usuario` que já faz o hash)
+                # O código abaixo permanece o mesmo
                 ativo = 1 if self.ativo_radio.isChecked() else 0
-                
-                # Atualizar dados básicos
-                result, message = self.db.atualizar_usuario(
-                    self.usuario_id, nome, login, email, tipo, ativo
-                )
+                result, message = self.db.atualizar_usuario(self.usuario_id, nome, login, email, tipo, ativo)
 
                 if not result:
                     QMessageBox.critical(self, "Erro", message)
                     return
                 
-                # Se escolheu alterar senha
                 if hasattr(self, 'alterar_senha_check') and self.alterar_senha_check.isChecked():
                     senha = self.senha_edit.text()
-                    # A função alterar_senha_usuario já faz o hash
                     senha_result, senha_message = self.db.alterar_senha_usuario(self.usuario_id, senha)
                     
                     if not senha_result:
                         QMessageBox.warning(self, "Aviso", f"Dados salvos, mas houve um erro ao alterar a senha: {senha_message}")
             else:
+                # ###########################################################
+                # ## AQUI ESTÁ A CORREÇÃO PRINCIPAL ##
+                # ###########################################################
+                
                 # Adicionar novo usuário
-                senha = self.senha_edit.text()
-                # A função cadastrar_usuario já faz o hash internamente
-                result, message = self.db.cadastrar_usuario(nome, login, senha, email, tipo)
+                senha_plana = self.senha_edit.text()
+                
+                # 1. Faz o hash da senha antes de enviar para o banco
+                senha_hash = hashlib.sha256(senha_plana.encode('utf-8')).hexdigest()
+
+                # 2. Passa o hash para a função do banco de dados
+                result, message = self.db.cadastrar_usuario(nome, login, senha_hash, email, tipo)
                 
                 if not result:
                     QMessageBox.critical(self, "Erro", message)
                     return
 
-            # Se tudo ocorreu bem (sem return antecipado)
+            # Se tudo ocorreu bem
             QMessageBox.information(self, "Sucesso", "Operação realizada com sucesso!")
             self.accept()
 
