@@ -1324,45 +1324,43 @@ class DatabaseManager:
             print(f"Erro ao registrar item de venda: {e}")
             return False
     
-
     def obter_dados_dashboard(self, data_inicio, data_fim):
         """
         Obtém dados consolidados para o dashboard.
-        CORRIGIDO: Usa 'localtime' para datas, otimiza consultas e calcula o lucro corretamente.
+        CORRIGIDO: Lida corretamente com a cláusula IN vazia e com tuplas de um elemento.
         """
         try:
-            # Garante que a conexão esteja ativa e usa um cursor local para a função
             if not self.ensure_connection():
                 raise Exception("Não foi possível conectar ao banco de dados.")
             
             cursor = self.conn.cursor()
 
-            # --- OTIMIZAÇÃO: Primeiro, obtemos os IDs das vendas no período ---
-            # Usamos o modificador 'localtime' para garantir que a data da venda seja
-            # comparada com a data local do sistema, e não UTC.
+            # --- Etapa 1: Obter os IDs das vendas no período ---
             cursor.execute("""
                 SELECT id FROM vendas 
                 WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
             """, (data_inicio, data_fim))
             
-            # Cria uma tupla de IDs de vendas. Ex: (1, 2, 5, 8)
             venda_ids = tuple(row['id'] for row in cursor.fetchall())
             
-            # Se não houver vendas no período, retorna dados vazios para evitar erros.
+            # --- CORREÇÃO FUNDAMENTAL ---
+            # Se não houver vendas (tupla vazia), não podemos continuar, pois 'IN ()' é inválido.
+            # Retornamos um dicionário vazio para a UI lidar com isso.
             if not venda_ids:
                 return {
                     'faturamento': 0, 'num_vendas': 0, 'lucro': 0,
                     'produtos': [], 'pagamentos': [], 'clientes': [], 'vendas_diarias': []
                 }
             
-            # --- Fim da Otimização ---
+            # --- CORREÇÃO DA SINTAXE DA CLÁUSULA IN ---
+            # Para evitar problemas com a sintaxe de tupla de um elemento, como 'IN (12,)',
+            # nós formatamos a string de forma mais robusta.
+            if len(venda_ids) == 1:
+                query_in_ids = f"IN ({venda_ids[0]})"  # Resulta em 'IN (12)'
+            else:
+                query_in_ids = f"IN {venda_ids}"      # Resulta em 'IN (12, 13, 14)'
 
-            # Para cláusulas IN, o placeholder '?' não funciona com tuplas.
-            # Formatamos a string de forma segura, pois 'venda_ids' contém apenas números.
-            # Isso evita que as consultas fiquem lentas em tabelas grandes.
-            query_in_ids = f"IN {venda_ids}"
-            
-            # 1. Faturamento e número de vendas (agora usando os IDs)
+            # 1. Faturamento e número de vendas
             cursor.execute(f"""
                 SELECT 
                     COUNT(*) as num_vendas, 
@@ -1372,13 +1370,11 @@ class DatabaseManager:
             """)
             vendas_resumo = cursor.fetchone()
 
-            # 2. Lucro (com cálculo corrigido para produtos fracionados)
+            # 2. Lucro
             cursor.execute(f"""
                 SELECT 
                     SUM(
                         i.subtotal - (i.quantidade * 
-                            -- Se o preço unitário da venda for o preço da embalagem, o custo é o de compra da embalagem.
-                            -- Senão (é fracionado), o custo é o de compra dividido pela quantidade na embalagem.
                             CASE 
                                 WHEN i.preco_unitario = p.preco_venda THEN p.preco_compra
                                 ELSE (p.preco_compra / p.qtd_por_embalagem)
@@ -1393,7 +1389,7 @@ class DatabaseManager:
             lucro_resultado = cursor.fetchone()
             lucro = lucro_resultado['lucro'] if lucro_resultado and lucro_resultado['lucro'] is not None else 0
             
-            # 3. Produtos mais vendidos (por valor, usando os IDs)
+            # 3. Produtos mais vendidos (por valor)
             cursor.execute(f"""
                 SELECT p.nome, SUM(i.quantidade) as quantidade, SUM(i.subtotal) as valor_total
                 FROM itens_venda i
@@ -1405,7 +1401,7 @@ class DatabaseManager:
             """)
             produtos = [dict(row) for row in cursor.fetchall()]
             
-            # 4. Formas de pagamento (usando os IDs)
+            # 4. Formas de pagamento
             cursor.execute(f"""
                 SELECT forma_pagamento as forma, SUM(valor_total) as valor_total
                 FROM vendas
@@ -1415,7 +1411,7 @@ class DatabaseManager:
             """)
             pagamentos = [dict(row) for row in cursor.fetchall()]
             
-            # 5. Melhores clientes (usando os IDs)
+            # 5. Melhores clientes
             cursor.execute(f"""
                 SELECT 
                     COALESCE(c.nome, 'Cliente Não Identificado') as nome,
@@ -1430,7 +1426,7 @@ class DatabaseManager:
             """)
             clientes = [dict(row) for row in cursor.fetchall()]
 
-            # 6. Vendas por dia (pode continuar usando o período de data, é mais simples e já funciona)
+            # 6. Vendas por dia (pode continuar usando o período de data)
             cursor.execute("""
                 SELECT 
                     date(data_hora, 'localtime') as data,
@@ -1442,7 +1438,6 @@ class DatabaseManager:
             """, (data_inicio, data_fim))
             vendas_diarias = [dict(row) for row in cursor.fetchall()]
             
-            # Montar resultado final
             resultado = {
                 'faturamento': vendas_resumo['faturamento'] or 0,
                 'num_vendas': vendas_resumo['num_vendas'] or 0,
@@ -1455,11 +1450,8 @@ class DatabaseManager:
 
             return resultado
         except Exception as e:
-            # Imprime o erro no console para facilitar a depuração
             print(f"Erro detalhado ao obter dados para dashboard: {e}")
-            # Retorna None para que a interface possa lidar com o erro
             return None
-        
     
     # --- Métodos para Configurações do Sistema ---
 

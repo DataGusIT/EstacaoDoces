@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                            QPushButton, QTableWidget, QTableWidgetItem, QFormLayout,
                            QMessageBox, QHeaderView, QDialog, QFrame, QComboBox, QFileDialog,
-                           QTextEdit, QSpinBox, QCheckBox, QGroupBox, QProgressBar)
+                           QTextEdit, QSpinBox, QCheckBox, QGroupBox, QProgressBar, QSizePolicy)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont
 import csv
@@ -13,13 +13,16 @@ from email import encoders
 import os
 from datetime import datetime
 
+from ui.icon_manager import IconManager # LINHA CORRETA
+
 class FornecedorWindow(QWidget):
-    def __init__(self, db):
+    def __init__(self, db, theme_colors):
         super().__init__()
+        self.theme_colors = theme_colors 
         self.db = db
         self.initUI()
         self.carregar_dados()
-    
+        
     # NOVO MÉTODO: Centraliza a estilização dos botões (copiado da outra classe)
     def _get_button_style(self, style_type):
         """Retorna uma string de estilo CSS para um tipo de botão específico."""
@@ -50,66 +53,84 @@ class FornecedorWindow(QWidget):
         text, bg, hover, pressed = styles.get(style_type, ("black", "#f0f0f0", "#e0e0e0", "#d0d0d0"))
         return base_style.format(text_color=text, bg_color=bg, hover_color=hover, pressed_color=pressed)
     
-    def initUI(self):
-        # Layout principal
-        layout = QVBoxLayout(self)
+    def set_theme(self, theme_colors):
+        """Atualiza as cores do tema e os ícones."""
+        self.theme_colors = theme_colors
+        self.update_button_icons()
+        # Recarrega a tabela para que os ícones internos sejam atualizados
+        self.carregar_dados()
+
+    def update_button_icons(self):
+        """Atualiza os ícones dos botões para refletir o novo tema."""
+        icon_color = self.theme_colors.get('text_color', '#000')
+
+        self.search_button.setIcon(IconManager.get_icon('search', icon_color))
+        # Botões de ação principais herdam a cor do tema
+        self.importar_csv_btn.setIcon(IconManager.get_icon('import', icon_color))
+        self.exportar_csv_btn.setIcon(IconManager.get_icon('export', icon_color))
+        self.verificar_estoque_btn.setIcon(IconManager.get_icon('check_stock', icon_color))
         
-        # Título da página
+        # O botão primário sempre terá um ícone branco para contrastar com o fundo
+        self.add_button.setIcon(IconManager.get_icon('add', 'white'))
+    
+    def initUI(self):
+        layout = QVBoxLayout(self)
         titulo = QLabel("Cadastro de Fornecedores")
         titulo.setFont(QFont("Arial", 14, QFont.Bold))
         layout.addWidget(titulo)
-        
-        # Área de pesquisa
-        search_layout = QHBoxLayout()
+
+        search_group = QGroupBox("Pesquisa")
+        search_layout = QHBoxLayout(search_group)
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Pesquisar fornecedor...")
-        self.search_button = QPushButton("Buscar")
+        self.search_button = QPushButton()
+        self.search_button.setToolTip("Buscar Fornecedor")
         self.search_button.clicked.connect(self.pesquisar_fornecedores)
         search_layout.addWidget(self.search_input)
         search_layout.addWidget(self.search_button)
-        layout.addLayout(search_layout)
-        
-        # Tabela de fornecedores
+        layout.addWidget(search_group)
+
         self.tabela = QTableWidget()
         self.tabela.setColumnCount(7)
-        self.tabela.setHorizontalHeaderLabels(["ID", "Empresa", "Representante", "Frequência", "Telefone", 
-                                              "Email", "Ações"])
+        self.tabela.setHorizontalHeaderLabels(["ID", "Empresa", "Representante", "Frequência", "Telefone", "Email", "Ações"])
+
+        # Esta linha agora se aplica a TODAS as colunas, incluindo a coluna "Ações"
         self.tabela.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+
         self.tabela.verticalHeader().setVisible(False)
         layout.addWidget(self.tabela)
-        
-        # Botões de ação - AGORA COM ESTILOS
+
         action_layout = QHBoxLayout()
-        
-        # Grupo de botões principais
-        self.add_button = QPushButton("Adicionar Fornecedor")
-        self.add_button.setStyleSheet(self._get_button_style("add")) # Estilo adicionado
+        action_layout.setSpacing(10)
+        botoes_acao = []
+
+        self.add_button = QPushButton()
+        self.add_button.setText(" Adicionar Fornecedor")
+        self.add_button.setObjectName("primaryActionButton")
         self.add_button.clicked.connect(self.abrir_formulario_fornecedor)
-        action_layout.addWidget(self.add_button)
-        
-        # Grupo de botões CSV
-        csv_group = QGroupBox("Importar/Exportar")
-        csv_layout = QHBoxLayout(csv_group)
-        
-        self.importar_csv_btn = QPushButton("Importar CSV")
-        self.importar_csv_btn.setStyleSheet(self._get_button_style("data")) # Estilo adicionado
+        botoes_acao.append(self.add_button)
+
+        self.importar_csv_btn = QPushButton()
+        self.importar_csv_btn.setText(" Importar CSV")
         self.importar_csv_btn.clicked.connect(self.importar_csv)
-        csv_layout.addWidget(self.importar_csv_btn)
-        
-        self.exportar_csv_btn = QPushButton("Exportar CSV")
-        self.exportar_csv_btn.setStyleSheet(self._get_button_style("data")) # Estilo adicionado
+        botoes_acao.append(self.importar_csv_btn)
+
+        self.exportar_csv_btn = QPushButton()
+        self.exportar_csv_btn.setText(" Exportar CSV")
         self.exportar_csv_btn.clicked.connect(self.exportar_csv)
-        csv_layout.addWidget(self.exportar_csv_btn)
-        
-        action_layout.addWidget(csv_group)
-        
-        # Botão de verificar estoque baixo
-        self.verificar_estoque_btn = QPushButton("Verificar Estoque Baixo")
-        self.verificar_estoque_btn.setStyleSheet(self._get_button_style("action")) # Estilo adicionado
+        botoes_acao.append(self.exportar_csv_btn)
+
+        self.verificar_estoque_btn = QPushButton()
+        self.verificar_estoque_btn.setText(" Verificar Estoque Baixo")
         self.verificar_estoque_btn.clicked.connect(self.verificar_estoque_baixo)
-        action_layout.addWidget(self.verificar_estoque_btn)
-        
+        botoes_acao.append(self.verificar_estoque_btn)
+
+        for btn in botoes_acao:
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            action_layout.addWidget(btn)
+
         layout.addLayout(action_layout)
+        self.update_button_icons() # Define os ícones iniciais
     
     def carregar_dados(self):
         """Carrega os fornecedores do banco de dados para a tabela."""
@@ -123,36 +144,36 @@ class FornecedorWindow(QWidget):
         self.atualizar_tabela(fornecedores)
     
     def atualizar_tabela(self, fornecedores):
-        """Atualiza a tabela com os fornecedores fornecidos."""
         self.tabela.setRowCount(0)
-        
+        icon_color = self.theme_colors.get('text_color', '#000')
+
         for row, fornecedor in enumerate(fornecedores):
             self.tabela.insertRow(row)
-            
             self.tabela.setItem(row, 0, QTableWidgetItem(str(fornecedor['id'])))
             self.tabela.setItem(row, 1, QTableWidgetItem(fornecedor['empresa']))
             self.tabela.setItem(row, 2, QTableWidgetItem(fornecedor['representante'] or ""))
             self.tabela.setItem(row, 3, QTableWidgetItem(fornecedor['frequencia_compra'] or ""))
             self.tabela.setItem(row, 4, QTableWidgetItem(fornecedor['telefone'] or ""))
             self.tabela.setItem(row, 5, QTableWidgetItem(fornecedor['email'] or ""))
-            
-            # Botões de ação - AGORA COM ESTILOS
+
             acoes_widget = QWidget()
             acoes_layout = QHBoxLayout(acoes_widget)
-            acoes_layout.setContentsMargins(0, 0, 0, 0)
-            acoes_layout.setSpacing(5) # Espaçamento adicionado
-            
-            editar_btn = QPushButton("Editar")
-            editar_btn.setStyleSheet(self._get_button_style("edit")) # Estilo adicionado
+            acoes_layout.setContentsMargins(5, 2, 5, 2)
+            acoes_layout.setSpacing(5)
+
+            editar_btn = QPushButton(IconManager.get_icon('edit', icon_color), " ")
+            editar_btn.setToolTip("Editar Fornecedor")
+            editar_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
             editar_btn.clicked.connect(lambda _, f_id=fornecedor['id']: self.abrir_formulario_fornecedor(f_id))
-            
-            excluir_btn = QPushButton("Excluir")
-            excluir_btn.setStyleSheet(self._get_button_style("delete")) # Estilo adicionado
+
+            excluir_btn = QPushButton(IconManager.get_icon('delete', icon_color), "")
+            excluir_btn.setToolTip("Excluir Fornecedor")
+            excluir_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
             excluir_btn.clicked.connect(lambda _, f_id=fornecedor['id']: self.excluir_fornecedor(f_id))
-            
+
             acoes_layout.addWidget(editar_btn)
             acoes_layout.addWidget(excluir_btn)
-            
+
             self.tabela.setCellWidget(row, 6, acoes_widget)
     
     def abrir_formulario_fornecedor(self, fornecedor_id=None):
@@ -164,7 +185,7 @@ class FornecedorWindow(QWidget):
     def excluir_fornecedor(self, fornecedor_id):
         """Exclui um fornecedor após confirmação."""
         confirmacao = QMessageBox.question(
-            self, 
+            self,
             "Confirmar Exclusão",
             "Tem certeza que deseja excluir este fornecedor? Isso pode afetar produtos associados.",
             QMessageBox.Yes | QMessageBox.No
@@ -318,46 +339,31 @@ class DialogEstoqueBaixo(QDialog):
         self.smtp_port.setRange(1, 65535)
         self.smtp_port.setValue(587)
         self.email_usuario = QLineEdit()
-        self.email_usuario.setPlaceholderText("seu.email@gmail.com")
+        self.email_usuario.setPlaceholderText("seu.email@exemplo.com")
         self.email_senha = QLineEdit()
         self.email_senha.setEchoMode(QLineEdit.Password)
-        self.email_senha.setPlaceholderText("senha do app ou senha do email")
+        self.email_senha.setPlaceholderText("Sua senha de email ou senha de app")
         
         email_layout.addRow("Servidor SMTP:", self.smtp_server)
         email_layout.addRow("Porta:", self.smtp_port)
         email_layout.addRow("Seu Email:", self.email_usuario)
-        email_layout.addRow("Senha:", self.email_senha)
+        email_layout.addRow("Sua Senha:", self.email_senha)
         
         layout.addWidget(email_group)
-        
-        # Botões com estilo adicionado
+
         button_layout = QHBoxLayout()
         
-        self.enviar_emails_btn = QPushButton("Enviar Emails para Fornecedores")
-        # Estilo para ação principal (verde)
-        self.enviar_emails_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #28a745; color: white; border: none;
-                padding: 8px 12px; border-radius: 4px; font-weight: bold;
-            }
-            QPushButton:hover { background-color: #218838; }
-        """)
+        self.enviar_emails_btn = QPushButton(IconManager.get_icon('send', 'white'), " Enviar Emails para Fornecedores")
+        self.enviar_emails_btn.setObjectName("primaryActionButton")
         self.enviar_emails_btn.clicked.connect(self.enviar_emails)
-        
-        self.fechar_btn = QPushButton("Fechar")
-        # Estilo para ação secundária (cinza)
-        self.fechar_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6c757d; color: white; border: none;
-                padding: 8px 12px; border-radius: 4px; font-weight: bold;
-            }
-            QPushButton:hover { background-color: #5a6268; }
-        """)
+
+        self.fechar_btn = QPushButton(IconManager.get_icon('close'), " Fechar")
         self.fechar_btn.clicked.connect(self.accept)
-        
+
+        button_layout.addStretch()
         button_layout.addWidget(self.enviar_emails_btn)
         button_layout.addWidget(self.fechar_btn)
-        
+
         layout.addLayout(button_layout)
     
     # ... O resto da classe DialogEstoqueBaixo permanece o mesmo ...
@@ -476,59 +482,40 @@ class FormularioFornecedor(QDialog):
     def initUI(self):
         self.setWindowTitle("Cadastro de Fornecedor")
         self.setFixedWidth(500)
-        
+
         layout = QVBoxLayout(self)
-        form_layout = QFormLayout()
         
+        form_group = QGroupBox("Dados do Fornecedor")
+        form_layout = QFormLayout(form_group)
+
         self.empresa_input = QLineEdit()
         self.representante_input = QLineEdit()
-        self.representante_input.setPlaceholderText("Nome do representante")
         self.frequencia_input = QComboBox()
-        self.frequencia_input.addItems(["Alta", "Média", "Baixa"])
+        self.frequencia_input.addItems(["", "Alta", "Média", "Baixa"])
         self.telefone_input = QLineEdit()
         self.email_input = QLineEdit()
         self.endereco_input = QLineEdit()
         self.contato_input = QLineEdit()
-        self.contato_input.setPlaceholderText("Nome do contato")
-        
-        form_layout.addRow("Empresa:", self.empresa_input)
+
+        form_layout.addRow("Empresa (*):", self.empresa_input)
         form_layout.addRow("Representante:", self.representante_input)
         form_layout.addRow("Frequência de Compra:", self.frequencia_input)
         form_layout.addRow("Telefone:", self.telefone_input)
         form_layout.addRow("Email:", self.email_input)
         form_layout.addRow("Endereço:", self.endereco_input)
         form_layout.addRow("Contato:", self.contato_input)
-        layout.addLayout(form_layout)
-        
-        separador = QFrame()
-        separador.setFrameShape(QFrame.HLine)
-        separador.setFrameShadow(QFrame.Sunken)
-        layout.addWidget(separador)
-        
-        # Botões com estilo adicionado
+        layout.addWidget(form_group)
+
+        # Botões
         button_layout = QHBoxLayout()
-        self.salvar_btn = QPushButton("Salvar")
-        # Estilo para salvar (verde)
-        self.salvar_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #28a745; color: white; border: none;
-                padding: 8px 12px; border-radius: 4px; font-weight: bold;
-            }
-            QPushButton:hover { background-color: #218838; }
-        """)
+        self.salvar_btn = QPushButton(IconManager.get_icon('save', 'white'), " Salvar")
+        self.salvar_btn.setObjectName("primaryActionButton")
         self.salvar_btn.clicked.connect(self.salvar_fornecedor)
-        
-        self.cancelar_btn = QPushButton("Cancelar")
-        # Estilo para cancelar (cinza)
-        self.cancelar_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6c757d; color: white; border: none;
-                padding: 8px 12px; border-radius: 4px; font-weight: bold;
-            }
-            QPushButton:hover { background-color: #5a6268; }
-        """)
+
+        self.cancelar_btn = QPushButton(IconManager.get_icon('cancel'), " Cancelar")
         self.cancelar_btn.clicked.connect(self.reject)
-        
+
+        button_layout.addStretch()
         button_layout.addWidget(self.salvar_btn)
         button_layout.addWidget(self.cancelar_btn)
         layout.addLayout(button_layout)

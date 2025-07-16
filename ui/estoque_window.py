@@ -13,15 +13,40 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 import csv
+import qtawesome as qta
+from ui.icon_manager import IconManager # LINHA CORRETA
 
+class IconManager:
+    """Centraliza a criação de ícones para a tela de Estoque."""
+    ICONS = {
+        'search': 'fa5s.search',
+        'filter': 'fa5s.filter',
+        'clear': 'fa5s.broom',
+        'add': 'fa5s.plus-circle',
+        'report': 'fa5s.file-pdf',
+        'export': 'fa5s.file-csv',
+        'import': 'fa5s.file-upload',
+        'edit': 'fa5s.pencil-alt',
+        'delete': 'fa5s.trash-alt',
+        'break': 'fa5s.unlink', # Ícone para "quebrar" embalagem
+        'save': 'fa5s.save',
+        'cancel': 'fa5s.times-circle',
+        'confirm': 'fa5s.check-circle'
+    }
+
+    @staticmethod
+    def get_icon(name, color='#000000'):
+        icon_name = IconManager.ICONS.get(name, 'fa5s.question-circle')
+        return qta.icon(icon_name, color=color)
+    
 class EstoqueWindow(QWidget):
-    def __init__(self, db):
+    def __init__(self, db, theme_colors):
         super().__init__()
         self.db = db
+        self.theme_colors = theme_colors
         self.initUI()
         self.carregar_dados()
-        
-    # NOVO MÉTODO: Centraliza a estilização dos botões
+
     def _get_button_style(self, style_type):
         """Retorna uma string de estilo CSS para um tipo de botão específico."""
         base_style = """
@@ -40,8 +65,6 @@ class EstoqueWindow(QWidget):
                 background-color: {pressed_color};
             }}
         """
-        
-        # Paleta de cores (Bootstrap-like)
         styles = {
             "add":      ("white", "#28a745", "#218838", "#1e7e34"),  # Verde (Sucesso)
             "report":   ("white", "#007bff", "#0069d9", "#0062cc"),  # Azul (Informativo)
@@ -50,71 +73,93 @@ class EstoqueWindow(QWidget):
             "delete":   ("white", "#dc3545", "#c82333", "#bd2130"),  # Vermelho (Perigo/Exclusão)
             "action":   ("white", "#fd7e14", "#e67311", "#da6d10")   # Laranja (Ação especial)
         }
-        
-        # Pega a tupla de cores (texto, fundo, hover, pressionado)
         text, bg, hover, pressed = styles.get(style_type, ("black", "#f0f0f0", "#e0e0e0", "#d0d0d0"))
-        
         return base_style.format(text_color=text, bg_color=bg, hover_color=hover, pressed_color=pressed)
     
-    def initUI(self):
-        # Layout principal
-        layout = QVBoxLayout(self)
+    def set_theme(self, theme_colors):
+        """Atualiza o tema da janela, dos ícones e do cabeçalho da tabela."""
+        self.theme_colors = theme_colors
         
-        # Título da página
+        # Define o estilo para o cabeçalho da tabela
+        header_style = f"""
+            QHeaderView::section {{
+                background-color: {self.theme_colors.get('surface_color', '#f0f0f0')};
+                color: {self.theme_colors.get('text_color', '#000000')};
+                padding: 4px;
+                border: 1px solid {self.theme_colors.get('border_color', '#d0d0d0')};
+                font-weight: bold;
+            }}
+        """
+        self.tabela.horizontalHeader().setStyleSheet(header_style)
+        
+        # Atualiza os ícones dos botões
+        self.update_button_icons()
+    
+    def update_button_icons(self):
+        """Atualiza todos os ícones da interface para refletir o novo tema."""
+        # Botões de filtro
+        self.search_button.setIcon(IconManager.get_icon('search', self.theme_colors.get('text_color', '#000')))
+        self.aplicar_filtro_btn.setIcon(IconManager.get_icon('filter', self.theme_colors.get('text_color', '#000')))
+        self.limpar_filtro_btn.setIcon(IconManager.get_icon('clear', self.theme_colors.get('text_color', '#000')))
+
+        # Botões de ação principais (geralmente com cor de texto fixa para contraste com o fundo)
+        self.add_button.setIcon(IconManager.get_icon('add', 'white'))
+        self.relatorio_btn.setIcon(IconManager.get_icon('report', 'white'))
+        self.relatorio_estoque_btn.setIcon(IconManager.get_icon('report', 'white'))
+        self.exportar_csv_btn.setIcon(IconManager.get_icon('export', 'white'))
+        self.importar_csv_btn.setIcon(IconManager.get_icon('import', 'white'))
+
+        # Recarregar a tabela para que os ícones internos também sejam atualizados
+        self.pesquisar_produtos()
+    
+    def initUI(self):
+        layout = QVBoxLayout(self)
+    
         titulo = QLabel("Controle de Estoque")
         titulo.setFont(QFont("Arial", 14, QFont.Bold))
         layout.addWidget(titulo)
         
-        # Área de pesquisa e filtros
         search_group = QGroupBox("Pesquisa e Filtros")
         search_layout = QVBoxLayout(search_group)
         
-        # Linha de pesquisa
         search_input_layout = QHBoxLayout()
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Pesquisar produto por nome, descrição ou código de barras...")
-        self.search_button = QPushButton("Buscar")
+        
+        self.search_button = QPushButton(IconManager.get_icon('search'), "") # Apenas ícone
+        self.search_button.setToolTip("Buscar")
         self.search_button.clicked.connect(self.pesquisar_produtos)
         search_input_layout.addWidget(self.search_input)
         search_input_layout.addWidget(self.search_button)
         search_layout.addLayout(search_input_layout)
         
-        # Linha de filtros
         filter_layout = QHBoxLayout()
-        
-        # Filtro de estoque
         self.estoque_combo = QComboBox()
-        self.estoque_combo.addItem("Todos os níveis", "todos")
-        self.estoque_combo.addItem("Estoque Baixo", "baixo")
-        self.estoque_combo.addItem("Estoque Médio", "medio")
-        self.estoque_combo.addItem("Estoque Alto", "alto")
+        self.estoque_combo.addItems(["Todos os níveis", "Estoque Baixo", "Estoque Médio", "Estoque Alto"])
         filter_layout.addWidget(QLabel("Nível de Estoque:"))
         filter_layout.addWidget(self.estoque_combo)
         
-        # Filtro de vencimento
         self.vencimento_combo = QComboBox()
-        self.vencimento_combo.addItem("Todos", "todos")
-        self.vencimento_combo.addItem("Vence em 30 dias", "30")
-        self.vencimento_combo.addItem("Vence em 15 dias", "15")
-        self.vencimento_combo.addItem("Vencidos", "vencidos")
+        self.vencimento_combo.addItems(["Todos", "Vence em 30 dias", "Vence em 15 dias", "Vencidos"])
         filter_layout.addWidget(QLabel("Vencimento:"))
         filter_layout.addWidget(self.vencimento_combo)
 
-        # Filtro de categoria
         self.categoria_combo = QComboBox()
-        self.categoria_combo.addItem("Todas as categorias", "todas")
+        self.categoria_combo.addItem("Todas as categorias")
         self.carregar_categorias()
         filter_layout.addWidget(QLabel("Categoria:"))
         filter_layout.addWidget(self.categoria_combo)
         
-        # Botão de aplicar filtros
-        self.aplicar_filtro_btn = QPushButton("Aplicar Filtros")
+        # Botões de filtro APENAS COM ÍCONES E TOOLTIP
+        self.aplicar_filtro_btn = QPushButton(IconManager.get_icon('filter'), "")
+        self.aplicar_filtro_btn.setToolTip("Aplicar Filtros")
         self.aplicar_filtro_btn.clicked.connect(self.aplicar_filtros)
-        filter_layout.addWidget(self.aplicar_filtro_btn)
         
-        # Botão para limpar filtros
-        self.limpar_filtro_btn = QPushButton("Limpar Filtros")
+        self.limpar_filtro_btn = QPushButton(IconManager.get_icon('clear'), "")
+        self.limpar_filtro_btn.setToolTip("Limpar Filtros")
         self.limpar_filtro_btn.clicked.connect(self.limpar_filtros)
+        
+        filter_layout.addWidget(self.aplicar_filtro_btn)
         filter_layout.addWidget(self.limpar_filtro_btn)
         
         search_layout.addLayout(filter_layout)
@@ -148,25 +193,22 @@ class EstoqueWindow(QWidget):
         
         # Botões de ação - AGORA COM ESTILOS
         action_layout = QHBoxLayout()
-        
-        self.add_button = QPushButton("Adicionar Produto")
-        self.add_button.setStyleSheet(self._get_button_style("add"))
+    
+        self.add_button = QPushButton(IconManager.get_icon('add', 'white'), " Adicionar Produto")
+        # Usamos um objectName para que o tema principal possa estilizá-lo
+        self.add_button.setObjectName("primaryActionButton") 
         self.add_button.clicked.connect(self.abrir_formulario_produto)
 
-        self.relatorio_btn = QPushButton("Relatório de Vencimentos")
-        self.relatorio_btn.setStyleSheet(self._get_button_style("report"))
+        self.relatorio_btn = QPushButton(IconManager.get_icon('report'), " Relatório de Vencimentos")
         self.relatorio_btn.clicked.connect(self.relatorio_vencimentos)
 
-        self.relatorio_estoque_btn = QPushButton("Relatório de Estoque Baixo")
-        self.relatorio_estoque_btn.setStyleSheet(self._get_button_style("report"))
+        self.relatorio_estoque_btn = QPushButton(IconManager.get_icon('report'), " Relatório de Estoque Baixo")
         self.relatorio_estoque_btn.clicked.connect(self.relatorio_estoque_baixo)
         
-        self.exportar_csv_btn = QPushButton("Exportar CSV")
-        self.exportar_csv_btn.setStyleSheet(self._get_button_style("data"))
+        self.exportar_csv_btn = QPushButton(IconManager.get_icon('export'), " Exportar CSV")
         self.exportar_csv_btn.clicked.connect(self.exportar_csv)
 
-        self.importar_csv_btn = QPushButton("Importar CSV")
-        self.importar_csv_btn.setStyleSheet(self._get_button_style("data"))
+        self.importar_csv_btn = QPushButton(IconManager.get_icon('import'), " Importar CSV")
         self.importar_csv_btn.clicked.connect(self.importar_csv)
 
         action_layout.addWidget(self.add_button)
@@ -175,7 +217,7 @@ class EstoqueWindow(QWidget):
         action_layout.addWidget(self.exportar_csv_btn)
         action_layout.addWidget(self.importar_csv_btn)
         layout.addLayout(action_layout)
-        
+
     def atualizar_categorias_filtro(self):
         categoria_selecionada = self.categoria_combo.currentData()
         self.carregar_categorias()
@@ -260,46 +302,59 @@ class EstoqueWindow(QWidget):
         
         for row, produto in enumerate(produtos):
             self.tabela.insertRow(row)
-            self.tabela.setItem(row, 0, QTableWidgetItem(str(produto['id'])))
-            self.tabela.setItem(row, 1, QTableWidgetItem(produto['codigo_barras'] or ""))
-            nome_produto = produto['nome']
-            if produto['fracionado']:
-                nome_produto += f" (Frac. - {produto['unidade_medida']})"
-            self.tabela.setItem(row, 2, QTableWidgetItem(nome_produto))
-            self.tabela.setItem(row, 3, QTableWidgetItem(produto['categoria'] or "Sem categoria"))
             
-            if produto['fracionado']:
-                estoque_total = produto['estoque_total_calculado']
-                quantidade_display = f"{produto['quantidade']} emb. + {produto['estoque_fracionado']} {produto['unidade_medida']} (Total: {estoque_total})"
-                tooltip_text = f"Embalagens: {produto['quantidade']}\nFracionado: {produto['estoque_fracionado']} {produto['unidade_medida']}\nTotal em unidades: {estoque_total}"
+            # Função auxiliar para obter valores de forma segura
+            def get_value(key, default=""):
+                return produto[key] if key in produto.keys() else default
+
+            self.tabela.setItem(row, 0, QTableWidgetItem(str(get_value('id', 0))))
+            self.tabela.setItem(row, 1, QTableWidgetItem(get_value('codigo_barras', '')))
+            
+            nome_produto = get_value('nome', 'Produto Desconhecido')
+            is_fracionado = bool(get_value('fracionado', False))
+            
+            if is_fracionado:
+                nome_produto += f" (Frac. - {get_value('unidade_medida', 'un')})"
+            self.tabela.setItem(row, 2, QTableWidgetItem(nome_produto))
+            self.tabela.setItem(row, 3, QTableWidgetItem(get_value('categoria', "Sem categoria")))
+            
+            quantidade = get_value('quantidade', 0)
+            estoque_fracionado = get_value('estoque_fracionado', 0)
+            
+            if is_fracionado:
+                estoque_total = get_value('estoque_total_calculado', 0)
+                quantidade_display = f"{quantidade} emb. + {estoque_fracionado} {get_value('unidade_medida', 'un')} (Total: {estoque_total})"
+                tooltip_text = f"Embalagens: {quantidade}\nFracionado: {estoque_fracionado} {get_value('unidade_medida', 'un')}\nTotal em unidades: {estoque_total}"
             else:
-                quantidade_display = str(produto['quantidade'])
-                tooltip_text = f"Quantidade: {produto['quantidade']}"
+                quantidade_display = str(quantidade)
+                tooltip_text = f"Quantidade: {quantidade}"
             
             quantidade_item = QTableWidgetItem(quantidade_display)
             quantidade_item.setToolTip(tooltip_text)
             
-            estoque_minimo = produto['estoque_minimo'] or 0
-            estoque_atual = produto['estoque_total_calculado'] if produto['fracionado'] else produto['quantidade']
+            estoque_minimo = get_value('estoque_minimo', 0)
+            estoque_atual = get_value('estoque_total_calculado', quantidade) # Usa estoque_total se existir, senão o normal
+            
             if estoque_atual <= estoque_minimo:
                 quantidade_item.setForeground(QBrush(QColor('red')))
                 quantidade_item.setToolTip(quantidade_item.toolTip() + "\nESTOQUE ABAIXO DO MÍNIMO!")
             
             self.tabela.setItem(row, 4, quantidade_item)
             self.tabela.setItem(row, 5, QTableWidgetItem(str(estoque_minimo)))
-            self.tabela.setItem(row, 6, QTableWidgetItem(f"R$ {produto['preco_compra']:.2f}"))
-            self.tabela.setItem(row, 7, QTableWidgetItem(f"{(produto['margem_lucro'] or 0):.2f}%"))
+            self.tabela.setItem(row, 6, QTableWidgetItem(f"R$ {get_value('preco_compra', 0):.2f}"))
+            self.tabela.setItem(row, 7, QTableWidgetItem(f"{get_value('margem_lucro', 0):.2f}%"))
             
-            if produto['fracionado'] and produto['preco_unitario_fracao']:
-                preco_display = f"Emb: R$ {produto['preco_venda']:.2f} | Un: R$ {produto['preco_unitario_fracao']:.2f}"
+            if is_fracionado and get_value('preco_unitario_fracao', 0):
+                preco_display = f"Emb: R$ {get_value('preco_venda', 0):.2f} | Un: R$ {get_value('preco_unitario_fracao', 0):.2f}"
             else:
-                preco_display = f"R$ {produto['preco_venda']:.2f}"
+                preco_display = f"R$ {get_value('preco_venda', 0):.2f}"
             self.tabela.setItem(row, 8, QTableWidgetItem(preco_display))
             
-            validade_item = QTableWidgetItem(str(produto['data_validade'] or ""))
-            if produto['data_validade']:
+            validade_str = get_value('data_validade', '')
+            validade_item = QTableWidgetItem(validade_str)
+            if validade_str:
                 try:
-                    data_validade = datetime.strptime(produto['data_validade'], "%Y-%m-%d").date()
+                    data_validade = datetime.strptime(validade_str, "%Y-%m-%d").date()
                     dias_para_vencer = (data_validade - hoje).days
                     if dias_para_vencer <= 0:
                         validade_item.setForeground(QBrush(QColor('darkred')))
@@ -310,34 +365,40 @@ class EstoqueWindow(QWidget):
                     elif dias_para_vencer <= 30:
                         validade_item.setForeground(QBrush(QColor('orange')))
                         validade_item.setToolTip(f"Vence em {dias_para_vencer} dias!")
-                except: pass
+                except (ValueError, TypeError): 
+                    pass # Ignora se a data for inválida
             
             self.tabela.setItem(row, 9, validade_item)
-            self.tabela.setItem(row, 10, QTableWidgetItem(produto['localizacao'] or ""))
-            self.tabela.setItem(row, 11, QTableWidgetItem(produto['fornecedor_nome'] or "N/A"))
+            self.tabela.setItem(row, 10, QTableWidgetItem(get_value('localizacao', '')))
+            self.tabela.setItem(row, 11, QTableWidgetItem(get_value('fornecedor_nome', "N/A")))
             
-            # Botões de ação - AGORA COM ESTILOS
+            # Botões de ação com ícones e tooltips
             acoes_widget = QWidget()
             acoes_layout = QHBoxLayout(acoes_widget)
             acoes_layout.setContentsMargins(0, 0, 0, 0)
-            acoes_layout.setSpacing(5) # Adiciona um pequeno espaço entre os botões
+            acoes_layout.setSpacing(5)
             
-            editar_btn = QPushButton("Editar")
-            editar_btn.setStyleSheet(self._get_button_style("edit"))
-            editar_btn.clicked.connect(lambda _, p_id=produto['id']: self.abrir_formulario_produto(p_id))
+            editar_btn = QPushButton(IconManager.get_icon('edit', 'black'), "")
+            editar_btn.setToolTip("Editar Produto")
+            editar_btn.setFixedSize(30, 30)
+            editar_btn.clicked.connect(lambda _, p_id=get_value('id'): self.abrir_formulario_produto(p_id))
             
-            excluir_btn = QPushButton("Excluir")
-            excluir_btn.setStyleSheet(self._get_button_style("delete"))
-            excluir_btn.clicked.connect(lambda _, p_id=produto['id']: self.excluir_produto(p_id))
+            excluir_btn = QPushButton(IconManager.get_icon('delete', 'white'), "")
+            excluir_btn.setToolTip("Excluir Produto")
+            excluir_btn.setFixedSize(30, 30)
+            excluir_btn.clicked.connect(lambda _, p_id=get_value('id'): self.excluir_produto(p_id))
             
             acoes_layout.addWidget(editar_btn)
             acoes_layout.addWidget(excluir_btn)
             
-            if produto['fracionado'] and produto['quantidade'] > 0:
-                quebrar_btn = QPushButton("Quebrar")
-                quebrar_btn.setStyleSheet(self._get_button_style("action"))
+            ## =============================================== ##
+            ##          LINHA CRÍTICA CORRIGIDA AQUI           ##
+            ## =============================================== ##
+            if is_fracionado and quantidade > 0:
+                quebrar_btn = QPushButton(IconManager.get_icon('break', 'white'), "")
                 quebrar_btn.setToolTip("Quebrar embalagem em unidades")
-                quebrar_btn.clicked.connect(lambda _, p_id=produto['id']: self.abrir_dialog_quebrar_embalagem(p_id))
+                quebrar_btn.setFixedSize(30, 30)
+                quebrar_btn.clicked.connect(lambda _, p_id=get_value('id'): self.abrir_dialog_quebrar_embalagem(p_id))
                 acoes_layout.addWidget(quebrar_btn)
             
             self.tabela.setCellWidget(row, 12, acoes_widget)
@@ -1164,15 +1225,16 @@ class FormularioProduto(QDialog):
         
         # Botões
         button_layout = QHBoxLayout()
-        self.salvar_btn = QPushButton("Salvar")
+        self.salvar_btn = QPushButton(IconManager.get_icon('save', 'white'), " Salvar")
+        self.salvar_btn.setStyleSheet(EstoqueWindow._get_button_style(self, "add")) # Reutiliza estilo verde
         self.salvar_btn.clicked.connect(self.salvar_produto)
-        self.cancelar_btn = QPushButton("Cancelar")
+        
+        self.cancelar_btn = QPushButton(IconManager.get_icon('cancel', 'white'), " Cancelar")
+        self.cancelar_btn.setStyleSheet(EstoqueWindow._get_button_style(self, "delete")) # Reutiliza estilo vermelho
         self.cancelar_btn.clicked.connect(self.reject)
         
         button_layout.addWidget(self.salvar_btn)
         button_layout.addWidget(self.cancelar_btn)
-        
-        layout.addLayout(button_layout)
     
     def carregar_categorias(self):
         """Carrega as categorias existentes no combobox."""
@@ -1429,16 +1491,16 @@ class DialogQuebrarEmbalagem(QDialog):
         # Botões
         button_layout = QHBoxLayout()
         
-        confirmar_btn = QPushButton("Confirmar")
+        confirmar_btn = QPushButton(IconManager.get_icon('confirm', 'white'), " Confirmar")
+        confirmar_btn.setStyleSheet(EstoqueWindow._get_button_style(self, "add")) # Verde
         confirmar_btn.clicked.connect(self.quebrar_embalagem)
         
-        cancelar_btn = QPushButton("Cancelar")
+        cancelar_btn = QPushButton(IconManager.get_icon('cancel', 'white'), " Cancelar")
+        cancelar_btn.setStyleSheet(EstoqueWindow._get_button_style(self, "delete")) # Vermelho
         cancelar_btn.clicked.connect(self.reject)
         
         button_layout.addWidget(confirmar_btn)
         button_layout.addWidget(cancelar_btn)
-        
-        layout.addLayout(button_layout)
     
     def atualizar_preview(self):
         """Atualiza o preview do resultado da quebra."""

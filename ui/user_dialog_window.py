@@ -7,115 +7,131 @@ import hashlib
 class UserDialogWindow(QDialog):
     """Diálogo para adicionar ou editar usuários"""
     
-    def __init__(self, db_manager, usuario_id=None):
+    def __init__(self, db_manager, theme_colors, usuario_id=None):
         super().__init__()
-        
         self.db = db_manager
+        self.theme_colors = theme_colors
         self.usuario_id = usuario_id
         self.is_edit_mode = usuario_id is not None
         
         self.init_ui()
+        self.apply_styles() # Aplica o tema
         
         if self.is_edit_mode:
             self.carregar_dados_usuario()
     
     def init_ui(self):
-        """Inicializa a interface do usuário"""
         self.setWindowTitle("Adicionar Usuário" if not self.is_edit_mode else "Editar Usuário")
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(450)
         
-        # Layout principal
-        main_layout = QVBoxLayout()
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(15)
         
-        # Formulário
         form_layout = QFormLayout()
+        form_layout.setLabelAlignment(Qt.AlignRight)
+        form_layout.setSpacing(10)
         
-        # Campos do formulário
         self.nome_edit = QLineEdit()
         self.login_edit = QLineEdit()
+        self.email_edit = QLineEdit()
         
-        # Campos de senha - só obrigatórios em modo de adicionar
+        self.tipo_combo = QComboBox()
+        self.tipo_combo.addItems(["Comum", "Administrador"])
+        
+        form_layout.addRow("Nome Completo:", self.nome_edit)
+        form_layout.addRow("Nome de Usuário (login):", self.login_edit)
+        form_layout.addRow("E-mail:", self.email_edit)
+        form_layout.addRow("Tipo de Conta:", self.tipo_combo)
+
         senha_group = QGroupBox("Senha" if not self.is_edit_mode else "Alterar Senha")
-        senha_layout = QVBoxLayout()
-        
+        senha_layout = QFormLayout()
         self.senha_edit = QLineEdit()
         self.senha_edit.setEchoMode(QLineEdit.Password)
         self.confirmar_senha_edit = QLineEdit()
         self.confirmar_senha_edit.setEchoMode(QLineEdit.Password)
-        
-        senha_form = QFormLayout()
-        senha_form.addRow("Senha:", self.senha_edit)
-        senha_form.addRow("Confirmar Senha:", self.confirmar_senha_edit)
-        
-        # Checkbox para indicar se quer alterar a senha no modo de edição
-        if self.is_edit_mode:
-            self.alterar_senha_check = QCheckBox("Alterar senha")
-            self.alterar_senha_check.setChecked(False)
-            self.alterar_senha_check.toggled.connect(self.toggle_senha_fields)
-            senha_layout.addWidget(self.alterar_senha_check)
-            self.senha_edit.setEnabled(False)
-            self.confirmar_senha_edit.setEnabled(False)
-        
-        senha_layout.addLayout(senha_form)
+        senha_layout.addRow("Nova Senha:", self.senha_edit)
+        senha_layout.addRow("Confirmar Senha:", self.confirmar_senha_edit)
         senha_group.setLayout(senha_layout)
         
-        # Outros campos
-        self.email_edit = QLineEdit()
-        
-        # Tipo de usuário
-        self.tipo_combo = QComboBox()
-        self.tipo_combo.addItem("Comum", "comum")
-        self.tipo_combo.addItem("Administrador", "admin")
-        
-        # Status (apenas no modo de edição)
         if self.is_edit_mode:
-            self.status_group = QGroupBox("Status")
-            status_layout = QHBoxLayout()
-            
-            self.ativo_radio = QRadioButton("Ativo")
-            self.inativo_radio = QRadioButton("Inativo")
-            
-            status_layout.addWidget(self.ativo_radio)
-            status_layout.addWidget(self.inativo_radio)
-            
-            self.status_group.setLayout(status_layout)
+            self.alterar_senha_check = QCheckBox("Marque para alterar a senha")
+            self.alterar_senha_check.toggled.connect(self.toggle_senha_fields)
+            senha_layout.insertRow(0, self.alterar_senha_check)
+            self.toggle_senha_fields(False)
         
-        # Adicionar campos ao formulário
-        form_layout.addRow("Nome:", self.nome_edit)
-        form_layout.addRow("Login:", self.login_edit)
-        form_layout.addRow("Email:", self.email_edit)
-        form_layout.addRow("Tipo:", self.tipo_combo)
-        
-        if self.is_edit_mode:
-            form_layout.addRow(self.status_group)
-        
-        # Botões
         buttons_layout = QHBoxLayout()
-        
         self.cancel_button = QPushButton("Cancelar")
         self.cancel_button.clicked.connect(self.reject)
-        
         self.save_button = QPushButton("Salvar")
+        self.save_button.setObjectName("primaryButton") # Para estilo especial
         self.save_button.clicked.connect(self.salvar_usuario)
-        
+        buttons_layout.addStretch()
         buttons_layout.addWidget(self.cancel_button)
         buttons_layout.addWidget(self.save_button)
         
-        # Adicionar ao layout principal
         main_layout.addLayout(form_layout)
         main_layout.addWidget(senha_group)
+        main_layout.addStretch()
         main_layout.addLayout(buttons_layout)
-        
         self.setLayout(main_layout)
-    
+
+    def apply_styles(self):
+        colors = self.theme_colors
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {colors['bg_color']};
+                color: {colors['text_color']};
+                font-size: 10pt;
+            }}
+            QLineEdit, QComboBox {{
+                background-color: {colors['surface_color']};
+                color: {colors['text_color']};
+                border: 1px solid {colors['border_color']};
+                padding: 8px;
+                border-radius: 6px;
+            }}
+            QLineEdit:focus, QComboBox:focus {{
+                border: 1px solid {colors['accent_color']};
+            }}
+            QGroupBox {{
+                color: {colors['text_color']};
+                border: 1px solid {colors['border_color']};
+                border-radius: 6px;
+                margin-top: 10px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 5px;
+                left: 10px;
+            }}
+            QPushButton {{
+                background-color: {colors['surface_color']};
+                color: {colors['text_color']};
+                border: 1px solid {colors['border_color']};
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                border-color: {colors['accent_color']};
+            }}
+            #primaryButton {{
+                background-color: {colors['accent_color']};
+                color: white;
+                border: none;
+            }}
+            #primaryButton:hover {{
+                background-color: #005bb5;
+            }}
+        """)
+
     def toggle_senha_fields(self, checked):
-        """Habilita/desabilita os campos de senha no modo de edição"""
         self.senha_edit.setEnabled(checked)
         self.confirmar_senha_edit.setEnabled(checked)
-        
         if not checked:
-            self.senha_edit.setText("")
-            self.confirmar_senha_edit.setText("")
+            self.senha_edit.clear()
+            self.confirmar_senha_edit.clear()
     
     def carregar_dados_usuario(self):
         """Carrega os dados do usuário para edição"""

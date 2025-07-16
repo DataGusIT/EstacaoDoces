@@ -9,48 +9,51 @@ from PyQt5.QtCore import Qt, QDate
 from PyQt5.QtGui import QColor, QIcon
 import hashlib
 
+from .icon_manager import IconManager
+
 class AdminWindow(QDialog):
-    """Janela de administração do sistema"""
+    """Janela de administração do sistema, adaptada ao tema."""
     
-    def __init__(self, db_manager, usuario):
+    # 1. Modificar o construtor para aceitar theme_colors
+    def __init__(self, db_manager, usuario, theme_colors):
         super().__init__()
         
         self.db = db_manager
         self.usuario = usuario
+        self.theme_colors = theme_colors # Armazena o tema
         
         if self.usuario.get('tipo') != 'admin':
-            # Registrar tentativa de acesso indevido
-            self.db.registrar_log('WARNING', self.usuario.get('login'), 
+            self.db.registrar_log('WARNING', self.usuario.get('login'),
                                  'ACESSO_ADMIN', 'Tentativa de acesso não autorizado ao painel.')
             QMessageBox.warning(self, "Acesso Negado", "Você não tem permissão para acessar esta área.")
             self.reject()
             return
         
         self.init_ui()
-        # Registrar acesso bem-sucedido
+        self.apply_styles() # Aplica os estilos
+        
         self.db.registrar_log('ADMIN', self.usuario.get('login'), 'ACESSO_ADMIN', 'Acessou o painel de administração.')
 
     def init_ui(self):
-        """Inicializa a interface do usuário"""
+        """Inicializa a interface do usuário (sem estilos fixos)."""
         self.setWindowTitle("Painel de Administração")
         self.setMinimumSize(900, 700)
         
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(15, 15, 15, 15)
         
         title_label = QLabel("Painel de Administração")
-        title_label.setStyleSheet("font-size: 18pt; font-weight: bold; margin-bottom: 10px;")
+        title_label.setObjectName("titleLabel") # Para estilização
         
         self.tab_widget = QTabWidget()
         
         self.usuarios_tab = self.criar_tab_usuarios()
-        self.tab_widget.addTab(self.usuarios_tab, "Gerenciar Usuários")
+        self.tab_widget.addTab(self.usuarios_tab, IconManager.get_icon('clientes', self.theme_colors['text_secondary']), "Gerenciar Usuários")
         
         self.config_tab = self.criar_tab_config()
-        self.tab_widget.addTab(self.config_tab, "Configurações do Sistema")
+        self.tab_widget.addTab(self.config_tab, IconManager.get_icon('config', self.theme_colors['text_secondary']), "Configurações")
         
         self.logs_tab = self.criar_tab_logs()
-        self.tab_widget.addTab(self.logs_tab, "Logs de Atividades")
+        self.tab_widget.addTab(self.logs_tab, IconManager.get_icon('relatorio', self.theme_colors['text_secondary']), "Logs de Atividades")
         
         buttons_layout = QHBoxLayout()
         self.close_button = QPushButton("Fechar")
@@ -62,12 +65,88 @@ class AdminWindow(QDialog):
         main_layout.addWidget(self.tab_widget)
         main_layout.addLayout(buttons_layout)
 
+    def apply_styles(self):
+        """Aplica a folha de estilo QSS baseada no tema."""
+        colors = self.theme_colors
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {colors['bg_color']};
+                color: {colors['text_color']};
+            }}
+            #titleLabel {{
+                font-size: 18pt;
+                font-weight: bold;
+                color: {colors['text_color']};
+                margin-bottom: 10px;
+            }}
+            QTabWidget::pane {{
+                border: 1px solid {colors['border_color']};
+                border-top: none;
+            }}
+            QTabBar::tab {{
+                background: transparent;
+                color: {colors['text_secondary']};
+                padding: 10px 20px;
+                border: 1px solid transparent;
+                border-bottom: none;
+            }}
+            QTabBar::tab:selected {{
+                background: {colors['surface_color']};
+                color: {colors['accent_color']};
+                border: 1px solid {colors['border_color']};
+                border-bottom: 1px solid {colors['surface_color']};
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+            }}
+            QTableWidget {{
+                background-color: {colors['surface_color']};
+                color: {colors['text_color']};
+                border: none;
+                gridline-color: {colors['border_color']};
+                alternate-background-color: {colors['button_hover']};
+            }}
+            QHeaderView::section {{
+                background-color: {colors['menu_color'] if colors.get('menu_color') else colors['surface_color']};
+                color: {colors['text_color']};
+                padding: 5px;
+                border: 1px solid {colors['border_color']};
+                font-weight: bold;
+            }}
+            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit {{
+                background-color: {colors['surface_color']};
+                color: {colors['text_color']};
+                border: 1px solid {colors['border_color']};
+                padding: 8px;
+                border-radius: 6px;
+            }}
+            QPushButton {{
+                background-color: {colors['surface_color']};
+                color: {colors['text_color']};
+                border: 1px solid {colors['border_color']};
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                border-color: {colors['accent_color']};
+            }}
+            #primaryButton {{
+                background-color: {colors['accent_color']};
+                color: white;
+                border: none;
+            }}
+            #primaryButton:hover {{
+                background-color: #005bb5;
+            }}
+        """)
+
     # ===================================================================
     # ABA DE USUÁRIOS
     # ===================================================================
     def criar_tab_usuarios(self):
         tab = QWidget()
         layout = QVBoxLayout(tab)
+        layout.setContentsMargins(0, 10, 0, 0)
         
         self.usuarios_table = QTableWidget()
         self.usuarios_table.setColumnCount(6)
@@ -79,11 +158,13 @@ class AdminWindow(QDialog):
         self.usuarios_table.doubleClicked.connect(self.editar_usuario)
 
         action_layout = QHBoxLayout()
-        self.add_user_button = QPushButton(QIcon.fromTheme("list-add"), " Adicionar")
-        self.edit_user_button = QPushButton(QIcon.fromTheme("document-edit"), " Editar")
-        self.toggle_user_button = QPushButton(QIcon.fromTheme("process-stop"), " Ativar/Desativar")
-        self.reset_pass_button = QPushButton(QIcon.fromTheme("dialog-password"), " Resetar Senha")
-        self.refresh_users_button = QPushButton(QIcon.fromTheme("view-refresh"), " Atualizar")
+        icon_color = self.theme_colors.get('text_color', '#000000')
+
+        self.add_user_button = QPushButton(IconManager.get_icon('add', color=icon_color), " Adicionar")
+        self.edit_user_button = QPushButton(IconManager.get_icon('edit', color=icon_color), " Editar")
+        self.toggle_user_button = QPushButton(IconManager.get_icon('unlock', color=icon_color), " Ativar/Desativar")
+        self.reset_pass_button = QPushButton(IconManager.get_icon('password', color=icon_color), " Resetar Senha")
+        self.refresh_users_button = QPushButton(IconManager.get_icon('atualizar', color=icon_color), " Atualizar")
 
         self.add_user_button.clicked.connect(self.adicionar_usuario)
         self.edit_user_button.clicked.connect(self.editar_usuario)
@@ -103,6 +184,26 @@ class AdminWindow(QDialog):
         
         self.carregar_usuarios()
         return tab
+
+    # 2. Atualizar a chamada da UserDialogWindow
+    def adicionar_usuario(self):
+        from ui.user_dialog_window import UserDialogWindow
+        # PASSA O TEMA PARA O DIÁLOGO
+        dialog = UserDialogWindow(self.db, self.theme_colors)
+        if dialog.exec_() == QDialog.Accepted:
+            self.db.registrar_log('ADMIN', self.usuario.get('login'), 'USER_CREATE', f"Usuário criado.")
+            self.carregar_usuarios()
+
+    def editar_usuario(self):
+        user_id, _ = self.get_selected_user_info()
+        if not user_id: return
+        
+        from ui.user_dialog_window import UserDialogWindow
+        # PASSA O TEMA PARA O DIÁLOGO
+        dialog = UserDialogWindow(self.db, self.theme_colors, user_id)
+        if dialog.exec_() == QDialog.Accepted:
+            self.db.registrar_log('ADMIN', self.usuario.get('login'), 'USER_UPDATE', f"Dados do usuário ID {user_id} atualizados.")
+            self.carregar_usuarios()
     
     def carregar_usuarios(self):
         try:
@@ -132,24 +233,6 @@ class AdminWindow(QDialog):
         user_id = int(self.usuarios_table.item(row, 0).text())
         user_info = self.db.obter_usuario_por_id(user_id)
         return user_id, user_info
-
-    def adicionar_usuario(self):
-        # Este método depende da sua UserDialogWindow. Verifique o nome da classe.
-        from ui.user_dialog_window import UserDialogWindow
-        dialog = UserDialogWindow(self.db)
-        if dialog.exec_() == QDialog.Accepted:
-            self.db.registrar_log('ADMIN', self.usuario.get('login'), 'USER_CREATE', f"Usuário '{dialog.get_username()}' criado.")
-            self.carregar_usuarios()
-
-    def editar_usuario(self):
-        user_id, _ = self.get_selected_user_info()
-        if not user_id: return
-        
-        from ui.user_dialog_window import UserDialogWindow
-        dialog = UserDialogWindow(self.db, user_id)
-        if dialog.exec_() == QDialog.Accepted:
-            self.db.registrar_log('ADMIN', self.usuario.get('login'), 'USER_UPDATE', f"Dados do usuário ID {user_id} atualizados.")
-            self.carregar_usuarios()
 
     def alternar_status_usuario(self):
         user_id, user_info = self.get_selected_user_info()
@@ -198,9 +281,9 @@ class AdminWindow(QDialog):
     def criar_tab_config(self):
         tab = QWidget()
         layout = QVBoxLayout(tab)
+        layout.setContentsMargins(10, 10, 10, 10)
         form_layout = QFormLayout()
 
-        # Configurações de Produto
         self.margem_lucro_padrao = QDoubleSpinBox(suffix=" %")
         self.alerta_estoque_padrao = QSpinBox(suffix=" unidades")
         self.alerta_validade_dias = QSpinBox(suffix=" dias")
@@ -210,7 +293,8 @@ class AdminWindow(QDialog):
         form_layout.addRow("Alerta de Estoque Baixo Padrão:", self.alerta_estoque_padrao)
         form_layout.addRow("Alerta de Vencimento (antecedência):", self.alerta_validade_dias)
 
-        save_button = QPushButton(QIcon.fromTheme("document-save"), " Salvar Configurações")
+        save_button = QPushButton(IconManager.get_icon('save', color='white'), " Salvar Configurações")
+        save_button.setObjectName("primaryButton") # Aplica o estilo de botão primário
         save_button.clicked.connect(self.salvar_configuracoes)
 
         layout.addLayout(form_layout)
@@ -243,8 +327,8 @@ class AdminWindow(QDialog):
     def criar_tab_logs(self):
         tab = QWidget()
         layout = QVBoxLayout(tab)
+        layout.setContentsMargins(0, 10, 0, 0)
 
-        # Filtros
         filter_layout = QHBoxLayout()
         self.log_data_inicio = QDateEdit(QDate.currentDate().addMonths(-1))
         self.log_data_fim = QDateEdit(QDate.currentDate())
@@ -256,7 +340,7 @@ class AdminWindow(QDialog):
         self.log_usuario_input.setPlaceholderText("Filtrar por usuário...")
         self.log_level_combo.addItems(["Todos", "ADMIN", "INFO", "WARNING", "ERROR"])
 
-        filter_button = QPushButton(QIcon.fromTheme("edit-find"), " Filtrar")
+        filter_button = QPushButton(IconManager.get_icon('filter', color=self.theme_colors['text_color']), " Filtrar")
         filter_button.clicked.connect(self.carregar_logs)
 
         filter_layout.addWidget(QLabel("De:"))
@@ -267,7 +351,6 @@ class AdminWindow(QDialog):
         filter_layout.addWidget(self.log_level_combo)
         filter_layout.addWidget(filter_button)
 
-        # Tabela de logs
         self.logs_table = QTableWidget()
         self.logs_table.setColumnCount(5)
         self.logs_table.setHorizontalHeaderLabels(["Timestamp", "Nível", "Usuário", "Ação", "Detalhes"])

@@ -1,302 +1,219 @@
-from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QLineEdit, QPushButton, QMessageBox, QGridLayout, QSpacerItem,
-                             QSizePolicy)
-from PyQt5.QtGui import QFont, QPainter, QColor, QBrush
-from PyQt5.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve
+# Arquivo: ui/change_password_window.py (VERSÃO TEMÁTICA)
 
+from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+                             QLineEdit, QPushButton, QMessageBox, QGridLayout)
+from PyQt5.QtGui import QFont
+from PyQt5.QtCore import Qt
+import hashlib
+
+# Importe o IconManager para usar ícones consistentes
+from .icon_manager import IconManager
 
 class ChangePasswordWindow(QDialog):
-    def __init__(self, db, usuario_id, dark_mode=False):
+    """Janela para alterar senha, adaptada para herdar o tema."""
+
+    # 1. Modificar o construtor para aceitar theme_colors
+    def __init__(self, db, usuario_id, theme_colors):
         super().__init__()
         self.db = db
         self.usuario_id = usuario_id
-        self.dark_mode = dark_mode
+        self.theme_colors = theme_colors  # Armazena o dicionário de tema
+        
         self.setWindowTitle("Alterar Senha")
-        self.setFixedSize(480, 420)  # Tamanho ajustado para comportar melhor o conteúdo
+        self.setFixedSize(480, 400)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         
-        # Definir cores conforme o tema
-        self.setup_colors()
         self.setup_ui()
-    
-    def setup_colors(self):
-        """Configura as cores com base no modo claro/escuro"""
-        if self.dark_mode:
-            self.bg_color = "#1c1c1e"
-            self.surface_color = "#2c2c2e" 
-            self.text_color = "#ffffff"
-            self.text_secondary = "#8e8e93"
-            self.border_color = "#3a3a3c"
-            self.button_hover = "#3a3a3c"
-            self.accent_color = "#007AFF"
-        else:
-            self.bg_color = "#ffffff"
-            self.surface_color = "#f2f2f7"
-            self.text_color = "#000000"
-            self.text_secondary = "#6d6d70"
-            self.border_color = "#d1d1d6"
-            self.button_hover = "#e5e5ea"
-            self.accent_color = "#007AFF"
-    
+        self.apply_styles() # Aplica os estilos
+
     def setup_ui(self):
-        # Layout principal
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(12)  # Reduzir espaçamento geral
-        main_layout.setContentsMargins(25, 25, 25, 25)  # Margens menores
-        
-        # Estilo geral da janela
-        self.setStyleSheet(f"""
-            QDialog {{
-                background-color: {self.bg_color};
-            }}
-            QLabel {{
-                color: {self.text_color};
-            }}
-        """)
-        
-        # Título
+        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(25, 25, 25, 25)
+
         title_label = QLabel("Alterar Senha")
-        title_label.setFont(QFont("SF Pro Display", 20, QFont.DemiBold))  # Fonte menor
-        title_label.setAlignment(Qt.AlignLeft)
-        title_label.setStyleSheet(f"color: {self.text_color}; margin-bottom: 2px;")
+        title_label.setObjectName("titleLabel")
+        
+        subtitle_label = QLabel("Para sua segurança, por favor, escolha uma nova senha forte.")
+        subtitle_label.setObjectName("subtitleLabel")
+        subtitle_label.setWordWrap(True)
+
         main_layout.addWidget(title_label)
-        
-        # Subtítulo
-        subtitle = QLabel("Configure uma nova senha para sua conta")
-        subtitle.setFont(QFont("SF Pro Text", 12))  # Fonte menor
-        subtitle.setStyleSheet(f"color: {self.text_secondary};")
-        subtitle.setWordWrap(True)  # Permitir quebra de linha
-        main_layout.addWidget(subtitle)
-        
-        # Espaçador menor
+        main_layout.addWidget(subtitle_label)
         main_layout.addSpacing(10)
+
+        # Campos do formulário
+        form_layout = QGridLayout()
+        form_layout.setVerticalSpacing(15)
         
-        # Usar Grid Layout em vez de Form Layout para maior controle
-        grid_layout = QGridLayout()
-        grid_layout.setSpacing(10)  # Espaçamento reduzido
-        grid_layout.setContentsMargins(0, 0, 0, 0)
-        grid_layout.setVerticalSpacing(12)  # Espaçamento vertical menor
-        
-        # Estilo para os campos - reduzindo o padding para evitar cortes
-        input_style = f"""
-            QLineEdit {{
-                padding: 8px 12px;
-                border-radius: 8px;
-                background-color: {self.surface_color};
-                color: {self.text_color};
-                border: none;
-                font-size: 14px;
-                selection-background-color: {self.accent_color}40;
-            }}
-            QLineEdit:focus {{
-                border: 2px solid {self.accent_color};
-                padding: 7px 11px;
-            }}
-        """
-        
-        # Estilo para as labels do formulário com espaçamento reduzido
-        form_label_style = f"""
-            QLabel {{
-                font-size: 13px;
-                font-weight: normal;
-                color: {self.text_color};
-                padding-right: 8px;
-                margin-bottom: 4px;
-            }}
-        """
-        
-        # Campos de senha com altura menor
         self.current_password = QLineEdit()
         self.current_password.setPlaceholderText("Digite sua senha atual")
         self.current_password.setEchoMode(QLineEdit.Password)
-        self.current_password.setStyleSheet(input_style)
-        self.current_password.setMinimumHeight(38)  # Altura menor
-        self.current_password.setFixedHeight(38)
-        
+
         self.new_password = QLineEdit()
-        self.new_password.setPlaceholderText("Digite a nova senha")
+        self.new_password.setPlaceholderText("Mínimo de 6 caracteres")
         self.new_password.setEchoMode(QLineEdit.Password)
-        self.new_password.setStyleSheet(input_style)
-        self.new_password.setMinimumHeight(38)
-        self.new_password.setFixedHeight(38)
-        
+
         self.confirm_password = QLineEdit()
         self.confirm_password.setPlaceholderText("Confirme a nova senha")
         self.confirm_password.setEchoMode(QLineEdit.Password)
-        self.confirm_password.setStyleSheet(input_style)
-        self.confirm_password.setMinimumHeight(38)
-        self.confirm_password.setFixedHeight(38)
+
+        form_layout.addWidget(QLabel("Senha Atual:"), 0, 0)
+        form_layout.addWidget(self.current_password, 0, 1)
+        form_layout.addWidget(QLabel("Nova Senha:"), 1, 0)
+        form_layout.addWidget(self.new_password, 1, 1)
+        form_layout.addWidget(QLabel("Confirmar Senha:"), 2, 0)
+        form_layout.addWidget(self.confirm_password, 2, 1)
         
-        # Labels do formulário
-        current_label = QLabel("Senha atual")
-        current_label.setStyleSheet(form_label_style)
-        
-        new_label = QLabel("Nova senha")
-        new_label.setStyleSheet(form_label_style)
-        
-        confirm_label = QLabel("Confirmar senha")
-        confirm_label.setStyleSheet(form_label_style)
-        
-        # Adicionar campos ao grid layout
-        grid_layout.addWidget(current_label, 0, 0)
-        grid_layout.addWidget(self.current_password, 0, 1)
-        
-        grid_layout.addWidget(new_label, 1, 0)
-        grid_layout.addWidget(self.new_password, 1, 1)
-        
-        grid_layout.addWidget(confirm_label, 2, 0)
-        grid_layout.addWidget(self.confirm_password, 2, 1)
-        
-        # Configurar proporções do grid
-        grid_layout.setColumnStretch(0, 1)  # A coluna das labels terá peso 1
-        grid_layout.setColumnStretch(1, 3)  # A coluna dos inputs terá peso 3
-        
-        main_layout.addLayout(grid_layout)
-        
-        # Informação sobre senha com fonte menor
-        password_info = QLabel("A senha deve ter pelo menos 6 caracteres, incluindo letras e números.")
-        password_info.setFont(QFont("SF Pro Text", 11))  # Fonte menor
-        password_info.setStyleSheet(f"color: {self.text_secondary}; margin-top: 8px;")
-        password_info.setWordWrap(True)
-        main_layout.addWidget(password_info)
-        
-        # Espaçador menor
-        main_layout.addSpacing(15)
-        
-        # Botões com tamanho menor
+        form_layout.setColumnStretch(1, 1)
+        main_layout.addLayout(form_layout)
+        main_layout.addStretch()
+
+        # Botões
         buttons_layout = QHBoxLayout()
         buttons_layout.setSpacing(12)
         
         self.cancel_button = QPushButton("Cancelar")
-        self.cancel_button.setFixedSize(120, 38)  # Botões menores
-        self.cancel_button.setCursor(Qt.PointingHandCursor)
-        self.cancel_button.setFont(QFont("SF Pro Text", 13))  # Fonte menor
-        self.cancel_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {self.surface_color};
-                color: {self.accent_color};
-                border: none;
-                border-radius: 19px;
-                font-weight: medium;
-                padding: 0 15px;
-            }}
-            QPushButton:hover {{
-                background-color: {self.button_hover};
-            }}
-            QPushButton:pressed {{
-                background-color: {self.button_hover};
-                opacity: 0.8;
-            }}
-        """)
+        self.save_button = QPushButton("Salvar Alterações")
+        self.save_button.setObjectName("primaryButton")
         
-        self.save_button = QPushButton("Salvar")
-        self.save_button.setFixedSize(120, 38)  # Botão menor
-        self.save_button.setCursor(Qt.PointingHandCursor)
-        self.save_button.setFont(QFont("SF Pro Text", 13))  # Fonte menor
-        self.save_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {self.accent_color};
-                color: white;
-                border: none;
-                border-radius: 19px;
-                font-weight: medium;
-                padding: 0 15px;
-            }}
-            QPushButton:hover {{
-                background-color: {self.accent_color}E6;
-            }}
-            QPushButton:pressed {{
-                background-color: {self.accent_color}CC;
-            }}
-        """)
-        
-        # Adicionar espaçador antes dos botões para alinhá-los à direita
         buttons_layout.addStretch()
         buttons_layout.addWidget(self.cancel_button)
         buttons_layout.addWidget(self.save_button)
-        
         main_layout.addLayout(buttons_layout)
         
         # Conectar sinais
         self.save_button.clicked.connect(self.save_password)
         self.cancel_button.clicked.connect(self.reject)
-    
-    def save_password(self):
-        """Salvar nova senha no banco de dados"""
-        current = self.current_password.text()
-        new_password = self.new_password.text()
-        confirm = self.confirm_password.text()
-        
-        # Validações
-        if not current or not new_password or not confirm:
-            self.show_message("Campos vazios", "Por favor, preencha todos os campos.")
-            return
-        
-        if len(new_password) < 6:
-            self.show_message("Senha inválida", "A nova senha deve ter pelo menos 6 caracteres.")
-            return
-        
-        if new_password != confirm:
-            self.show_message("Senha diferente", "As senhas não coincidem.")
-            return
-        
-        # Verificar senha atual (sem hash)
-        self.db.cursor.execute('''
-        SELECT id FROM usuarios WHERE id = ? AND senha = ?
-        ''', (self.usuario_id, current))
-        
-        if not self.db.cursor.fetchone():
-            self.show_message("Senha incorreta", "A senha atual está incorreta.", icon=QMessageBox.Critical)
-            return
-        
-        # Atualizar senha (sem hash)
-        try:
-            self.db.cursor.execute('''
-            UPDATE usuarios SET senha = ? WHERE id = ?
-            ''', (new_password, self.usuario_id))
-            
-            self.db.conn.commit()
-            self.show_message("Senha atualizada", "Sua senha foi alterada com sucesso.", icon=QMessageBox.Information)
-            self.accept()
-        except Exception as e:
-            self.show_message("Erro", f"Não foi possível alterar a senha: {str(e)}", icon=QMessageBox.Critical)
-    
-    def show_message(self, title, message, icon=QMessageBox.Warning):
-        """Exibe mensagens estilizadas"""
-        msg_box = QMessageBox(self)
-        msg_box.setIcon(icon)
-        msg_box.setWindowTitle(title)
-        msg_box.setText(message)
-        msg_box.setFont(QFont("SF Pro Text", 12))
-        
-        # Estilizar o QMessageBox - ajustado para melhor visualização
-        msg_box.setStyleSheet(f"""
-            QMessageBox {{
-                background-color: {self.bg_color};
-                color: {self.text_color};
+
+    def apply_styles(self):
+        """Aplica a folha de estilo QSS baseada no tema."""
+        colors = self.theme_colors
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {colors['bg_color']};
+            }}
+            #titleLabel {{
+                font-size: 22pt;
+                font-weight: bold;
+                color: {colors['text_color']};
+            }}
+            #subtitleLabel {{
+                font-size: 11pt;
+                color: {colors['text_secondary']};
             }}
             QLabel {{
-                color: {self.text_color};
+                color: {colors['text_color']};
+                font-size: 10pt;
+            }}
+            QLineEdit {{
+                background-color: {colors['surface_color']};
+                color: {colors['text_color']};
+                border: 1px solid {colors['border_color']};
+                padding: 10px;
+                border-radius: 8px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {colors['accent_color']};
+            }}
+            QPushButton {{
+                background-color: {colors['surface_color']};
+                color: {colors['text_color']};
+                border: 1px solid {colors['border_color']};
+                padding: 10px 20px;
+                border-radius: 8px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                border-color: {colors['accent_color']};
+            }}
+            #primaryButton {{
+                background-color: {colors['accent_color']};
+                color: white;
+                border: none;
+            }}
+            #primaryButton:hover {{
+                background-color: #005bb5;
+            }}
+        """)
+
+    def save_password(self):
+        """Salva a nova senha no banco de dados, agora usando hash."""
+        current_pass_plain = self.current_password.text()
+        new_pass_plain = self.new_password.text()
+        confirm_pass_plain = self.confirm_password.text()
+
+        if not all([current_pass_plain, new_pass_plain, confirm_pass_plain]):
+            self.show_message("Campos Vazios", "Por favor, preencha todos os campos.", "warning")
+            return
+
+        if len(new_pass_plain) < 6:
+            self.show_message("Senha Inválida", "A nova senha deve ter pelo menos 6 caracteres.", "warning")
+            return
+
+        if new_pass_plain != confirm_pass_plain:
+            self.show_message("Senhas Diferentes", "A nova senha e a confirmação não coincidem.", "warning")
+            return
+
+        # --- LÓGICA DE HASH CORRIGIDA ---
+        # 1. Obter o usuário e sua senha HASHEADA do banco
+        usuario_db = self.db.obter_usuario_por_id(self.usuario_id)
+        if not usuario_db:
+             self.show_message("Erro Crítico", "Usuário não encontrado no sistema.", "critical")
+             return
+
+        # 2. Obter a senha hasheada armazenada
+        #    Precisamos buscar a senha diretamente, pois obter_usuario_por_id não a retorna.
+        self.db.cursor.execute("SELECT senha FROM usuarios WHERE id = ?", (self.usuario_id,))
+        senha_hash_db = self.db.cursor.fetchone()['senha']
+        
+        # 3. Fazer o hash da senha atual que o usuário digitou
+        current_pass_hash = hashlib.sha256(current_pass_plain.encode('utf-8')).hexdigest()
+
+        # 4. Comparar os dois hashes
+        if current_pass_hash != senha_hash_db:
+            self.show_message("Senha Incorreta", "A sua senha atual está incorreta.", "critical")
+            return
+
+        # 5. Se a senha atual estiver correta, chame o método do DB para alterar, que já faz o hash
+        success, msg = self.db.alterar_senha_usuario(self.usuario_id, new_pass_plain)
+        
+        if success:
+            self.show_message("Sucesso", msg, "info")
+            self.accept()
+        else:
+            self.show_message("Erro ao Salvar", msg, "critical")
+    
+    def show_message(self, title, message, level="info"):
+        icon_map = {"info": QMessageBox.Information, "warning": QMessageBox.Warning, "critical": QMessageBox.Critical}
+        
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle(title)
+        msg_box.setText(message)
+        msg_box.setIcon(icon_map.get(level, QMessageBox.Information))
+        
+        colors = self.theme_colors
+        msg_box.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {colors['surface_color']};
+                border-radius: 12px;
+            }}
+            QMessageBox QLabel {{
+                color: {colors['text_color']};
+                font-size: 10pt;
                 min-width: 300px;
             }}
             QPushButton {{
-                background-color: {self.accent_color};
+                background-color: {colors['accent_color']};
                 color: white;
                 border: none;
-                border-radius: 16px;
-                padding: 6px 16px;
-                font-weight: medium;
+                border-radius: 8px;
+                padding: 8px 16px;
                 min-width: 80px;
-                min-height: 32px;
+                font-weight: bold;
             }}
             QPushButton:hover {{
-                background-color: {self.accent_color}E6;
+                background-color: #005bb5;
             }}
         """)
-        
         msg_box.exec_()
-    
-    def paintEvent(self, event):
-        """Remove o gradiente e aplica fundo liso"""
-        super().paintEvent(event)
-        # O estilo do fundo já é aplicado via setStyleSheet
