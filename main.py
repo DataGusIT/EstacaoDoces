@@ -258,18 +258,18 @@ def verificar_produtos_alertas(window, db):
 
 def on_login_success(usuario):
     """Função para lidar com o login bem-sucedido"""
-    # Salvar informações do usuário logado
     session.set_usuario(usuario)
     
-    # Criar e mostrar a janela principal
-    window = MainWindow(db, settings)
-    window.session = session  # Passar o gerenciador de sessão
-    window.usuario = usuario  # Passar as informações do usuário
-    window.setup_for_user(usuario)  # Configurar interface para o usuário
+    # Altere esta linha:
+    # window = MainWindow(db, settings)
+    # Para esta, passando o dicionário de tema:
+    window = MainWindow(db, settings, theme_colors)
+
+    window.session = session
+    window.usuario = usuario
+    window.setup_for_user(usuario)
     window.show()
     
-    # Aguardar um pouco para a janela ser totalmente carregada
-    # antes de mostrar os alertas
     QTimer.singleShot(500, lambda: verificar_produtos_alertas(window, db))
 
 if __name__ == "__main__":
@@ -289,6 +289,26 @@ if __name__ == "__main__":
     try:
         # Aplicar configurações (agora usando o diretório correto)
         settings = Settings()
+        
+        # ========================================================== #
+        # ## CORREÇÃO PRINCIPAL - PARTE 1: CRIAR O DICIONÁRIO DE TEMA ##
+        # ========================================================== #
+        # ANTES de criar qualquer janela, pegue as cores do tema
+        is_dark = settings.get_theme() == 'dark'
+        if is_dark:
+            theme_colors = {
+                'bg_color': "#1c2128", 'surface_color': "#22272e", 'menu_color': "#22272e",
+                'text_color': "#cdd9e5", 'text_secondary': "#768390", 'border_color': "#373e47",
+                'button_hover': "#373e47", 'accent_color': "#007AFF"
+            }
+        else:
+            theme_colors = {
+                'bg_color': "#ffffff", 'surface_color': "#f2f2f7", 'menu_color': "#f9f9f9",
+                'text_color': "#000000", 'text_secondary': "#6d6d70", 'border_color': "#d1d1d6",
+                'button_hover': "#e5e5ea", 'accent_color': "#007AFF"
+            }
+        
+        # Aplicar o tema ao QApplication (você já fazia isso, está correto)
         settings.apply_theme(app)
         
         # Definir fonte global
@@ -313,8 +333,11 @@ if __name__ == "__main__":
         if splash:
             QTimer.singleShot(1500, splash.close)
         
-        # Exibir tela de login
-        login_window = LoginWindow(db)
+        # ================================================================= #
+        # ## CORREÇÃO PRINCIPAL - PARTE 2: PASSAR OS ARGUMENTOS CORRETOS ##
+        # ================================================================= #
+        # Exibir tela de login, agora passando 'settings' e 'theme_colors'
+        login_window = LoginWindow(db, theme_colors)
         
         # Conectar o sinal de login bem-sucedido
         login_window.login_success_signal.connect(on_login_success)

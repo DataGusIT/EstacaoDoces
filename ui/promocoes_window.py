@@ -1,103 +1,93 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                            QPushButton, QTableWidget, QTableWidgetItem, QFormLayout,
                            QDateEdit, QComboBox, QMessageBox, QHeaderView, QDoubleSpinBox,
-                           QDialog, QFrame, QTabWidget, QRadioButton, QButtonGroup, QFileDialog)
+                           QDialog, QFrame, QTabWidget, QRadioButton, QButtonGroup, QFileDialog, QSizePolicy, QGroupBox)
 from PyQt5.QtCore import Qt, QDate
 from PyQt5.QtGui import QFont
 from datetime import datetime, timedelta
 import csv
 import os
+from ui.icon_manager import IconManager
+
 
 class PromocoesWindow(QWidget):
-    def __init__(self, db):
+    def __init__(self, db, theme_colors):
         super().__init__()
         self.db = db
+        self.theme_colors = theme_colors
         self.initUI()
         self.carregar_dados()
-    
-    # NOVO MÉTODO: Centraliza a estilização dos botões
-    def _get_button_style(self, style_type):
-        """Retorna uma string de estilo CSS para um tipo de botão específico."""
-        base_style = """
-            QPushButton {{
-                color: {text_color};
-                background-color: {bg_color};
-                border: none;
-                padding: 8px 12px;
-                border-radius: 4px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {hover_color};
-            }}
-            QPushButton:pressed {{
-                background-color: {pressed_color};
-            }}
-        """
-        styles = {
-            "add":      ("white", "#28a745", "#218838", "#1e7e34"),  # Verde (Sucesso)
-            "report":   ("white", "#007bff", "#0069d9", "#0062cc"),  # Azul (Informativo)
-            "data":     ("white", "#17a2b8", "#138496", "#117a8b"),  # Azul-petróleo (Import/Export)
-            "edit":     ("black", "#ffc107", "#e0a800", "#d39e00"),  # Amarelo (Aviso/Edição)
-            "delete":   ("white", "#dc3545", "#c82333", "#bd2130"),  # Vermelho (Perigo/Exclusão)
-            "action":   ("white", "#fd7e14", "#e67311", "#da6d10")   # Laranja (Ação especial)
-        }
-        text, bg, hover, pressed = styles.get(style_type, ("black", "#f0f0f0", "#e0e0e0", "#d0d0d0"))
-        return base_style.format(text_color=text, bg_color=bg, hover_color=hover, pressed_color=pressed)
-    
+
+    def set_theme(self, theme_colors):
+        self.theme_colors = theme_colors
+        self.update_button_icons()
+        self.carregar_dados()
+
+    def update_button_icons(self):
+        icon_color = self.theme_colors.get('text_color', '#000')
+
+        self.search_button.setIcon(IconManager.get_icon('search', icon_color))
+        self.exportar_button.setIcon(IconManager.get_icon('export', icon_color))
+        self.importar_button.setIcon(IconManager.get_icon('import', icon_color))
+        self.produtos_especiais_button.setIcon(IconManager.get_icon('tags', icon_color))
+
+        self.add_button.setIcon(IconManager.get_icon('add', 'white'))
+
     def initUI(self):
-        # Layout principal
         layout = QVBoxLayout(self)
-        
-        # Título da página
-        titulo = QLabel("Cadastro de Promoções")
+        titulo = QLabel("Gerenciamento de Promoções")
         titulo.setFont(QFont("Arial", 14, QFont.Bold))
         layout.addWidget(titulo)
-        
-        # Área de pesquisa
-        search_layout = QHBoxLayout()
+
+        search_group = QGroupBox("Pesquisa")
+        search_layout = QHBoxLayout(search_group)
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Pesquisar promoção...")
-        self.search_button = QPushButton("Buscar")
+        self.search_input.setPlaceholderText("Pesquisar promoção pelo nome do produto...")
+        self.search_button = QPushButton()
+        self.search_button.setToolTip("Buscar")
         self.search_button.clicked.connect(self.pesquisar_promocoes)
         search_layout.addWidget(self.search_input)
         search_layout.addWidget(self.search_button)
-        layout.addLayout(search_layout)
-        
-        # Tabela de promoções
+        layout.addWidget(search_group)
+
         self.tabela = QTableWidget()
         self.tabela.setColumnCount(8)
-        self.tabela.setHorizontalHeaderLabels(["ID", "Produto", "Preço Antigo", 
-                                             "Taxa de Desconto", "Preço Promocional", "Início", "Fim", "Ações"])
+        self.tabela.setHorizontalHeaderLabels(["ID", "Produto", "Preço Antigo", "Desconto %", "Preço Promo", "Início", "Fim", "Ações"])
         self.tabela.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.tabela.verticalHeader().setVisible(False)
         layout.addWidget(self.tabela)
-        
-        # Botões de ação - AGORA COM ESTILOS
+
         action_layout = QHBoxLayout()
-    
-        self.add_button = QPushButton("Adicionar Promoção")
-        self.add_button.setStyleSheet(self._get_button_style("add")) # ESTILO ADICIONADO
+        action_layout.setSpacing(10)
+        botoes_acao = []
+
+        self.add_button = QPushButton()
+        self.add_button.setText(" Adicionar Promoção")
+        self.add_button.setObjectName("primaryActionButton")
         self.add_button.clicked.connect(self.abrir_formulario_promocao)
-        
-        self.produtos_especiais_button = QPushButton("Gerenciar Promoções Especiais")
-        self.produtos_especiais_button.setStyleSheet(self._get_button_style("action")) # ESTILO ADICIONADO
+        botoes_acao.append(self.add_button)
+
+        self.produtos_especiais_button = QPushButton()
+        self.produtos_especiais_button.setText(" Promoções Especiais")
         self.produtos_especiais_button.clicked.connect(self.abrir_promocoes_especiais)
+        botoes_acao.append(self.produtos_especiais_button)
         
-        # Novos botões de importar/exportar
-        self.exportar_button = QPushButton("Exportar CSV")
-        self.exportar_button.setStyleSheet(self._get_button_style("data")) # ESTILO ADICIONADO
+        self.exportar_button = QPushButton()
+        self.exportar_button.setText(" Exportar CSV")
         self.exportar_button.clicked.connect(self.exportar_csv)
+        botoes_acao.append(self.exportar_button)
         
-        self.importar_button = QPushButton("Importar CSV")
-        self.importar_button.setStyleSheet(self._get_button_style("data")) # ESTILO ADICIONADO
+        self.importar_button = QPushButton()
+        self.importar_button.setText(" Importar CSV")
         self.importar_button.clicked.connect(self.importar_csv)
-        
-        action_layout.addWidget(self.add_button)
-        action_layout.addWidget(self.produtos_especiais_button)
-        action_layout.addWidget(self.exportar_button)
-        action_layout.addWidget(self.importar_button)
+        botoes_acao.append(self.importar_button)
+
+        for btn in botoes_acao:
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            action_layout.addWidget(btn)
+            
         layout.addLayout(action_layout)
+        self.update_button_icons()
     
     def carregar_dados(self):
         promocoes = self.db.listar_promocoes()
@@ -110,7 +100,8 @@ class PromocoesWindow(QWidget):
     
     def atualizar_tabela(self, promocoes):
         self.tabela.setRowCount(0)
-        
+        icon_color = self.theme_colors.get('text_color', '#000')
+
         for row, promocao in enumerate(promocoes):
             self.tabela.insertRow(row)
             
@@ -126,18 +117,17 @@ class PromocoesWindow(QWidget):
             self.tabela.setItem(row, 5, QTableWidgetItem(str(promocao['data_inicio'])))
             self.tabela.setItem(row, 6, QTableWidgetItem(str(promocao['data_fim'])))
             
-            # Botões de ação - AGORA COM ESTILOS
             acoes_widget = QWidget()
             acoes_layout = QHBoxLayout(acoes_widget)
-            acoes_layout.setContentsMargins(0, 0, 0, 0)
-            acoes_layout.setSpacing(5) # Espaçamento adicionado
+            acoes_layout.setContentsMargins(5, 2, 5, 2)
+            acoes_layout.setSpacing(5)
 
-            editar_btn = QPushButton("Editar")
-            editar_btn.setStyleSheet(self._get_button_style("edit")) # ESTILO ADICIONADO
+            editar_btn = QPushButton(IconManager.get_icon('edit', icon_color), " ")
+            editar_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
             editar_btn.clicked.connect(lambda _, p_id=promocao['id']: self.abrir_formulario_promocao(p_id))
             
-            excluir_btn = QPushButton("Excluir")
-            excluir_btn.setStyleSheet(self._get_button_style("delete")) # ESTILO ADICIONADO
+            excluir_btn = QPushButton(IconManager.get_icon('delete', icon_color), " ")
+            excluir_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
             excluir_btn.clicked.connect(lambda _, p_id=promocao['id']: self.excluir_promocao(p_id))
             
             acoes_layout.addWidget(editar_btn)
@@ -176,8 +166,8 @@ class PromocoesWindow(QWidget):
             if not promocoes:
                 QMessageBox.information(self, "Aviso", "Não há promoções para exportar!")
                 return
-            
             arquivo, _ = QFileDialog.getSaveFileName(
+            
                 self, "Exportar Promoções", "promocoes.csv", "Arquivos CSV (*.csv)"
             )
             
@@ -323,28 +313,15 @@ class PromocoesEspeciaisDialog(QDialog):
         desconto_layout.addStretch()
         layout.addWidget(desconto_group)
         
-        # Botões com estilo adicionado
         buttons_layout = QHBoxLayout()
-        self.aplicar_button = QPushButton("Aplicar Promoções Selecionadas")
-        self.aplicar_button.setStyleSheet("""
-            QPushButton {
-                background-color: #28a745; color: white; border: none;
-                padding: 8px 12px; border-radius: 4px; font-weight: bold;
-            }
-            QPushButton:hover { background-color: #218838; }
-        """)
+        self.aplicar_button = QPushButton(IconManager.get_icon('confirm', 'white'), " Aplicar Promoções")
+        self.aplicar_button.setObjectName("primaryActionButton")
         self.aplicar_button.clicked.connect(self.aplicar_promocoes)
         
-        self.cancelar_button = QPushButton("Cancelar")
-        self.cancelar_button.setStyleSheet("""
-            QPushButton {
-                background-color: #6c757d; color: white; border: none;
-                padding: 8px 12px; border-radius: 4px; font-weight: bold;
-            }
-            QPushButton:hover { background-color: #5a6268; }
-        """)
+        self.cancelar_button = QPushButton(IconManager.get_icon('cancel'), " Cancelar")
         self.cancelar_button.clicked.connect(self.reject)
         
+        buttons_layout.addStretch()
         buttons_layout.addWidget(self.aplicar_button)
         buttons_layout.addWidget(self.cancelar_button)
         layout.addLayout(buttons_layout)
@@ -545,12 +522,15 @@ class FormularioPromocao(QDialog):
         self.setWindowTitle("Cadastro de Promoção")
         self.setFixedWidth(500)
         layout = QVBoxLayout(self)
-        form_layout = QFormLayout()
+        
+        form_group = QGroupBox("Detalhes da Promoção")
+        form_layout = QFormLayout(form_group)
         
         self.produto_combo = QComboBox()
         self.carregar_produtos()
         
         self.preco_antigo_input = QDoubleSpinBox()
+        self.preco_antigo_input.setReadOnly(True) # Preço antigo não deve ser editável
         self.preco_antigo_input.setRange(0, 99999.99)
         self.preco_antigo_input.setPrefix("R$ ")
         self.preco_antigo_input.setDecimals(2)
@@ -576,41 +556,23 @@ class FormularioPromocao(QDialog):
         self.descricao_input = QLineEdit()
         
         form_layout.addRow("Produto:", self.produto_combo)
-        form_layout.addRow("Preço Antigo:", self.preco_antigo_input)
+        form_layout.addRow("Preço Original:", self.preco_antigo_input)
         form_layout.addRow("Taxa de Desconto:", self.taxa_desconto_input)
         form_layout.addRow("Preço Promocional:", self.preco_promocional_input)
         form_layout.addRow("Data de Início:", self.data_inicio_input)
         form_layout.addRow("Data de Fim:", self.data_fim_input)
         form_layout.addRow("Descrição:", self.descricao_input)
-        layout.addLayout(form_layout)
-        
-        separador = QFrame()
-        separador.setFrameShape(QFrame.HLine)
-        separador.setFrameShadow(QFrame.Sunken)
-        layout.addWidget(separador)
-        
-        # Botões com estilo adicionado
+        layout.addWidget(form_group)
+
         button_layout = QHBoxLayout()
-        self.salvar_btn = QPushButton("Salvar")
-        self.salvar_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #28a745; color: white; border: none;
-                padding: 8px 12px; border-radius: 4px; font-weight: bold;
-            }
-            QPushButton:hover { background-color: #218838; }
-        """)
+        self.salvar_btn = QPushButton(IconManager.get_icon('save', 'white'), " Salvar")
+        self.salvar_btn.setObjectName("primaryActionButton")
         self.salvar_btn.clicked.connect(self.salvar_promocao)
         
-        self.cancelar_btn = QPushButton("Cancelar")
-        self.cancelar_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6c757d; color: white; border: none;
-                padding: 8px 12px; border-radius: 4px; font-weight: bold;
-            }
-            QPushButton:hover { background-color: #5a6268; }
-        """)
+        self.cancelar_btn = QPushButton(IconManager.get_icon('cancel'), " Cancelar")
         self.cancelar_btn.clicked.connect(self.reject)
         
+        button_layout.addStretch()
         button_layout.addWidget(self.salvar_btn)
         button_layout.addWidget(self.cancelar_btn)
         layout.addLayout(button_layout)

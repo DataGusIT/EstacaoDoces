@@ -1,16 +1,19 @@
-
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel, QLineEdit,
-                            QPushButton, QTableWidget, QTableWidgetItem, QComboBox, QDateEdit,
-                            QMessageBox, QDialog, QFormLayout, QTextEdit, QDoubleSpinBox,
-                            QSpinBox, QHeaderView, QCheckBox, QGroupBox, QGridLayout, QFrame,
-                            QSplitter, QApplication)
-from PyQt5.QtCore import Qt, QDate, QDateTime, QTimer
-from PyQt5.QtGui import QIcon, QColor, QFont
-import datetime
+# --- Importações necessárias ---
 import sys
-import random  # Para dados de exemplo
+import random
+import datetime
 
-# Importações para os gráficos
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel,
+                             QPushButton, QTableWidget, QTableWidgetItem, QComboBox, QDateEdit,
+                             QMessageBox, QGroupBox, QGridLayout, QFrame, QSplitter, QApplication,
+                             QHeaderView)
+from PyQt5.QtCore import Qt, QDate, QTimer
+from PyQt5.QtGui import QFont
+
+# Usaremos qtawesome para ícones modernos e fáceis de usar
+import qtawesome as qta
+
+# --- Importações e configuração do Matplotlib ---
 import matplotlib
 matplotlib.use('Qt5Agg')
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -19,351 +22,384 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker
 import numpy as np
 
-# Configurações globais para todos os gráficos
-def set_modern_style():
-    plt.style.use('default')  # Mudança para estilo mais estável
-    
-    # Cores modernas
-    colors = {
-        'primary': '#3498db',        # Azul
-        'success': '#2ecc71',        # Verde
-        'warning': '#f39c12',        # Laranja
-        'danger': '#e74c3c',         # Vermelho
-        'info': '#9b59b6',           # Roxo
-        'secondary': '#1abc9c',      # Turquesa
-        'light': '#ecf0f1',          # Cinza claro
-        'dark': '#34495e'            # Cinza escuro
-    }
-    
-    # Definir estilo de texto
-    font = {'family': 'sans-serif', 
-            'weight': 'normal',
-            'size': 10}
-    matplotlib.rc('font', **font)
-    
-    # Estilo de grade mais suave
-    matplotlib.rc('grid', linestyle='--', alpha=0.3)
-    
-    return colors
 
-# Classe MplCanvas modificada para melhor estabilidade
 class MplCanvas(FigureCanvas):
+    """Canvas Matplotlib customizado e ciente do tema."""
     def __init__(self, parent=None, width=5, height=4, dpi=100):
-        self.fig = Figure(figsize=(width, height), dpi=dpi, facecolor='white')
+        self.fig = Figure(figsize=(width, height), dpi=dpi)
         self.axes = self.fig.add_subplot(111)
-        
-        # Definir estilo
-        set_modern_style()
-        
-        # Inicializar o canvas com parent
         super(MplCanvas, self).__init__(self.fig)
         self.setParent(parent)
+
+    def apply_theme(self, theme_colors):
+        """Aplica as cores do tema ao gráfico."""
+        self.fig.patch.set_facecolor(theme_colors['bg_color'])
+        self.axes.set_facecolor(theme_colors['surface_color'])
         
-        # Configurações para melhor estética
-        self.fig.tight_layout(pad=2.5)
-        self.setStyleSheet("background-color:transparent;")
+        # Cor dos eixos e textos
+        self.axes.spines['top'].set_color(theme_colors['border_color'])
+        self.axes.spines['bottom'].set_color(theme_colors['border_color'])
+        self.axes.spines['left'].set_color(theme_colors['border_color'])
+        self.axes.spines['right'].set_color(theme_colors['border_color'])
         
-        # Manter referência forte ao parent para evitar garbage collection
-        self._parent_ref = parent
+        self.axes.tick_params(axis='x', colors=theme_colors['text_secondary'])
+        self.axes.tick_params(axis='y', colors=theme_colors['text_secondary'])
+        
+        self.axes.yaxis.label.set_color(theme_colors['text_color'])
+        self.axes.xaxis.label.set_color(theme_colors['text_color'])
+        self.axes.title.set_color(theme_colors['text_color'])
+        
+        # Estilo de fonte global para os gráficos
+        plt.rcParams.update({
+            'font.family': 'sans-serif',
+            'font.size': 9,
+            'text.color': theme_colors['text_color'],
+            'axes.labelcolor': theme_colors['text_secondary']
+        })
 
 
 class DashboardWindow(QWidget):
-    def __init__(self, db):
+    def __init__(self, db, theme_colors):
         super().__init__()
         self.db = db
+        self.theme_colors = theme_colors
         self.chartCanvases = {}
         self._initialized = False
         
-        # Timer para evitar múltiplas atualizações simultâneas
         self.update_timer = QTimer()
         self.update_timer.setSingleShot(True)
         self.update_timer.timeout.connect(self._delayed_update)
         
-        self.initUI()
-        self._initialized = True
+        self._setup_ui()
+        self._apply_stylesheet()
         
-        # Usar timer para inicialização para evitar problemas de timing
+        self._initialized = True
         QTimer.singleShot(100, self._initial_load)
     
+    def set_theme(self, theme_colors):
+        """Permite atualizar o tema dinamicamente."""
+        self.theme_colors = theme_colors
+        self._apply_stylesheet()
+        for canvas in self.chartCanvases.values():
+            canvas.apply_theme(self.theme_colors)
+        self.carregar_dados() # Recarrega os dados para redesenhar gráficos com novas cores
+
+    def _setup_ui(self):
+        """Cria e organiza todos os widgets da UI."""
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        main_layout.setSpacing(15)
+
+        # Barra de filtros
+        filter_group = self._create_filter_group()
+        main_layout.addWidget(filter_group)
+        
+        # Splitter principal
+        splitter = QSplitter(Qt.Horizontal)
+        
+        # --- Coluna da Esquerda (KPIs e Gráfico Principal) ---
+        left_column_widget = QWidget()
+        left_layout = QVBoxLayout(left_column_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(15)
+
+        kpi_group = QGroupBox("Indicadores Chave")
+        kpi_layout = self._create_kpi_cards_layout()
+        kpi_group.setLayout(kpi_layout)
+        left_layout.addWidget(kpi_group)
+
+        main_chart_group = QGroupBox("Evolução de Vendas no Período")
+        main_chart_layout = QVBoxLayout()
+        self.chart_vendas = MplCanvas(parent=main_chart_group, width=5, height=3, dpi=100)
+        self.chartCanvases['vendas_diarias'] = self.chart_vendas
+        main_chart_layout.addWidget(self.chart_vendas)
+        main_chart_group.setLayout(main_chart_layout)
+        left_layout.addWidget(main_chart_group)
+        
+        splitter.addWidget(left_column_widget)
+        
+        # --- Coluna da Direita (Abas com detalhes) ---
+        right_column_widget = QWidget()
+        right_layout = QVBoxLayout(right_column_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+
+        tabs_group = QGroupBox("Análise Detalhada")
+        tabs_layout = QVBoxLayout()
+        tabs = self._create_charts_tabs(tabs_group)
+        tabs_layout.addWidget(tabs)
+        tabs_group.setLayout(tabs_layout)
+        right_layout.addWidget(tabs_group)
+
+        splitter.addWidget(right_column_widget)
+        
+        splitter.setSizes([int(self.width() * 0.45), int(self.width() * 0.55)])
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 1)
+
+        main_layout.addWidget(splitter)
+
+    def _create_filter_group(self):
+        """Cria o QGroupBox para os filtros de data."""
+        group = QGroupBox("Filtros")
+        layout = QHBoxLayout()
+
+        layout.addWidget(QLabel("Período:"))
+        self.cb_periodo = QComboBox()
+        self.cb_periodo.addItems(["Hoje", "Última Semana", "Último Mês", "Personalizado"])
+        self.cb_periodo.currentIndexChanged.connect(self.periodo_alterado)
+        layout.addWidget(self.cb_periodo)
+        
+        self.dt_inicio = QDateEdit(QDate.currentDate())
+        self.dt_inicio.setCalendarPopup(True)
+        self.dt_inicio.dateChanged.connect(self.data_alterada)
+        
+        self.dt_fim = QDateEdit(QDate.currentDate())
+        self.dt_fim.setCalendarPopup(True)
+        self.dt_fim.dateChanged.connect(self.data_alterada)
+        
+        layout.addSpacing(10)
+        layout.addWidget(QLabel("De:"))
+        layout.addWidget(self.dt_inicio)
+        layout.addWidget(QLabel("Até:"))
+        layout.addWidget(self.dt_fim)
+        layout.addStretch()
+
+        self.btn_atualizar = QPushButton(qta.icon('fa5s.sync-alt', color=self.theme_colors['text_color']), " Atualizar")
+        self.btn_atualizar.clicked.connect(self.schedule_update)
+        layout.addWidget(self.btn_atualizar)
+
+        group.setLayout(layout)
+        return group
+
+    def _create_kpi_cards_layout(self):
+        """Cria o layout em grid para os cards de indicadores (KPIs)."""
+        grid_layout = QGridLayout()
+        grid_layout.setSpacing(15)
+
+        self.card_faturamento = self._create_kpi_card("Faturamento Total", "R$ 0,00", 'fa5s.dollar-sign', '#28a745')
+        self.card_lucro = self._create_kpi_card("Lucro Líquido", "R$ 0,00", 'fa5s.chart-line', '#007bff')
+        self.card_vendas = self._create_kpi_card("Nº de Vendas", "0", 'fa5s.shopping-cart', '#6f42c1')
+        self.card_ticket = self._create_kpi_card("Ticket Médio", "R$ 0,00", 'fa5s.receipt', '#fd7e14')
+
+        grid_layout.addWidget(self.card_faturamento, 0, 0)
+        grid_layout.addWidget(self.card_lucro, 0, 1)
+        grid_layout.addWidget(self.card_vendas, 1, 0)
+        grid_layout.addWidget(self.card_ticket, 1, 1)
+
+        return grid_layout
+
+    def _create_kpi_card(self, title, value, icon_name, icon_bg_color):
+        """Cria um widget de card individual."""
+        card = QFrame()
+        card.setObjectName("kpiCard")
+        
+        card_layout = QHBoxLayout(card)
+        card_layout.setContentsMargins(15, 15, 15, 15)
+
+        # Ícone
+        icon_label = QLabel()
+        icon_label.setFixedSize(40, 40)
+        icon = qta.icon(icon_name, color='white')
+        icon_label.setPixmap(icon.pixmap(30, 30))
+        icon_label.setAlignment(Qt.AlignCenter)
+        icon_label.setStyleSheet(f"""
+            background-color: {icon_bg_color};
+            border-radius: 20px;
+        """)
+        
+        # Textos
+        text_layout = QVBoxLayout()
+        text_layout.setSpacing(0)
+        lbl_title = QLabel(title)
+        lbl_title.setObjectName("kpiTitle")
+        lbl_value = QLabel(value)
+        lbl_value.setObjectName("kpiValue")
+        
+        # Salva referência ao label de valor para atualização futura
+        card.setProperty("valueLabel", lbl_value)
+
+        text_layout.addWidget(lbl_title)
+        text_layout.addWidget(lbl_value)
+        
+        card_layout.addWidget(icon_label)
+        card_layout.addSpacing(10)
+        card_layout.addLayout(text_layout)
+        
+        return card
+
+    def _create_charts_tabs(self, parent):
+        """Cria o QTabWidget com as abas de gráficos e tabelas detalhadas."""
+        tabs = QTabWidget()
+        
+        # Função helper para criar uma aba
+        def create_tab(title, chart_name, columns):
+            tab_widget = QWidget()
+            layout = QVBoxLayout(tab_widget)
+            layout.setContentsMargins(0, 5, 0, 0)
+            
+            splitter = QSplitter(Qt.Vertical)
+            
+            # Tabela
+            table = QTableWidget()
+            table.setColumnCount(len(columns))
+            table.setHorizontalHeaderLabels(columns)
+            table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            table.verticalHeader().setVisible(False)
+            splitter.addWidget(table)
+            
+            # Gráfico
+            canvas = MplCanvas(parent=parent, width=5, height=2.5, dpi=100)
+            self.chartCanvases[chart_name] = canvas
+            splitter.addWidget(canvas)
+            
+            splitter.setSizes([150, 250])
+            layout.addWidget(splitter)
+            
+            return tab_widget, table
+        
+        # Aba de Produtos
+        tab_produtos, self.tabela_produtos = create_tab("Produtos", 'produtos', ['Produto', 'Qtde', 'Valor Total', '% Part.'])
+        tabs.addTab(tab_produtos, qta.icon('fa5s.box', color=self.theme_colors['text_secondary']), "Produtos")
+        
+        # Aba de Pagamentos
+        tab_pagamentos, self.tabela_pagamentos = create_tab("Pagamentos", 'pagamentos', ['Forma', 'Valor Total', '% Part.'])
+        tabs.addTab(tab_pagamentos, qta.icon('fa5s.credit-card', color=self.theme_colors['text_secondary']), "Pagamentos")
+
+        # Aba de Clientes
+        tab_clientes, self.tabela_clientes = create_tab("Clientes", 'clientes', ['Cliente', 'Nº Compras', 'Valor Total', 'Ticket Médio'])
+        tabs.addTab(tab_clientes, qta.icon('fa5s.users', color=self.theme_colors['text_secondary']), "Clientes")
+        
+        return tabs
+
+    def _apply_stylesheet(self):
+        """Aplica a folha de estilo QSS baseada no tema."""
+        colors = self.theme_colors
+        self.setStyleSheet(f"""
+            DashboardWindow {{
+                background-color: {colors['bg_color']};
+            }}
+            QGroupBox {{
+                background-color: {colors['surface_color']};
+                border: 1px solid {colors['border_color']};
+                border-radius: 8px;
+                margin-top: 10px;
+                font-weight: bold;
+                color: {colors['text_color']};
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 10px;
+                left: 10px;
+                background-color: {colors['surface_color']};
+            }}
+            QLabel {{
+                color: {colors['text_secondary']};
+                background-color: transparent;
+            }}
+            #kpiCard {{
+                background-color: {colors['surface_color']};
+                border: 1px solid {colors['border_color']};
+                border-radius: 8px;
+            }}
+            #kpiCard:hover {{
+                border: 1px solid {colors['accent_color']};
+            }}
+            #kpiTitle {{
+                font-size: 12px;
+                color: {colors['text_secondary']};
+            }}
+            #kpiValue {{
+                font-size: 20px;
+                font-weight: bold;
+                color: {colors['text_color']};
+            }}
+            QComboBox, QDateEdit {{
+                background-color: {colors['surface_color']};
+                color: {colors['text_color']};
+                border: 1px solid {colors['border_color']};
+                padding: 5px;
+                border-radius: 4px;
+            }}
+            QComboBox::drop-down, QDateEdit::drop-down {{
+                border: none;
+            }}
+            QPushButton {{
+                background-color: {colors['accent_color']};
+                color: white;
+                border: none;
+                padding: 6px 14px;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: #0056b3; /* Um pouco mais escuro no hover */
+            }}
+            QTabWidget::pane {{
+                border: 1px solid {colors['border_color']};
+                border-top: none;
+                border-radius: 0 0 8px 8px;
+                background-color: {colors['surface_color']};
+            }}
+            QTabBar::tab {{
+                background: transparent;
+                color: {colors['text_secondary']};
+                padding: 8px 15px;
+                border: 1px solid transparent;
+                border-bottom: none;
+            }}
+            QTabBar::tab:selected {{
+                background: {colors['surface_color']};
+                color: {colors['accent_color']};
+                border: 1px solid {colors['border_color']};
+                border-bottom: 1px solid {colors['surface_color']};
+                border-radius: 8px 8px 0 0;
+            }}
+            QTableWidget {{
+                background-color: {colors['surface_color']};
+                color: {colors['text_color']};
+                border: none;
+                gridline-color: {colors['border_color']};
+            }}
+            QHeaderView::section {{
+                background-color: {colors['bg_color']};
+                color: {colors['text_secondary']};
+                padding: 4px;
+                border: 1px solid {colors['border_color']};
+                font-weight: bold;
+            }}
+            QSplitter::handle {{
+                background-color: {colors['border_color']};
+            }}
+            QSplitter::handle:horizontal {{
+                width: 1px;
+            }}
+            QSplitter::handle:vertical {{
+                height: 1px;
+            }}
+        """)
+        
+        # Força atualização dos ícones
+        self.btn_atualizar.setIcon(qta.icon('fa5s.sync-alt', color='white'))
+
+    # --- Métodos de Lógica (quase inalterados, mas agora atualizam nova UI) ---
+    
     def _initial_load(self):
-        """Carregamento inicial com delay para garantir que a UI está pronta"""
         if self._initialized:
             self.periodo_alterado(0)
     
     def _delayed_update(self):
-        """Atualização com delay para evitar múltiplas chamadas"""
         if self._initialized:
             self.carregar_dados()
-    
-    def initUI(self):
-        layout = QVBoxLayout(self)
-        
-        # Frame superior com filtros
-        frame_filtros = QFrame()
-        frame_filtros.setFrameShape(QFrame.StyledPanel)
-        frame_filtros_layout = QHBoxLayout(frame_filtros)
-        
-        frame_filtros_layout.addWidget(QLabel("Período:"))
-        self.cb_periodo = QComboBox()
-        self.cb_periodo.addItems(["Hoje", "Última Semana", "Último Mês", "Personalizado"])
-        self.cb_periodo.currentIndexChanged.connect(self.periodo_alterado)
-        frame_filtros_layout.addWidget(self.cb_periodo)
-        
-        frame_filtros_layout.addWidget(QLabel("De:"))
-        self.dt_inicio = QDateEdit(QDate.currentDate())
-        self.dt_inicio.setCalendarPopup(True)
-        self.dt_inicio.dateChanged.connect(self.data_alterada)
-        frame_filtros_layout.addWidget(self.dt_inicio)
-        
-        frame_filtros_layout.addWidget(QLabel("Até:"))
-        self.dt_fim = QDateEdit(QDate.currentDate())
-        self.dt_fim.setCalendarPopup(True)
-        self.dt_fim.dateChanged.connect(self.data_alterada)
-        frame_filtros_layout.addWidget(self.dt_fim)
-        
-        self.btn_atualizar = QPushButton("Atualizar")
-        self.btn_atualizar.clicked.connect(self.schedule_update)
-        frame_filtros_layout.addWidget(self.btn_atualizar)
-        
-        layout.addWidget(frame_filtros)
-        
-        # Split principal em duas colunas
-        splitter = QSplitter(Qt.Horizontal)
-        
-        # Coluna esquerda (indicadores principais)
-        frame_indicadores = QFrame()
-        frame_indicadores.setFrameShape(QFrame.StyledPanel)
-        indicadores_layout = QVBoxLayout(frame_indicadores)
-        
-        # Cards de indicadores
-        grid_cards = QGridLayout()
-        
-        # Faturamento
-        card_faturamento = self.criar_card("Faturamento", "R$ 0,00", "#28a745")
-        grid_cards.addWidget(card_faturamento, 0, 0)
-        
-        # Lucro
-        card_lucro = self.criar_card("Lucro", "R$ 0,00", "#007bff")
-        grid_cards.addWidget(card_lucro, 0, 1)
-        
-        # Nº de Vendas
-        card_vendas = self.criar_card("Nº de Vendas", "0", "#6f42c1")
-        grid_cards.addWidget(card_vendas, 1, 0)
-        
-        # Ticket Médio
-        card_ticket = self.criar_card("Ticket Médio", "R$ 0,00", "#fd7e14")
-        grid_cards.addWidget(card_ticket, 1, 1)
-        
-        indicadores_layout.addLayout(grid_cards)
-        
-        # Salvar referências aos labels de valores
-        self.lbl_faturamento = card_faturamento.findChild(QLabel, "valor")
-        self.lbl_lucro = card_lucro.findChild(QLabel, "valor")
-        self.lbl_num_vendas = card_vendas.findChild(QLabel, "valor")
-        self.lbl_ticket_medio = card_ticket.findChild(QLabel, "valor")
-        
-        # Gráfico de vendas por dia
-        frame_grafico = QFrame()
-        frame_grafico.setFrameShape(QFrame.StyledPanel)
-        frame_grafico.setStyleSheet("background-color: white;")
-        frame_grafico.setMinimumHeight(250)
-        
-        grafico_layout = QVBoxLayout(frame_grafico)
-        titulo_grafico = QLabel("Vendas por Dia")
-        titulo_grafico.setStyleSheet("font-weight: bold; font-size: 14px;")
-        grafico_layout.addWidget(titulo_grafico)
-        
-        # Adicionar o canvas do matplotlib para o gráfico de vendas
-        self.chart_vendas = MplCanvas(parent=frame_grafico, width=5, height=2.5, dpi=100)
-        grafico_layout.addWidget(self.chart_vendas)
-        self.chartCanvases['vendas_diarias'] = self.chart_vendas
-        
-        indicadores_layout.addWidget(frame_grafico)
-        
-        splitter.addWidget(frame_indicadores)
-        
-        # Coluna direita (detalhes)
-        frame_detalhes = QFrame()
-        frame_detalhes.setFrameShape(QFrame.StyledPanel)
-        detalhes_layout = QVBoxLayout(frame_detalhes)
-        
-        # Tabs para diferentes visões
-        tabs = QTabWidget()
-        
-        # Tab de Produtos mais vendidos
-        tab_produtos = QWidget()
-        tab_produtos_layout = QVBoxLayout(tab_produtos)
-        
-        # Layout dividido para tabela e gráfico
-        produtos_splitter = QSplitter(Qt.Vertical)
-        
-        # Frame para a tabela
-        frame_tabela_produtos = QFrame()
-        layout_tabela_produtos = QVBoxLayout(frame_tabela_produtos)
-        
-        self.tabela_produtos = QTableWidget()
-        self.tabela_produtos.setColumnCount(4)
-        self.tabela_produtos.setHorizontalHeaderLabels(['Produto', 'Qtde Vendida', 'Valor Total', '% Participação'])
-        self.tabela_produtos.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        layout_tabela_produtos.addWidget(self.tabela_produtos)
-        
-        produtos_splitter.addWidget(frame_tabela_produtos)
-        
-        # Frame para o gráfico de produtos
-        frame_grafico_produtos = QFrame()
-        frame_grafico_produtos.setMinimumHeight(250)
-        frame_grafico_produtos.setFrameShape(QFrame.StyledPanel)
-        frame_grafico_produtos.setStyleSheet("background-color: white;")
-        
-        layout_grafico_produtos = QVBoxLayout(frame_grafico_produtos)
-        titulo_produtos = QLabel("Top 5 Produtos por Valor")
-        titulo_produtos.setStyleSheet("font-weight: bold; font-size: 14px;")
-        layout_grafico_produtos.addWidget(titulo_produtos)
-        
-        self.chart_produtos = MplCanvas(parent=frame_grafico_produtos, width=5, height=2.5, dpi=100)
-        layout_grafico_produtos.addWidget(self.chart_produtos)
-        self.chartCanvases['produtos'] = self.chart_produtos
-        
-        produtos_splitter.addWidget(frame_grafico_produtos)
-        
-        tab_produtos_layout.addWidget(produtos_splitter)
-        tabs.addTab(tab_produtos, "Produtos Mais Vendidos")
-        
-        # Tab de Formas de Pagamento
-        tab_pagamentos = QWidget()
-        tab_pagamentos_layout = QVBoxLayout(tab_pagamentos)
-        
-        # Layout dividido para tabela e gráfico
-        pagamentos_splitter = QSplitter(Qt.Vertical)
-        
-        # Frame para a tabela
-        frame_tabela_pagamentos = QFrame()
-        layout_tabela_pagamentos = QVBoxLayout(frame_tabela_pagamentos)
-        
-        self.tabela_pagamentos = QTableWidget()
-        self.tabela_pagamentos.setColumnCount(3)
-        self.tabela_pagamentos.setHorizontalHeaderLabels(['Forma de Pagamento', 'Valor Total', '% Participação'])
-        self.tabela_pagamentos.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        layout_tabela_pagamentos.addWidget(self.tabela_pagamentos)
-        
-        pagamentos_splitter.addWidget(frame_tabela_pagamentos)
-        
-        # Frame para o gráfico de pagamentos
-        frame_grafico_pagamentos = QFrame()
-        frame_grafico_pagamentos.setMinimumHeight(250)
-        frame_grafico_pagamentos.setFrameShape(QFrame.StyledPanel)
-        frame_grafico_pagamentos.setStyleSheet("background-color: white;")
-        
-        layout_grafico_pagamentos = QVBoxLayout(frame_grafico_pagamentos)
-        titulo_pagamentos = QLabel("Distribuição por Forma de Pagamento")
-        titulo_pagamentos.setStyleSheet("font-weight: bold; font-size: 14px;")
-        layout_grafico_pagamentos.addWidget(titulo_pagamentos)
-        
-        self.chart_pagamentos = MplCanvas(parent=frame_grafico_pagamentos, width=5, height=2.5, dpi=100)
-        layout_grafico_pagamentos.addWidget(self.chart_pagamentos)
-        self.chartCanvases['pagamentos'] = self.chart_pagamentos
-        
-        pagamentos_splitter.addWidget(frame_grafico_pagamentos)
-        
-        tab_pagamentos_layout.addWidget(pagamentos_splitter)
-        tabs.addTab(tab_pagamentos, "Formas de Pagamento")
-        
-        # Tab de Clientes
-        tab_clientes = QWidget()
-        tab_clientes_layout = QVBoxLayout(tab_clientes)
-        
-        # Layout dividido para tabela e gráfico
-        clientes_splitter = QSplitter(Qt.Vertical)
-        
-        # Frame para a tabela
-        frame_tabela_clientes = QFrame()
-        layout_tabela_clientes = QVBoxLayout(frame_tabela_clientes)
-        
-        self.tabela_clientes = QTableWidget()
-        self.tabela_clientes.setColumnCount(4)
-        self.tabela_clientes.setHorizontalHeaderLabels(['Cliente', 'Qtde Compras', 'Valor Total', 'Ticket Médio'])
-        self.tabela_clientes.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        layout_tabela_clientes.addWidget(self.tabela_clientes)
-        
-        clientes_splitter.addWidget(frame_tabela_clientes)
-        
-        # Frame para o gráfico de clientes
-        frame_grafico_clientes = QFrame()
-        frame_grafico_clientes.setMinimumHeight(250)
-        frame_grafico_clientes.setFrameShape(QFrame.StyledPanel)
-        frame_grafico_clientes.setStyleSheet("background-color: white;")
-        
-        layout_grafico_clientes = QVBoxLayout(frame_grafico_clientes)
-        titulo_clientes = QLabel("Top 5 Clientes por Valor")
-        titulo_clientes.setStyleSheet("font-weight: bold; font-size: 14px;")
-        layout_grafico_clientes.addWidget(titulo_clientes)
-        
-        self.chart_clientes = MplCanvas(parent=frame_grafico_clientes, width=5, height=2.5, dpi=100)
-        layout_grafico_clientes.addWidget(self.chart_clientes)
-        self.chartCanvases['clientes'] = self.chart_clientes
-        
-        clientes_splitter.addWidget(frame_grafico_clientes)
-        
-        tab_clientes_layout.addWidget(clientes_splitter)
-        tabs.addTab(tab_clientes, "Melhores Clientes")
-        
-        detalhes_layout.addWidget(tabs)
-        
-        splitter.addWidget(frame_detalhes)
-        
-        # Ajustar proporção inicial do splitter
-        splitter.setSizes([int(self.width() * 0.4), int(self.width() * 0.6)])
-        
-        layout.addWidget(splitter)
-    
-    def criar_card(self, titulo, valor, cor):
-        card = QFrame()
-        card.setFrameShape(QFrame.StyledPanel)
-        card.setMinimumHeight(100)
-        card.setStyleSheet(f"background-color: {cor}; color: white; border-radius: 8px;")
-        
-        layout_card = QVBoxLayout(card)
-        
-        lbl_titulo = QLabel(titulo)
-        lbl_titulo.setStyleSheet("font-size: 14px; font-weight: bold;")
-        layout_card.addWidget(lbl_titulo)
-        
-        lbl_valor = QLabel(valor)
-        lbl_valor.setObjectName("valor")
-        lbl_valor.setStyleSheet("font-size: 24px; font-weight: bold;")
-        layout_card.addWidget(lbl_valor)
-        
-        return card
-    
+            
     def schedule_update(self):
-        """Agenda uma atualização para evitar múltiplas chamadas simultâneas"""
         if self._initialized:
-            self.update_timer.start(50)  # 50ms delay
-    
-    def data_alterada(self):
-        if not self._initialized:
-            return
-            
-        # Bloquear sinais para evitar loop infinito
-        self.cb_periodo.blockSignals(True)
-        self.cb_periodo.setCurrentText("Personalizado")
-        self.cb_periodo.blockSignals(False)
+            self.update_timer.start(50)
 
-        # Verificar se data início é maior que data fim e corrigir se necessário
-        if self.dt_inicio.date() > self.dt_fim.date():
-            self.dt_fim.setDate(self.dt_inicio.date())
-        
-        # Agendar a atualização dos dados sempre que uma data for alterada
-        self.schedule_update()
-    
     def periodo_alterado(self, index):
-        if not self._initialized:
-            return
-            
+        if not self._initialized: return
         periodo = self.cb_periodo.currentText()
         hoje = QDate.currentDate()
-        
-        # Bloquear sinais dos QDateEdit para evitar chamadas desnecessárias
         self.dt_inicio.blockSignals(True)
         self.dt_fim.blockSignals(True)
         
@@ -381,465 +417,192 @@ class DashboardWindow(QWidget):
         self.dt_inicio.setEnabled(personalizado)
         self.dt_fim.setEnabled(personalizado)
         
-        # Desbloquear sinais
         self.dt_inicio.blockSignals(False)
         self.dt_fim.blockSignals(False)
-        
-        # Agendar a atualização dos dados sempre que o período for alterado.
         self.schedule_update()
 
-    
+    def data_alterada(self):
+        if not self._initialized: return
+        self.cb_periodo.blockSignals(True)
+        self.cb_periodo.setCurrentText("Personalizado")
+        self.cb_periodo.blockSignals(False)
+        if self.dt_inicio.date() > self.dt_fim.date():
+            self.dt_fim.setDate(self.dt_inicio.date())
+        self.schedule_update()
+
     def carregar_dados(self):
-        if not self._initialized:
+        if not self._initialized: 
             return
-            
+        
         try:
             data_inicio = self.dt_inicio.date().toString("yyyy-MM-dd")
             data_fim = self.dt_fim.date().toString("yyyy-MM-dd")
             
-            # Buscar dados no banco
+            # --- Ponto Central da Integração ---
+            # Chamando o seu método real do banco de dados
             dados = self.db.obter_dados_dashboard(data_inicio, data_fim)
             
+            # Se o DB retornar None (por causa de um erro) ou se não houver dados, limpa a UI.
             if not dados:
                 self.mostrar_sem_dados()
+                print(f"Dashboard: Nenhum dado retornado do banco para o período de {data_inicio} a {data_fim}.") # Log para depuração
                 return
             
-            # Atualizar indicadores principais
-            self.lbl_faturamento.setText(f"R$ {dados['faturamento']:.2f}")
-            self.lbl_lucro.setText(f"R$ {dados['lucro']:.2f}")
-            self.lbl_num_vendas.setText(str(dados['num_vendas']))
+            # --- Atualizar a UI com os dados recebidos ---
             
-            ticket_medio = dados['faturamento'] / dados['num_vendas'] if dados['num_vendas'] > 0 else 0
-            self.lbl_ticket_medio.setText(f"R$ {ticket_medio:.2f}")
+            # Atualizar KPIs
+            self.card_faturamento.findChild(QLabel, "kpiValue").setText(f"R$ {dados.get('faturamento', 0):.2f}")
+            self.card_lucro.findChild(QLabel, "kpiValue").setText(f"R$ {dados.get('lucro', 0):.2f}")
+            self.card_vendas.findChild(QLabel, "kpiValue").setText(str(dados.get('num_vendas', 0)))
             
-            # Atualizar tabela de produtos
-            self.tabela_produtos.setRowCount(0)
-            
-            for i, produto in enumerate(dados['produtos']):
-                self.tabela_produtos.insertRow(i)
-                
-                self.tabela_produtos.setItem(i, 0, QTableWidgetItem(produto['nome']))
-                self.tabela_produtos.setItem(i, 1, QTableWidgetItem(str(produto['quantidade'])))
-                self.tabela_produtos.setItem(i, 2, QTableWidgetItem(f"R$ {produto['valor_total']:.2f}"))
-                
-                participacao = (produto['valor_total'] / dados['faturamento'] * 100) if dados['faturamento'] > 0 else 0
-                self.tabela_produtos.setItem(i, 3, QTableWidgetItem(f"{participacao:.2f}%"))
-            
-            # Atualizar gráfico de produtos (top 5)
-            self.atualizar_grafico_produtos(dados['produtos'][:5] if len(dados['produtos']) > 5 else dados['produtos'])
-            
-            # Atualizar tabela de formas de pagamento
-            self.tabela_pagamentos.setRowCount(0)
-            
-            for i, pagamento in enumerate(dados['pagamentos']):
-                self.tabela_pagamentos.insertRow(i)
-                
-                self.tabela_pagamentos.setItem(i, 0, QTableWidgetItem(pagamento['forma']))
-                self.tabela_pagamentos.setItem(i, 1, QTableWidgetItem(f"R$ {pagamento['valor_total']:.2f}"))
-                
-                participacao = (pagamento['valor_total'] / dados['faturamento'] * 100) if dados['faturamento'] > 0 else 0
-                self.tabela_pagamentos.setItem(i, 2, QTableWidgetItem(f"{participacao:.2f}%"))
-            
-            # Atualizar gráfico de formas de pagamento
-            self.atualizar_grafico_pagamentos(dados['pagamentos'])
-            
-            # Atualizar tabela de clientes
-            self.tabela_clientes.setRowCount(0)
-            
-            for i, cliente in enumerate(dados['clientes']):
-                self.tabela_clientes.insertRow(i)
-                
-                self.tabela_clientes.setItem(i, 0, QTableWidgetItem(cliente['nome']))
-                self.tabela_clientes.setItem(i, 1, QTableWidgetItem(str(cliente['compras'])))
-                self.tabela_clientes.setItem(i, 2, QTableWidgetItem(f"R$ {cliente['valor_total']:.2f}"))
-                
-                ticket = cliente['valor_total'] / cliente['compras'] if cliente['compras'] > 0 else 0
-                self.tabela_clientes.setItem(i, 3, QTableWidgetItem(f"R$ {ticket:.2f}"))
-            
-            # Atualizar gráfico de clientes (top 5)
-            self.atualizar_grafico_clientes(dados['clientes'][:5] if len(dados['clientes']) > 5 else dados['clientes'])
-            
-            # Atualizar gráfico de vendas por dia
+            faturamento_valor = dados.get('faturamento', 0)
+            num_vendas_valor = dados.get('num_vendas', 0)
+            ticket_medio = faturamento_valor / num_vendas_valor if num_vendas_valor > 0 else 0
+            self.card_ticket.findChild(QLabel, "kpiValue").setText(f"R$ {ticket_medio:.2f}")
+
+            # Atualizar tabelas e gráficos
+            self._atualizar_tabela(self.tabela_produtos, dados.get('produtos', []), ['nome', 'quantidade', 'valor_total', '% part.'], faturamento_valor)
+            self._atualizar_tabela(self.tabela_pagamentos, dados.get('pagamentos', []), ['forma', 'valor_total', '% part.'], faturamento_valor)
+            self._atualizar_tabela(self.tabela_clientes, dados.get('clientes', []), ['nome', 'compras', 'valor_total', 'ticket_medio'])
+
+            # Atualizar gráficos (usando .get para segurança)
             self.atualizar_grafico_vendas_diarias(dados.get('vendas_diarias', []))
-        
+            self.atualizar_grafico_produtos(dados.get('produtos', [])[:5])
+            self.atualizar_grafico_pagamentos(dados.get('pagamentos', []))
+            self.atualizar_grafico_clientes(dados.get('clientes', [])[:5])
+
         except Exception as e:
-            if self._initialized:
-                QMessageBox.critical(self, "Erro", f"Erro ao carregar dados: {str(e)}")
+            # Este 'except' pega erros que podem acontecer DENTRO DA UI, ao tentar processar os dados
+            QMessageBox.critical(self, "Erro na Interface", f"Ocorreu um erro ao exibir os dados do dashboard.\n\nErro: {e}")
+            self.mostrar_sem_dados()
+
+    def _atualizar_tabela(self, table, data, keys, total_faturamento=None):
+        table.setRowCount(0)
+        for i, row_data in enumerate(data):
+            table.insertRow(i)
+            for j, key in enumerate(keys):
+                item_text = ""
+                if key == 'valor_total' or key == 'ticket_medio':
+                    item_text = f"R$ {row_data.get(key, 0):.2f}"
+                elif key == '% part.':
+                    participacao = (row_data['valor_total'] / total_faturamento * 100) if total_faturamento else 0
+                    item_text = f"{participacao:.2f}%"
+                else:
+                    item_text = str(row_data.get(key, ''))
+                
+                table.setItem(i, j, QTableWidgetItem(item_text))
     
     def mostrar_sem_dados(self):
-        """Mostra interface quando não há dados"""
-        self.lbl_faturamento.setText("R$ 0,00")
-        self.lbl_lucro.setText("R$ 0,00")
-        self.lbl_num_vendas.setText("0")
-        self.lbl_ticket_medio.setText("R$ 0,00")
-        
-        # Limpar tabelas
+        """Limpa a UI quando não há dados."""
+        self.card_faturamento.findChild(QLabel, "kpiValue").setText("R$ 0,00")
+        self.card_lucro.findChild(QLabel, "kpiValue").setText("R$ 0,00")
+        self.card_vendas.findChild(QLabel, "kpiValue").setText("0")
+        self.card_ticket.findChild(QLabel, "kpiValue").setText("R$ 0,00")
+
         self.tabela_produtos.setRowCount(0)
         self.tabela_pagamentos.setRowCount(0)
         self.tabela_clientes.setRowCount(0)
-        
-        # Limpar gráficos
+
         for canvas in self.chartCanvases.values():
-            if canvas and hasattr(canvas, 'axes'):
-                try:
-                    canvas.axes.clear()
-                    canvas.draw()
-                except:
-                    pass
-    
-    def safe_draw_chart(self, canvas):
-        """Desenha o gráfico de forma segura"""
-        try:
-            if canvas and hasattr(canvas, 'draw') and hasattr(canvas, 'fig'):
-                canvas.fig.tight_layout()
-                canvas.draw()
-        except Exception as e:
-            print(f"Erro ao desenhar gráfico: {e}")
-    
+            canvas.axes.clear()
+            canvas.apply_theme(self.theme_colors) # Aplica fundo mesmo se vazio
+            canvas.draw()
+            
+    # --- Funções de Geração de Gráficos (Atualizadas para usar tema) ---
+
     def atualizar_grafico_vendas_diarias(self, vendas_diarias):
-        """Atualiza o gráfico de linha de vendas diárias com estilo moderno"""
-        if not self._initialized or not hasattr(self, 'chart_vendas') or not self.chart_vendas:
+        canvas = self.chartCanvases['vendas_diarias']
+        canvas.axes.clear()
+        canvas.apply_theme(self.theme_colors)
+        
+        if not vendas_diarias:
+            canvas.draw()
             return
             
-        try:
-            # Configurar estilo
-            colors = set_modern_style()
-            
-            # Se não temos dados de vendas diárias, criar alguns de exemplo
-            if not vendas_diarias:
-                data_inicio = self.dt_inicio.date()
-                data_fim = self.dt_fim.date()
-                
-                # Cria datas entre início e fim
-                datas = []
-                data_atual = data_inicio
-                while data_atual <= data_fim:
-                    datas.append(data_atual.toString("dd/MM"))
-                    data_atual = data_atual.addDays(1)
-                
-                # Gera valores aleatórios para exemplo
-                valores = [random.uniform(100, 5000) for _ in range(len(datas))]
-                
-                vendas_diarias = [{'data': data, 'valor': valor} for data, valor in zip(datas, valores)]
-            else:
-                # Formatando datas para exibição mais limpa
-                for item in vendas_diarias:
-                    if 'data' in item and len(item['data']) == 10:
-                        try:
-                            year, month, day = item['data'].split('-')
-                            item['data_display'] = f"{day}/{month}"
-                        except:
-                            item['data_display'] = item['data']
-                    else:
-                        item['data_display'] = item['data']
-            
-            # Limpa o gráfico
-            self.chart_vendas.axes.clear()
-            
-            # Extrai datas e valores
-            datas = [item.get('data_display', item['data']) for item in vendas_diarias]
-            valores = [item['valor'] for item in vendas_diarias]
-            
-            # Cria o gráfico de linha com estilo mais moderno
-            self.chart_vendas.axes.plot(
-                datas, 
-                valores, 
-                marker='o',
-                markersize=6, 
-                markerfacecolor='white',
-                markeredgecolor=colors['primary'],
-                markeredgewidth=1.5,
-                linestyle='-', 
-                linewidth=2.5,
-                color=colors['primary'],
-                alpha=0.8
-            )
-            
-            # Preencher área sob a linha
-            self.chart_vendas.axes.fill_between(
-                datas, 
-                valores, 
-                color=colors['primary'], 
-                alpha=0.1
-            )
-            
-            # Configurações visuais
-            self.chart_vendas.axes.set_ylabel('Valor (R$)', fontsize=11, fontweight='bold')
-            self.chart_vendas.axes.spines['top'].set_visible(False)
-            self.chart_vendas.axes.spines['right'].set_visible(False)
-            self.chart_vendas.axes.spines['left'].set_color('#cccccc')
-            self.chart_vendas.axes.spines['bottom'].set_color('#cccccc')
-            
-            # Rotaciona as datas para melhor visualização
-            if len(datas) > 3:
-                self.chart_vendas.axes.tick_params(axis='x', rotation=30)
-            
-            # Definir limites do eixo Y começando de zero
-            self.chart_vendas.axes.set_ylim(bottom=0)
-            
-            # Formatando valores do eixo Y
-            self.chart_vendas.axes.yaxis.set_major_formatter(
-                matplotlib.ticker.FuncFormatter(lambda x, p: f'R$ {x:,.0f}')
-            )
-            
-            # Desenha o gráfico de forma segura
-            self.safe_draw_chart(self.chart_vendas)
-            
-        except Exception as e:
-            print(f"Erro ao atualizar gráfico de vendas diárias: {e}")
+        datas = [item['data'] for item in vendas_diarias]
+        valores = [item['valor'] for item in vendas_diarias]
+        
+        canvas.axes.plot(datas, valores, marker='o', linestyle='-', color=self.theme_colors['accent_color'])
+        canvas.axes.fill_between(datas, valores, color=self.theme_colors['accent_color'], alpha=0.1)
+        
+        canvas.axes.set_ylabel('Valor (R$)')
+        canvas.axes.set_ylim(bottom=0)
+        canvas.axes.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, p: f'R$ {x:,.0f}'))
+        canvas.fig.autofmt_xdate(rotation=20, ha='right')
+        canvas.fig.tight_layout(pad=2.0)
+        canvas.draw()
 
     def atualizar_grafico_produtos(self, produtos):
-        """Atualiza o gráfico de barras dos produtos mais vendidos com estilo moderno"""
-        if not self._initialized or not hasattr(self, 'chart_produtos') or not self.chart_produtos:
+        canvas = self.chartCanvases['produtos']
+        canvas.axes.clear()
+        canvas.apply_theme(self.theme_colors)
+
+        if not produtos:
+            canvas.draw()
             return
-            
-        try:
-            # Configurar estilo
-            colors = set_modern_style()
-            
-            # Limpa o gráfico
-            self.chart_produtos.axes.clear()
-            
-            if not produtos:
-                self.safe_draw_chart(self.chart_produtos)
-                return
-            
-            # Extrai nomes e valores
-            nomes = [item['nome'] for item in produtos]
-            valores = [item['valor_total'] for item in produtos]
-            
-            # Encurtar nomes muito longos
-            nomes_display = []
-            for nome in nomes:
-                if len(nome) > 15:
-                    nomes_display.append(nome[:12] + '...')
-                else:
-                    nomes_display.append(nome)
-            
-            # Cria o gráfico de barras horizontais com gradiente de cores
-            color_map = matplotlib.cm.get_cmap('Blues')
-            num_bars = len(nomes)
-            bar_colors = [color_map(0.3 + 0.7 * i / num_bars) for i in range(num_bars)]
-            
-            bars = self.chart_produtos.axes.barh(
-                nomes_display, 
-                valores, 
-                color=bar_colors,
-                height=0.65,
-                edgecolor='white',
-                linewidth=0.5
-            )
-            
-            # Adiciona os valores no final das barras
-            for bar in bars:
-                width = bar.get_width()
-                self.chart_produtos.axes.text(
-                    width * 1.01, 
-                    bar.get_y() + bar.get_height()/2, 
-                    f'R$ {width:,.2f}',
-                    ha='left', 
-                    va='center',
-                    fontsize=9,
-                    alpha=0.8
-                )
-            
-            # Formata o gráfico
-            self.chart_produtos.axes.set_xlabel('Valor Total (R$)', fontsize=11, fontweight='bold')
-            
-            # Remover bordas desnecessárias
-            self.chart_produtos.axes.spines['top'].set_visible(False)
-            self.chart_produtos.axes.spines['right'].set_visible(False)
-            self.chart_produtos.axes.spines['left'].set_color('#cccccc')
-            self.chart_produtos.axes.spines['bottom'].set_color('#cccccc')
-            
-            # Definir limites do eixo X começando de zero
-            self.chart_produtos.axes.set_xlim(left=0)
-            
-            # Formatando valores do eixo X
-            self.chart_produtos.axes.xaxis.set_major_formatter(
-                matplotlib.ticker.FuncFormatter(lambda x, p: f'R$ {x:,.0f}')
-            )
-            
-            # Desenha o gráfico de forma segura
-            self.safe_draw_chart(self.chart_produtos)
-            
-        except Exception as e:
-            print(f"Erro ao atualizar gráfico de produtos: {e}")
+        
+        nomes = [p['nome'][:15] + '...' if len(p['nome']) > 15 else p['nome'] for p in produtos]
+        valores = [p['valor_total'] for p in produtos]
+        
+        bars = canvas.axes.barh(nomes, valores, color=self.theme_colors['accent_color'], height=0.6)
+        canvas.axes.invert_yaxis()
+        canvas.axes.set_xlabel('Valor Total (R$)')
+        canvas.axes.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, p: f'R$ {x:,.0f}'))
+        
+        canvas.fig.tight_layout(pad=2.0)
+        canvas.draw()
 
     def atualizar_grafico_pagamentos(self, pagamentos):
-        """Atualiza o gráfico de pizza das formas de pagamento com estilo moderno"""
-        if not self._initialized or not hasattr(self, 'chart_pagamentos') or not self.chart_pagamentos:
+        canvas = self.chartCanvases['pagamentos']
+        canvas.axes.clear()
+        canvas.apply_theme(self.theme_colors)
+        
+        if not pagamentos:
+            canvas.draw()
             return
             
-        try:
-            # Configurar estilo
-            colors = set_modern_style()
-            
-            # Limpa o gráfico
-            self.chart_pagamentos.axes.clear()
-            
-            if not pagamentos:
-                self.safe_draw_chart(self.chart_pagamentos)
-                return
-            
-            # Extrai labels e valores
-            labels = [item['forma'] for item in pagamentos]
-            valores = [item['valor_total'] for item in pagamentos]
-            
-            # Cores modernas para o gráfico de pizza
-            pie_colors = [
-                '#3498db', '#2ecc71', '#f39c12', '#e74c3c', 
-                '#9b59b6', '#1abc9c', '#34495e', '#7f8c8d'
-            ]
-            
-            # Total para calcular percentuais
-            total = sum(valores)
-            
-            # Cria o gráfico de pizza
-            wedges, texts, autotexts = self.chart_pagamentos.axes.pie(
-                valores, 
-                labels=None,
-                autopct=lambda pct: f"{pct:.1f}%" if pct > 3 else "",
-                startangle=90,
-                colors=pie_colors[:len(pagamentos)],
-                wedgeprops={'edgecolor': 'white', 'linewidth': 1.5, 'antialiased': True},
-                textprops={'fontsize': 9, 'color': 'white'}
-            )
-            
-            # Configurar textos de porcentagens
-            for autotext in autotexts:
-                autotext.set_fontsize(9)
-                autotext.set_fontweight('bold')
-            
-            # Adiciona um círculo branco no meio (estilo donut)
-            centre_circle = plt.Circle((0, 0), 0.5, fc='white', edgecolor='none')
-            self.chart_pagamentos.axes.add_patch(centre_circle)
-            
-            # Adiciona a legenda com valores e percentuais
-            legend_labels = [
-                f"{label}\nR$ {valor:,.2f} ({valor/total*100:.1f}%)" 
-                for label, valor in zip(labels, valores)
-            ]
-            
-            self.chart_pagamentos.axes.legend(
-                wedges, 
-                legend_labels, 
-                loc="center left", 
-                bbox_to_anchor=(1, 0, 0.5, 1),
-                fontsize=9,
-                frameon=False
-            )
-            
-            # Iguala os aspectos para ter um círculo perfeito
-            self.chart_pagamentos.axes.set_aspect('equal')
-            
-            # Desenha o gráfico de forma segura
-            self.safe_draw_chart(self.chart_pagamentos)
-            
-        except Exception as e:
-            print(f"Erro ao atualizar gráfico de pagamentos: {e}")
+        labels = [p['forma'] for p in pagamentos]
+        valores = [p['valor_total'] for p in pagamentos]
+        
+        pie_colors = ['#007AFF', '#34C759', '#FF9500', '#FF3B30', '#AF52DE', '#5856D6']
+        
+        wedges, texts, autotexts = canvas.axes.pie(valores, 
+            autopct='%1.1f%%',
+            startangle=90, 
+            colors=pie_colors,
+            wedgeprops={'edgecolor': self.theme_colors['surface_color'], 'linewidth': 2})
+        
+        plt.setp(autotexts, size=8, weight="bold", color="white")
+        
+        canvas.axes.legend(wedges, labels,
+                  title="Formas",
+                  loc="center left",
+                  bbox_to_anchor=(0.95, 0, 0.5, 1),
+                  frameon=False)
+                  
+        canvas.axes.set_title("Distribuição por Pagamento", color=self.theme_colors['text_color'])
+        canvas.draw()
+
 
     def atualizar_grafico_clientes(self, clientes):
-        """Atualiza o gráfico de barras dos melhores clientes com estilo moderno"""
-        if not self._initialized or not hasattr(self, 'chart_clientes') or not self.chart_clientes:
+        canvas = self.chartCanvases['clientes']
+        canvas.axes.clear()
+        canvas.apply_theme(self.theme_colors)
+
+        if not clientes:
+            canvas.draw()
             return
-            
-        try:
-            # Configurar estilo
-            colors = set_modern_style()
-            
-            # Limpa o gráfico
-            self.chart_clientes.axes.clear()
-            
-            if not clientes:
-                self.safe_draw_chart(self.chart_clientes)
-                return
-            
-            # Extrai nomes e valores
-            nomes = [item['nome'] for item in clientes]
-            valores = [item['valor_total'] for item in clientes]
-            
-            # Encurtar nomes muito longos
-            nomes_display = []
-            for nome in nomes:
-                if len(nome) > 12:
-                    nomes_display.append(nome[:10] + '...')
-                else:
-                    nomes_display.append(nome)
-            
-            # Gradiente de cores para as barras
-            color_map = matplotlib.cm.get_cmap('Purples')
-            num_bars = len(nomes)
-            bar_colors = [color_map(0.4 + 0.6 * i / num_bars) for i in range(num_bars)]
-            
-            # Cria o gráfico de barras verticais
-            bars = self.chart_clientes.axes.bar(
-                nomes_display, 
-                valores, 
-                color=bar_colors,
-                width=0.7,
-                edgecolor='white',
-                linewidth=1
-            )
-            
-            # Adiciona os valores em cima das barras
-            for bar in bars:
-                height = bar.get_height()
-                self.chart_clientes.axes.text(
-                    bar.get_x() + bar.get_width()/2, 
-                    height * 1.01,
-                    f'R$ {height:,.0f}', 
-                    ha='center', 
-                    va='bottom', 
-                    fontsize=9,
-                    alpha=0.8
-                )
-            
-            # Formata o gráfico
-            self.chart_clientes.axes.set_ylabel('Valor Total (R$)', fontsize=11, fontweight='bold')
-            
-            # Remover bordas desnecessárias
-            self.chart_clientes.axes.spines['top'].set_visible(False)
-            self.chart_clientes.axes.spines['right'].set_visible(False)
-            self.chart_clientes.axes.spines['left'].set_color('#cccccc')
-            self.chart_clientes.axes.spines['bottom'].set_color('#cccccc')
-            
-            # Definir limites do eixo Y começando de zero
-            self.chart_clientes.axes.set_ylim(bottom=0)
-            
-            # Formatando valores do eixo Y
-            self.chart_clientes.axes.yaxis.set_major_formatter(
-                matplotlib.ticker.FuncFormatter(lambda x, p: f'R$ {x:,.0f}')
-            )
-            
-            # Rotaciona os nomes para melhor visualização
-            self.chart_clientes.axes.tick_params(axis='x', rotation=30)
-            
-            # Desenha o gráfico de forma segura
-            self.safe_draw_chart(self.chart_clientes)
-            
-        except Exception as e:
-            print(f"Erro ao atualizar gráfico de clientes: {e}")
-    
-    def closeEvent(self, event):
-        """Limpa recursos ao fechar a janela"""
-        try:
-            # Limpar timers
-            if hasattr(self, 'update_timer'):
-                self.update_timer.stop()
-            
-            # Limpar gráficos
-            for canvas in self.chartCanvases.values():
-                if canvas and hasattr(canvas, 'fig'):
-                    try:
-                        canvas.fig.clear()
-                        plt.close(canvas.fig)
-                    except:
-                        pass
-            
-            self.chartCanvases.clear()
-            
-        except Exception as e:
-            print(f"Erro ao limpar recursos: {e}")
-        finally:
-            event.accept()
+
+        nomes = [c['nome'][:12] + '...' if len(c['nome']) > 12 else c['nome'] for c in clientes]
+        valores = [c['valor_total'] for c in clientes]
+
+        bars = canvas.axes.bar(nomes, valores, color=self.theme_colors['accent_color'], width=0.6)
+        canvas.axes.set_ylabel('Valor Total (R$)')
+        canvas.axes.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, p: f'R$ {x:,.0f}'))
+        canvas.fig.autofmt_xdate(rotation=30, ha='right')
+
+        canvas.fig.tight_layout(pad=2.0)
+        canvas.draw()
+
+   
+

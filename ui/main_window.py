@@ -7,6 +7,7 @@ from PyQt5.QtCore import Qt, QDate, QSize, QByteArray, QPropertyAnimation, QEasi
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication
 import os
+import qtawesome as qta
 
 from ui.estoque_window import EstoqueWindow
 from ui.fornecedor_window import FornecedorWindow
@@ -14,32 +15,37 @@ from ui.promocoes_window import PromocoesWindow
 from ui.clientes_window import ClientesWindow
 from ui.caixa_window import CaixaWindow
 from ui.dashboard_window import DashboardWindow
+from ui.icon_manager import IconManager
+
+
 
 class MainWindow(QMainWindow):
-    def __init__(self, db, settings):
+    def __init__(self, db, settings, theme_colors):
         super().__init__()
         self.db = db
         self.settings = settings
+        self.theme_colors = theme_colors # Salve o dicionário
         self.menu_collapsed = True
-        self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)  # Janela sem bordas
+        self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
         self.initUI()
         self.check_promocoes_ativas()
-        self.aplicar_tema()
-    
+        # A chamada para aplicar_tema agora é feita no final do initUI
+
     def initUI(self):
-        # Configurar janela principal
         self.setWindowTitle("Sistema de Estoque - GestorX")
-        self.setGeometry(100, 100, 1200, 700)
-        self.setWindowIcon(self.carregar_logo())
+        self.setGeometry(100, 100, 1280, 720)
+        self.setWindowIcon(IconManager.get_icon('estoque'))
         
-        # Widget central
-        central_widget = QWidget()
+        central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-        
-        # ===== NOVO CABEÇALHO UNIFICADO (VERSÃO CORRIGIDA) =====
+
+        # Obter cores UMA VEZ no início para a criação dos widgets.
+        theme_colors = self._get_theme_colors()
+
+        # ===== CABEÇALHO UNIFICADO =====
         header_frame = QFrame()
         header_frame.setObjectName("headerFrame")
         header_frame.setFixedHeight(50)
@@ -47,123 +53,100 @@ class MainWindow(QMainWindow):
         header_layout.setContentsMargins(10, 0, 5, 0)
         header_layout.setSpacing(10)
         
-        # Lado Esquerdo: Logo e Título
         self.app_logo = QLabel()
         self.app_logo.setFixedSize(32, 32)
-        self.app_logo.setScaledContents(True)
-        logo_pixmap = self.carregar_logo_pixmap()
-        self.app_logo.setPixmap(logo_pixmap if logo_pixmap else QPixmap())
         app_title = QLabel("Sistema de Estoque - GestorX")
         app_title.setFont(QFont("Segoe UI", 12, QFont.Bold))
         app_title.setObjectName("appTitle")
-        
         header_layout.addWidget(self.app_logo)
         header_layout.addWidget(app_title)
-        
         header_layout.addSpacing(20)
         
-        # Centro: Menus Principais
-        arquivo_btn = QPushButton("Arquivo")
+        # Menus do cabeçalho
+        self.arquivo_btn = QPushButton("Arquivo")
         arquivo_menu = QMenu(self)
-        config_action = QAction('Configurações', self)
-        config_action.triggered.connect(self.abrir_configuracoes)
-        arquivo_menu.addAction(config_action)
+        self.config_action = QAction('Configurações', self)
+        self.sair_action = QAction('Sair', self)
+        arquivo_menu.addAction(self.config_action)
         arquivo_menu.addSeparator()
-        sair_action = QAction('Sair', self)
-        sair_action.triggered.connect(self.close)
-        arquivo_menu.addAction(sair_action)
-        arquivo_btn.setMenu(arquivo_menu)
+        arquivo_menu.addAction(self.sair_action)
+        self.arquivo_btn.setMenu(arquivo_menu)
+        self.config_action.triggered.connect(self.abrir_configuracoes)
+        self.sair_action.triggered.connect(self.close)
 
-        relatorios_btn = QPushButton("Relatórios")
+        self.relatorios_btn = QPushButton("Relatórios")
         relatorios_menu = QMenu(self)
-        estoque_baixo_action = QAction('Estoque Baixo', self)
-        estoque_baixo_action.triggered.connect(self.relatorio_estoque_baixo)
-        relatorios_menu.addAction(estoque_baixo_action)
-        vencimentos_action = QAction('Produtos a Vencer', self)
-        vencimentos_action.triggered.connect(self.relatorio_vencimentos)
-        relatorios_menu.addAction(vencimentos_action)
-        relatorios_btn.setMenu(relatorios_menu)
+        self.estoque_baixo_action = QAction('Estoque Baixo', self)
+        self.vencimentos_action = QAction('Produtos a Vencer', self)
+        relatorios_menu.addAction(self.estoque_baixo_action)
+        relatorios_menu.addAction(self.vencimentos_action)
+        self.relatorios_btn.setMenu(relatorios_menu)
+        self.estoque_baixo_action.triggered.connect(self.relatorio_estoque_baixo)
+        self.vencimentos_action.triggered.connect(self.relatorio_vencimentos)
         
-        ajuda_btn = QPushButton("Ajuda")
+        self.ajuda_btn = QPushButton("Ajuda")
         ajuda_menu = QMenu(self)
-        sobre_action = QAction('Sobre', self)
-        sobre_action.triggered.connect(self.mostrar_sobre)
-        ajuda_menu.addAction(sobre_action)
-        ajuda_btn.setMenu(ajuda_menu)
+        self.sobre_action = QAction('Sobre', self)
+        ajuda_menu.addAction(self.sobre_action)
+        self.ajuda_btn.setMenu(ajuda_menu)
+        self.sobre_action.triggered.connect(self.mostrar_sobre)
 
-        for btn in [arquivo_btn, relatorios_btn, ajuda_btn]:
+        self.header_menu_buttons = [self.arquivo_btn, self.relatorios_btn, self.ajuda_btn]
+        for btn in self.header_menu_buttons:
             btn.setObjectName("headerMenuButton")
             btn.setCursor(Qt.PointingHandCursor)
             header_layout.addWidget(btn)
 
-        # Empurra tudo para os cantos
         header_layout.addStretch()
         
-        # Lado Direito: Botão Atualizar, Menu do Usuário e Controles da Janela
+        self.refresh_button = QPushButton("Atualizar")
+        self.refresh_button.setObjectName("headerActionButton")
+        self.refresh_button.setCursor(Qt.PointingHandCursor)
+        self.refresh_button.clicked.connect(self.atualizar_dados)
+        header_layout.addWidget(self.refresh_button)
         
-        # Botão de atualizar
-        refresh_button = QPushButton("Atualizar")
-        refresh_button.setObjectName("headerActionButton") # NOVO NOME para estilo
-        refresh_button.setCursor(Qt.PointingHandCursor)
-        refresh_button.clicked.connect(self.atualizar_dados)
-        header_layout.addWidget(refresh_button)
-        
-        # Placeholder para o menu do usuário
         self.user_menu_placeholder = QFrame()
         header_layout.addWidget(self.user_menu_placeholder)
 
-        # Separador visual
         separator = QFrame()
         separator.setFrameShape(QFrame.VLine)
         separator.setFrameShadow(QFrame.Sunken)
         header_layout.addWidget(separator)
         
-        # Controles da Janela
         window_controls_frame = QFrame()
         window_layout = QHBoxLayout(window_controls_frame)
         window_layout.setContentsMargins(0, 0, 0, 0)
-        window_layout.setSpacing(5)
+        window_layout.setSpacing(0)
         
-        # Usando caracteres Unicode que funcionam bem como ícones
-        minimize_btn = QPushButton("─")
-        maximize_btn = QPushButton("□")
-        close_btn = QPushButton("✕")
+        self.minimize_btn = QPushButton()
+        self.maximize_btn = QPushButton()
+        self.close_btn = QPushButton()
         
-        for btn, name in [(minimize_btn, "minimizeButton"), (maximize_btn, "maximizeButton"), (close_btn, "closeButton")]:
+        for btn, name in [(self.minimize_btn, "minimizeButton"), (self.maximize_btn, "maximizeButton"), (self.close_btn, "closeButton")]:
             btn.setObjectName(name)
-            btn.setFixedSize(30, 30)
+            btn.setFixedSize(45, 30)
         
-        # MUDANÇA PRINCIPAL AQUI: Conectar aos métodos com animação
-        minimize_btn.clicked.connect(self.showMinimizedAnimated)
-        maximize_btn.clicked.connect(self.toggleMaximizeAnimated)
-        close_btn.clicked.connect(self.close)
+        self.minimize_btn.clicked.connect(self.showMinimizedAnimated)
+        self.maximize_btn.clicked.connect(self.toggleMaximizeAnimated)
+        self.close_btn.clicked.connect(self.close)
         
-        window_layout.addWidget(minimize_btn)
-        window_layout.addWidget(maximize_btn)
-        window_layout.addWidget(close_btn)
+        window_layout.addWidget(self.minimize_btn)
+        window_layout.addWidget(self.maximize_btn)
+        window_layout.addWidget(self.close_btn)
         
         header_layout.addWidget(window_controls_frame)
         main_layout.addWidget(header_frame)
         
-        # Aplique o StyleSheet que contém os efeitos de hover
-        self.setStyleSheet(self.get_main_stylesheet())
-        
-        # Aplicar o StyleSheet que contém os efeitos de hover
-        # Adicione ou modifique seu método aplicar_tema ou adicione o estilo aqui
-        self.setStyleSheet(self.get_main_stylesheet())
-        
-        # Permitir arrastar a janela pelo cabeçalho
         header_frame.mousePressEvent = self.start_window_drag
         header_frame.mouseMoveEvent = self.window_drag
         self.drag_position = None
 
-        # ===== CONTEÚDO PRINCIPAL (CÓDIGO EXISTENTE - SEM MUDANÇAS) =====
+        # ===== CONTEÚDO PRINCIPAL =====
         content_frame = QFrame()
         content_layout = QHBoxLayout(content_frame)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
         
-        # Container do menu lateral (código existente)
         self.menu_container = QFrame()
         self.menu_container.setObjectName("menuContainer")
         menu_container_layout = QVBoxLayout(self.menu_container)
@@ -174,31 +157,29 @@ class MainWindow(QMainWindow):
         menu_header.setObjectName("menuHeader")
         menu_header.setFixedHeight(50)
         menu_header_layout = QHBoxLayout(menu_header)
-        menu_header_layout.setContentsMargins(15, 10, 15, 10)
+        menu_header_layout.setContentsMargins(10, 10, 10, 10)
         
-        self.hamburger_btn = QPushButton("☰")
+        self.hamburger_btn = QPushButton()
         self.hamburger_btn.setObjectName("hamburgerButton")
-        self.hamburger_btn.setFixedSize(30, 30)
+        self.hamburger_btn.setFixedSize(40, 40)
+        self.hamburger_btn.setIconSize(QSize(20, 20))
         self.hamburger_btn.setCursor(Qt.PointingHandCursor)
         self.hamburger_btn.clicked.connect(self.toggle_menu)
-        
-        menu_header_layout.addWidget(self.hamburger_btn)
-        menu_header_layout.addStretch()
+        menu_header_layout.addWidget(self.hamburger_btn, alignment=Qt.AlignCenter)
         menu_container_layout.addWidget(menu_header)
         
-        # Menu lateral (código existente)
         self.menu_widget = QFrame()
         self.menu_widget.setObjectName("menuLateral")
         menu_widget_layout = QVBoxLayout(self.menu_widget)
         menu_widget_layout.setSpacing(5)
-        menu_widget_layout.setContentsMargins(10, 20, 10, 20)
+        menu_widget_layout.setContentsMargins(5, 15, 5, 15)
         
-        self.btn_dashboard = self.criar_botao_menu("Dashboard", "dashboard.png")
-        self.btn_estoque = self.criar_botao_menu("Controle de Estoque", "estoque-pronto.png")
-        self.btn_fornecedor = self.criar_botao_menu("Fornecedores", "entregador.png")
-        self.btn_promocoes = self.criar_botao_menu("Promoções", "distintivo-de-desconto.png")
-        self.btn_clientes = self.criar_botao_menu("Clientes", "negocios.png")
-        self.btn_caixa = self.criar_botao_menu("Controle de Caixa", "dinheiro.png")
+        self.btn_dashboard = self.criar_botao_menu("Dashboard", 'dashboard')
+        self.btn_estoque = self.criar_botao_menu("Controle de Estoque", 'estoque')
+        self.btn_fornecedor = self.criar_botao_menu("Fornecedores", 'fornecedores')
+        self.btn_promocoes = self.criar_botao_menu("Promoções", 'promocoes')
+        self.btn_clientes = self.criar_botao_menu("Clientes", 'clientes')
+        self.btn_caixa = self.criar_botao_menu("Controle de Caixa", 'caixa')
         
         self.menu_buttons = [self.btn_dashboard, self.btn_estoque, self.btn_fornecedor, self.btn_promocoes, self.btn_clientes, self.btn_caixa]
         
@@ -206,24 +187,11 @@ class MainWindow(QMainWindow):
             menu_widget_layout.addWidget(btn)
         menu_widget_layout.addStretch()
         
-        separador_menu = QFrame()
-        separador_menu.setFrameShape(QFrame.HLine)
-        separador_menu.setFrameShadow(QFrame.Sunken)
-        separador_menu.setObjectName("separator")
-        menu_widget_layout.addWidget(separador_menu)
-        
-        self.btn_config = self.criar_botao_menu("Configurações", "engrenagem.png")
+        self.btn_config = self.criar_botao_menu("Configurações", 'config')
         self.btn_config.clicked.connect(self.abrir_configuracoes)
         menu_widget_layout.addWidget(self.btn_config)
-        
-        self.creditos = QLabel("© 2025")
-        self.creditos.setAlignment(Qt.AlignCenter)
-        self.creditos.setObjectName("creditos")
-        menu_widget_layout.addWidget(self.creditos)
-        
         menu_container_layout.addWidget(self.menu_widget)
         
-        # Área de conteúdo (código existente)
         content_container = QFrame()
         content_container.setObjectName("contentContainer")
         content_container_layout = QVBoxLayout(content_container)
@@ -244,13 +212,19 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         content_container_layout.addWidget(self.stack)
         
-        self.estoque_page = EstoqueWindow(self.db)
-        self.fornecedor_page = FornecedorWindow(self.db)
-        self.promocoes_page = PromocoesWindow(self.db)
-        self.clientes_page = ClientesWindow(self.db)
-        self.caixa_page = CaixaWindow(self.db)
-        self.dashboard_page = DashboardWindow(self.db)
+        ## ========================================================== ##
+        ## CORREÇÃO CRÍTICA: Instanciação das páginas com theme_colors ##
+        ## ========================================================== ##
+        self.dashboard_page = DashboardWindow(self.db, theme_colors)
+        self.estoque_page = EstoqueWindow(self.db, theme_colors)
+        self.fornecedor_page = FornecedorWindow(self.db, theme_colors)
+        self.promocoes_page = PromocoesWindow(self.db, theme_colors)
         
+        # Para as janelas abaixo funcionarem, elas também precisarão ser adaptadas
+        # para receber `theme_colors` no construtor.
+        self.clientes_page = ClientesWindow(self.db, theme_colors)
+        self.caixa_page = CaixaWindow(self.db, theme_colors)
+
         self.stack.addWidget(self.dashboard_page)
         self.stack.addWidget(self.estoque_page)
         self.stack.addWidget(self.fornecedor_page)
@@ -266,32 +240,27 @@ class MainWindow(QMainWindow):
         self.btn_caixa.clicked.connect(lambda: self.switch_page(5))
         
         content_layout.addWidget(self.menu_container)
-        content_layout.addWidget(content_container)
+        content_layout.addWidget(content_container, 1)
         main_layout.addWidget(content_frame)
         
-        # Status bar (código existente)
         self.statusBar = QStatusBar()
         self.statusBar.setObjectName("statusBar")
         self.statusBar.setFixedHeight(25)
-        self.statusBar.showMessage("Sistema pronto", 3000)
         self.setStatusBar(self.statusBar)
         
-        # Estado inicial do menu (código existente)
-        self.menu_container.setMinimumWidth(70)
-        self.menu_container.setMaximumWidth(70)
-        self.creditos.setText("©")
-        self.menu_collapsed = True
-        for btn in self.menu_buttons + [self.btn_config]:
-            if hasattr(btn, 'text_label'):
-                btn.text_label.hide()
+        self.toggle_menu()
+        self.switch_page(0)
+        
         self.setWindowOpacity(0.0)
-        self.show() # Mostra a janela (invisível)
+        self.show()
         self.fade_in_animation = QPropertyAnimation(self, b"windowOpacity")
         self.fade_in_animation.setDuration(500)
         self.fade_in_animation.setStartValue(0.0)
         self.fade_in_animation.setEndValue(1.0)
-        self.fade_in_animation.setEasingCurve(QEasingCurve.OutQuad)
         self.fade_in_animation.start()
+
+        # Aplica o tema DEPOIS que todos os widgets foram criados.
+        self.aplicar_tema()
     
     def carregar_logo(self):
         """Carrega a logo como QIcon para uso na barra de título"""
@@ -313,113 +282,89 @@ class MainWindow(QMainWindow):
             print(f"Logo não encontrada em: {logo_path}")
             return None
     
-    def criar_botao_menu(self, texto, icone=None):
-        """Cria um botão estilizado para o menu lateral."""
+    def criar_botao_menu(self, texto, icon_name=None):
+        """Cria um botão estilizado para o menu lateral usando qtawesome."""
         btn = QPushButton()
         btn.setObjectName("menuButton")
         btn.setMinimumHeight(45)
         btn.setCursor(Qt.PointingHandCursor)
         
-        # Layout para o botão
         layout = QHBoxLayout(btn)
-        layout.setContentsMargins(15, 8, 15, 8)
-        layout.setSpacing(10)
+        layout.setContentsMargins(15, 0, 15, 0)
+        layout.setSpacing(15)
         
-        # Ícone (arquivo de imagem)
-        if icone:
-            icon_label = QLabel()
-            icon_label.setFixedSize(28, 28)
-            icon_label.setAlignment(Qt.AlignCenter)
-            icon_label.setObjectName("buttonIcon")
-            
-            # Carregar ícone do arquivo
-            try:
-                pixmap = QPixmap(f"assets/icons/{icone}")
-                if not pixmap.isNull():
-                    # Redimensionar o ícone mantendo proporção
-                    scaled_pixmap = pixmap.scaled(20, 20, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                    icon_label.setPixmap(scaled_pixmap)
-                else:
-                    # Fallback: usar texto se o ícone não carregar
-                    icon_label.setText("📁")
-                    icon_label.setFont(QFont("Segoe UI", 16))
-            except Exception as e:
-                print(f"Erro ao carregar ícone {icone}: {e}")
-                # Fallback: usar emoji padrão
-                icon_label.setText("📁")
-                icon_label.setFont(QFont("Segoe UI", 16))
-            
-            layout.addWidget(icon_label)
-            # Guardar referência ao ícone no botão
-            btn.icon_label = icon_label
+        icon_color = self._get_theme_colors()['text_secondary']
         
-        # Texto
+        if icon_name:
+            icon_widget = QLabel()
+            icon_widget.setObjectName("buttonIcon")
+            icon_pixmap = IconManager.get_icon(icon_name, color=icon_color).pixmap(QSize(20, 20))
+            icon_widget.setPixmap(icon_pixmap)
+            icon_widget.setFixedSize(24, 24)
+            icon_widget.setAlignment(Qt.AlignCenter)
+            layout.addWidget(icon_widget)
+            btn.icon_widget = icon_widget # Salva referência ao widget do ícone
+            btn.icon_name = icon_name # Salva o nome do ícone
+        
         text_label = QLabel(texto)
-        text_label.setFont(QFont("Segoe UI", 11))
+        text_label.setFont(QFont("Segoe UI", 10))
         text_label.setObjectName("buttonText")
         layout.addWidget(text_label)
         layout.addStretch()
         
-        # Guardar referência ao texto no botão
         btn.text_label = text_label
-        btn.full_text = texto
-        
         return btn
     
     def toggle_menu(self):
-        """Alterna entre menu expandido e recolhido."""
+        """Alterna entre menu expandido e recolhido com animação."""
+        start_width = self.menu_container.width()
         if self.menu_collapsed:
-            # Expandir menu
-            self.menu_container.setMinimumWidth(250)
-            self.menu_container.setMaximumWidth(250)
-            self.creditos.setText("© 2025")
-            
-            # Mostrar texto dos botões
-            for btn in self.menu_buttons + [self.btn_config]:
-                if hasattr(btn, 'text_label'):
-                    btn.text_label.show()
-            
+            end_width = 250
             self.menu_collapsed = False
-        else:
-            # Recolher menu
-            self.menu_container.setMinimumWidth(70)
-            self.menu_container.setMaximumWidth(70)
-            self.creditos.setText("©")
-            
-            # Esconder texto dos botões, manter apenas ícones
             for btn in self.menu_buttons + [self.btn_config]:
-                if hasattr(btn, 'text_label'):
-                    btn.text_label.hide()
-            
+                btn.text_label.show()
+        else:
+            end_width = 60 # Largura recolhida
             self.menu_collapsed = True
+            for btn in self.menu_buttons + [self.btn_config]:
+                btn.text_label.hide()
+        
+        self.animation = QPropertyAnimation(self.menu_container, b"minimumWidth")
+        self.animation.setDuration(250)
+        self.animation.setStartValue(start_width)
+        self.animation.setEndValue(end_width)
+        self.animation.setEasingCurve(QEasingCurve.InOutCubic)
+        self.animation.start()
+        
+        self.animation2 = QPropertyAnimation(self.menu_container, b"maximumWidth")
+        self.animation2.setDuration(250)
+        self.animation2.setStartValue(start_width)
+        self.animation2.setEndValue(end_width)
+        self.animation2.setEasingCurve(QEasingCurve.InOutCubic)
+        self.animation2.start()
     
     def switch_page(self, index):
         """Muda para a página especificada e atualiza a interface."""
         self.stack.setCurrentIndex(index)
-        
-        # Atualizar título da página
-        titles = ["Dashboard", "Controle de Estoque", "Fornecedores", 
-                 "Promoções", "Clientes", "Controle de Caixa"]
-        
+        titles = ["Dashboard", "Controle de Estoque", "Fornecedores", "Promoções", "Clientes", "Controle de Caixa"]
         self.page_title.setText(titles[index])
-        
-        # Atualizar status bar com a página atual
         self.statusBar.showMessage(f"Área: {titles[index]}", 3000)
         
-        # Destacar botão ativo
-        buttons = [self.btn_dashboard, self.btn_estoque, self.btn_fornecedor, 
-                  self.btn_promocoes, self.btn_clientes, self.btn_caixa]
-        
+        buttons = [self.btn_dashboard, self.btn_estoque, self.btn_fornecedor, self.btn_promocoes, self.btn_clientes, self.btn_caixa]
+        theme_colors = self._get_theme_colors()
+
         for i, btn in enumerate(buttons):
-            if i == index:
-                btn.setProperty("active", True)
-            else:
-                btn.setProperty("active", False)
+            is_active = (i == index)
+            btn.setProperty("active", is_active)
             
-            # Força a atualização do estilo
+            # ATUALIZA A COR DO ÍCONE
+            if hasattr(btn, 'icon_widget') and hasattr(btn, 'icon_name'):
+                color = 'white' if is_active else theme_colors['text_secondary']
+                new_icon = IconManager.get_icon(btn.icon_name, color=color)
+                btn.icon_widget.setPixmap(new_icon.pixmap(QSize(20, 20)))
+            
             btn.style().unpolish(btn)
             btn.style().polish(btn)
-            btn.update()
     
     def toggle_maximize(self):
         """Alterna entre tela cheia e tamanho normal."""
@@ -441,12 +386,14 @@ class MainWindow(QMainWindow):
             event.accept()
 
     def changeEvent(self, event):
-        """Captura eventos de mudança de estado da janela."""
+        """Atualiza o ícone de maximizar/restaurar."""
         if event.type() == event.WindowStateChange:
-            # Se a janela deixou de ser minimizada
-            if not (self.windowState() & Qt.WindowMinimized):
-                # Garante que a opacidade volte a 1.0 ao ser restaurada
-                self.setWindowOpacity(1.0)
+            theme_colors = self._get_theme_colors()
+            icon_color = theme_colors['text_secondary']
+            if self.isMaximized():
+                self.maximize_btn.setIcon(IconManager.get_icon('restaurar', icon_color))
+            else:
+                self.maximize_btn.setIcon(IconManager.get_icon('maximizar', icon_color))
         super().changeEvent(event)
     
     def showMinimizedAnimated(self):
@@ -562,226 +509,174 @@ class MainWindow(QMainWindow):
             }}
         """
 
-    def aplicar_tema(self):
-        """Aplica o tema atual a todos os componentes."""
+    def _get_theme_colors(self):
+        """ÚNICA FONTE DE VERDADE para as cores do tema."""
         is_dark = self.settings.get_theme() == 'dark'
-        
-        # Cores do tema
         if is_dark:
-            bg_color = "#1c1c1e"
-            surface_color = "#2c2c2e" 
-            menu_color = "#1c1c1e"
-            text_color = "#ffffff"
-            text_secondary = "#8e8e93"
-            border_color = "#3a3a3c"
-            button_hover = "#3a3a3c"
-            accent_color = "#007AFF"
+            return {
+                'bg_color': "#1c2128", 'surface_color': "#22272e", 'menu_color': "#22272e",
+                'text_color': "#cdd9e5", 'text_secondary': "#768390", 'border_color': "#373e47",
+                'button_hover': "#373e47", 'accent_color': "#007AFF"
+            }
         else:
-            bg_color = "#ffffff"
-            surface_color = "#f2f2f7"
-            menu_color = "#f9f9f9"
-            text_color = "#000000"
-            text_secondary = "#6d6d70"
-            border_color = "#d1d1d6"
-            button_hover = "#e5e5ea"
-            accent_color = "#007AFF"
+            return {
+                'bg_color': "#ffffff", 'surface_color': "#f2f2f7", 'menu_color': "#f9f9f9",
+                'text_color': "#000000", 'text_secondary': "#6d6d70", 'border_color': "#d1d1d6",
+                'button_hover': "#e5e5ea", 'accent_color': "#007AFF"
+            }
+    
+    def aplicar_tema(self):
+        """Aplica o tema atual a todos os componentes, centralizando o estilo."""
+        theme = self._get_theme_colors()
+        accent_color = theme['accent_color']
+        text_color = theme['text_color']
+        text_secondary = theme['text_secondary']
+        bg_color = theme['bg_color']
+        surface_color = theme['surface_color']
+        border_color = theme['border_color']
+        button_hover = theme['button_hover']
+
+        # Ícones dinâmicos
+        self.app_logo.setPixmap(IconManager.get_icon('estoque', accent_color).pixmap(QSize(32, 32)))
+        self.hamburger_btn.setIcon(IconManager.get_icon('menu', text_color))
+        self.refresh_button.setIcon(IconManager.get_icon('atualizar', 'white'))
+        self.minimize_btn.setIcon(IconManager.get_icon('minimizar', text_secondary))
+        self.maximize_btn.setIcon(IconManager.get_icon('maximizar' if not self.isMaximized() else 'restaurar', text_secondary))
+        self.close_btn.setIcon(IconManager.get_icon('fechar', text_secondary))
         
-        # Aplicar stylesheet principal
+        # Atualiza os ícones do menu lateral para a cor correta (inativa/ativa)
+        self.switch_page(self.stack.currentIndex())
+        
+        # Aplica a folha de estilo principal
         self.setStyleSheet(f"""
-            /* Janela principal */
-            QMainWindow {{
+            QMainWindow, #centralWidget, QDialog {{
                 background-color: {bg_color};
                 color: {text_color};
             }}
             
-            #centralWidget {{
-                background-color: {bg_color};
-            }}
-            
-            /* Menu bar */
-            QMenuBar {{
-                background-color: {surface_color};
-                color: {text_color};
-                border-bottom: 1px solid {border_color};
-                padding: 4px;
-            }}
-            
-            QMenuBar::item {{
-                background: transparent;
-                padding: 8px 12px;
-                border-radius: 4px;
-            }}
-            
-            QMenuBar::item:selected {{
-                background-color: {button_hover};
-            }}
-            
-            QMenu {{
+            /* --- CAMPOS DE ENTRADA E SELEÇÃO --- */
+            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit {{
                 background-color: {surface_color};
                 color: {text_color};
                 border: 1px solid {border_color};
-                border-radius: 8px;
-                padding: 4px;
-            }}
-            
-            QMenu::item {{
-                padding: 8px 16px;
                 border-radius: 4px;
+                padding: 5px;
+                font-size: 10pt;
             }}
-            
-            QMenu::item:selected {{
-                background-color: {button_hover};
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus {{
+                border: 1px solid {accent_color};
             }}
-            
-            QMenu::separator {{
-                height: 1px;
-                background-color: {border_color};
-                margin: 4px 8px;
+            QComboBox::drop-down {{
+                border: none;
             }}
-            
-            /* Status bar */
-            #statusBar {{
+            QComboBox::down-arrow {{
+                image: url(assets/img/chevron-down.png); /* Crie um ícone de seta para baixo */
+            }}
+            QComboBox QAbstractItemView {{
                 background-color: {surface_color};
-                color: {text_secondary};
-                border-top: 1px solid {border_color};
-                padding: 4px;
+                border: 1px solid {border_color};
+                selection-background-color: {accent_color};
             }}
-            
-            /* Container do menu */
-            #menuContainer {{
-                background-color: {menu_color};
-                border-right: 1px solid {border_color};
+
+            /* --- TABELA --- */
+            QTableWidget {{
+                background-color: {surface_color};
+                color: {text_color};
+                border: 1px solid {border_color};
+                gridline-color: {border_color};
             }}
-            
-            #menuHeader {{
-                background-color: {menu_color};
+            QTableWidget::item {{
+                padding: 5px;
                 border-bottom: 1px solid {border_color};
             }}
-            
-            /* Menu lateral */
-            #menuLateral {{
-                background-color: {menu_color};
-            }}
-            
-            #appTitle {{
-                color: {text_color};
-            }}
-            
-            /* Botão hambúrguer */
-            #hamburgerButton {{
-                background-color: transparent;
-                border: none;
-                color: {text_color};
-                font-size: 18px;
-                font-weight: bold;
-                border-radius: 6px;
-                padding: 4px;
-            }}
-            
-            #hamburgerButton:hover {{
-                background-color: {button_hover};
-            }}
-            
-            #hamburgerButton:pressed {{
-                background-color: {border_color};
-            }}
-            
-            /* Botões do menu */
-            #menuButton {{
-                background-color: transparent;
-                border: none;
-                text-align: left;
-                padding: 8px;
-                border-radius: 8px;
-                color: {text_color};
-            }}
-            
-            #menuButton:hover {{
-                background-color: {button_hover};
-            }}
-            
-            #menuButton[active="true"] {{
+            QTableWidget::item:selected {{
                 background-color: {accent_color};
                 color: white;
             }}
-            
-            #menuButton[active="true"] #buttonIcon,
-            #menuButton[active="true"] #buttonText {{
-                color: white;
-            }}
-            
-            #buttonIcon {{
-                color: {text_secondary};
-            }}
-            
-            #buttonText {{
-                color: {text_color};
-            }}
-            
-            /* Separadores */
-            #separator {{
-                background-color: {border_color};
-                border: none;
-                max-height: 1px;
-            }}
-            
-            /* Créditos */
-            #creditos {{
-                color: {text_secondary};
-                font-size: 11px;
-                padding: 8px;
-            }}
-            
-            /* Área de conteúdo */
-            #contentContainer {{
+            QHeaderView::section {{
                 background-color: {bg_color};
-            }}
-            
-            #pageTitle {{
                 color: {text_color};
-                margin-bottom: 10px;
-            }}
-            
-            #contentSeparator {{
-                background-color: {border_color};
-                border: none;
-                max-height: 1px;
-            }}
-            
-            /* Botões da toolbar */
-            #toolbarButton {{
-                background-color: {accent_color};
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 6px;
-                font-weight: 500;
-                min-width: 80px;
-            }}
-            
-            #toolbarButton:hover {{
-                background-color: #0056b3;
-            }}
-            
-            #toolbarButton:pressed {{
-                background-color: #004085;
-            }}
-            
-            /* Avatar e nome do usuário */
-            #userAvatar {{
-                background-color: {accent_color};
-                color: white;
-                border-radius: 15px;
+                padding: 5px;
+                border: 1px solid {border_color};
                 font-weight: bold;
             }}
-            
-            #userName {{
+
+            /* --- BOTÕES --- */
+            QPushButton {{
+                background-color: transparent;
                 color: {text_color};
-                font-weight: 500;
+                border: 1px solid {border_color};
+                padding: 8px 12px;
+                border-radius: 4px;
+                font-weight: bold;
             }}
+            QPushButton:hover {{
+                background-color: {button_hover};
+                border-color: {accent_color};
+            }}
+            QPushButton:pressed {{
+                background-color: {border_color};
+            }}
+            
+            /* Botão de Ação Primária (Ex: Adicionar) */
+            #primaryActionButton {{
+                background-color: {accent_color};
+                color: white;
+                border: none;
+            }}
+            #primaryActionButton:hover {{
+                background-color: #0069d9;
+            }}
+            
+            /* --- OUTROS COMPONENTES --- */
+            QGroupBox {{
+                border: 1px solid {border_color};
+                border-radius: 6px;
+                margin-top: 20px;
+                font-weight: bold;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                subcontrol-position: top center;
+                padding: 0 10px;
+                background-color: {bg_color};
+                color: {text_secondary};
+            }}
+            
+            #headerFrame, #menuHeader, #menuLateral {{
+                background-color: {theme['menu_color']};
+                border-bottom: 1px solid {theme['border_color']};
+            }}
+            #menuContainer {{
+                background-color: {theme['menu_color']};
+                border-right: 1px solid {theme['border_color']};
+            }}
+            #appTitle, #pageTitle {{ color: {theme['text_color']}; }}
+            #hamburgerButton, #headerMenuButton {{
+                background-color: transparent; border: none;
+                color: {theme['text_color']}; border-radius: 6px;
+            }}
+            #menuButton {{
+                background-color: transparent; border: none; text-align: left; 
+                padding: 8px; border-radius: 8px; color: {theme['text_color']};
+            }}
+            #menuButton:hover {{ background-color: {theme['button_hover']}; }}
+            #menuButton[active="true"] {{ background-color: {theme['accent_color']}; color: white; }}
         """)
+    
+        # Propaga a mudança do tema para as sub-páginas
+        if hasattr(self, 'dashboard_page') and self.dashboard_page:
+            self.dashboard_page.set_theme(theme)
+        if hasattr(self, 'estoque_page') and self.estoque_page:
+            self.estoque_page.set_theme(theme)
+        if hasattr(self, 'fornecedor_page') and self.fornecedor_page:
+            self.fornecedor_page.set_theme(theme)
+        # ADICIONE ESTAS LINHAS:
+        if hasattr(self, 'promocoes_page') and self.promocoes_page:
+            self.promocoes_page.set_theme(theme)
+        if hasattr(self, 'clientes_page') and self.clientes_page:
+            self.clientes_page.set_theme(theme)
         
-        # Forçar atualização visual
         self.update()
         if hasattr(self, 'repaint'):
             self.repaint()
@@ -886,36 +781,33 @@ class MainWindow(QMainWindow):
     def setup_for_user(self, usuario):
         """Configura a interface para o usuário logado"""
         try:
-            # Usa o UserManager, se existir, para manter a estrutura organizada
             if not hasattr(self, 'user_manager'):
-                self.user_manager = UserManager(self, self.db)
+                # Passa a MainWindow (self) para o UserManager
+                self.user_manager = UserManager(self, self.db) 
             
             self.user_manager.usuario = usuario
             
-            # Cria o menu do usuário
-            user_menu_widget = UserMenuWidget(usuario)
+            # --- CORREÇÃO PRINCIPAL AQUI ---
+            # Ao criar o UserMenuWidget, passe as cores do tema
+            user_menu_widget = UserMenuWidget(usuario, self.theme_colors)
             
-            # Conecta os sinais do menu do usuário ao UserManager
+            # Conecta os sinais... (código existente)
             user_menu_widget.profile_requested.connect(self.user_manager.open_profile)
             user_menu_widget.password_change_requested.connect(self.user_manager.change_password)
             user_menu_widget.admin_requested.connect(self.user_manager.open_admin)
             user_menu_widget.logout_requested.connect(self.user_manager.logout)
 
-            # Remove o placeholder antigo e adiciona o widget real
-            # Isso garante que, se o usuário fizer logout e login de novo, não haja duplicação
+            # Lógica para substituir o placeholder... (código existente)
             if self.user_menu_placeholder.layout() is not None:
-                # Limpa o layout do placeholder se já tiver algo
                 while self.user_menu_placeholder.layout().count():
                     child = self.user_menu_placeholder.layout().takeAt(0)
                     if child.widget():
                         child.widget().deleteLater()
             else:
-                # Cria um layout se não existir
                 placeholder_layout = QHBoxLayout()
                 placeholder_layout.setContentsMargins(0, 0, 0, 0)
                 self.user_menu_placeholder.setLayout(placeholder_layout)
             
-            # Adiciona o novo menu do usuário ao placeholder
             self.user_menu_placeholder.layout().addWidget(user_menu_widget)
 
             # Configura a barra de status e ajusta permissões
@@ -958,9 +850,10 @@ class MainWindow(QMainWindow):
 class UserAvatarWidget(QWidget):
     """Widget responsável por exibir o avatar do usuário"""
     
-    def __init__(self, usuario, size=32):
+    def __init__(self, usuario, theme_colors, size=32):
         super().__init__()
         self.usuario = usuario
+        self.theme_colors = theme_colors # Armazena as cores
         self.size = size
         self.setup_ui()
     
@@ -1026,13 +919,14 @@ class UserAvatarWidget(QWidget):
         painter = QPainter(avatar_pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
         
-        # Desenhar círculo de fundo
+        # Desenhar círculo de fundo usando a cor de destaque do tema
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#0d6efd"))
+        # USA A COR DO TEMA AQUI!
+        painter.setBrush(QColor(self.theme_colors.get('accent_color', '#007AFF'))) 
         painter.drawEllipse(0, 0, self.size, self.size)
         
-        # Adicionar iniciais
-        painter.setPen(QColor("#ffffff"))
+        # Adicionar iniciais com cor branca (geralmente fica bom em qualquer accent color)
+        painter.setPen(QColor("#ffffff")) 
         font_size = max(8, self.size // 3)
         painter.setFont(QFont("Arial", font_size, QFont.Bold))
         painter.drawText(avatar_pixmap.rect(), Qt.AlignCenter, initials)
@@ -1049,67 +943,6 @@ class UserAvatarWidget(QWidget):
         except (KeyError, IndexError, AttributeError):
             return "U"
 
-
-class IconProvider:
-    """Provedor de ícones SVG"""
-    
-    ICONS = {
-        'chevron_down': """
-            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" 
-                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
-        """,
-        'profile': """
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" 
-                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                <circle cx="12" cy="7" r="4"></circle>
-            </svg>
-        """,
-        'password': """
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" 
-                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-            </svg>
-        """,
-        'admin': """
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" 
-                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 20h9"></path>
-                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-            </svg>
-        """,
-        'logout': """
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" 
-                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-                <polyline points="16 17 21 12 16 7"></polyline>
-                <line x1="21" y1="12" x2="9" y2="12"></line>
-            </svg>
-        """
-    }
-    
-    @classmethod
-    def create_icon(cls, icon_name, size=16):
-        """Cria um ícone a partir do SVG"""
-        if icon_name not in cls.ICONS:
-            return QIcon()
-        
-        svg_content = cls.ICONS[icon_name]
-        svg_renderer = QSvgRenderer(QByteArray(svg_content.encode()))
-        
-        icon_pixmap = QPixmap(size, size)
-        icon_pixmap.fill(Qt.transparent)
-        
-        painter = QPainter(icon_pixmap)
-        svg_renderer.render(painter)
-        painter.end()
-        
-        return QIcon(icon_pixmap)
-
-
 class UserMenuWidget(QFrame):
     """Widget do menu do usuário"""
     
@@ -1118,134 +951,125 @@ class UserMenuWidget(QFrame):
     admin_requested = pyqtSignal()
     logout_requested = pyqtSignal()
     
-    def __init__(self, usuario):
+    def __init__(self, usuario, theme_colors):
         super().__init__()
         self.usuario = usuario
+        self.theme_colors = theme_colors
         self.setup_ui()
         self.setup_menu()
+        self.apply_styles() 
     
     def setup_ui(self):
         """Configura a interface do widget"""
         self.setObjectName("userContainer")
         self.setCursor(Qt.PointingHandCursor)
-        self.setup_styles()
         
-        # Layout principal
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(8)
         
-        # Avatar
-        self.avatar_widget = UserAvatarWidget(self.usuario, 28)
+        self.avatar_widget = UserAvatarWidget(self.usuario, self.theme_colors, 28)
         layout.addWidget(self.avatar_widget)
         
-        # Nome do usuário
-        first_name = self.get_first_name()
-        self.name_label = QLabel(first_name)
-        self.name_label.setStyleSheet("""
-            color: #f0f0f0;
-            font-weight: bold;
-            font-size: 11pt;
-        """)
+        self.name_label = QLabel(self.get_first_name())
         layout.addWidget(self.name_label)
         
-        # Botão dropdown
         self.dropdown_button = QPushButton()
         self.dropdown_button.setFixedSize(20, 20)
         self.dropdown_button.setCursor(Qt.PointingHandCursor)
-        self.dropdown_button.setIcon(IconProvider.create_icon('chevron_down', 12))
-        self.dropdown_button.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                border: none;
-                padding: 0;
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 255, 255, 0.1);
-                border-radius: 10px;
-            }
-        """)
         layout.addWidget(self.dropdown_button)
         
-        # Conectar eventos
         self.dropdown_button.clicked.connect(self.show_menu)
         self.mousePressEvent = self.on_click
-    
-    def setup_styles(self):
-        """Configura os estilos do widget"""
-        self.setStyleSheet("""
-            #userContainer {
-                background-color: #1e1e1e;
-                border-radius: 16px;
-                border: 1px solid #333;
-            }
-            #userContainer:hover {
-                background-color: #2d2d2d;
-                border-color: #444;
-            }
+
+    def apply_styles(self):
+        """Configura os estilos do widget com base no tema."""
+        colors = self.theme_colors
+        text_color = colors.get('text_color', '#cdd9e5')
+        text_secondary = colors.get('text_secondary', '#768390')
+        surface_color = colors.get('surface_color', '#22272e')
+        menu_color = colors.get('menu_color', '#22272e')
+        border_color = colors.get('border_color', '#373e47')
+        accent_color = colors.get('accent_color', '#007AFF')
+
+        self.setStyleSheet(f"""
+            #userContainer {{
+                background-color: {surface_color};
+                border-radius: 18px;
+                border: 1px solid {border_color};
+            }}
+            #userContainer:hover {{
+                border-color: {accent_color};
+            }}
+            QLabel {{
+                color: {text_color};
+                font-weight: bold;
+                font-size: 10pt;
+                background-color: transparent;
+            }}
+            QPushButton {{
+                background-color: transparent; border: none; padding: 0;
+            }}
+        """)
+        
+        # ATUALIZAÇÃO: Ícone do dropdown usando IconManager
+        self.dropdown_button.setIcon(IconManager.get_icon('chevron_down', color=text_secondary))
+        
+        self.menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {menu_color}; color: {text_color};
+                border: 1px solid {border_color}; border-radius: 8px;
+                padding: 5px; min-width: 180px;
+            }}
+            QMenu::item {{
+                padding: 10px 15px; border-radius: 6px; margin: 2px;
+            }}
+            QMenu::item:selected {{
+                background-color: {accent_color}; color: white;
+            }}
+            QMenu::separator {{
+                height: 1px; background-color: {border_color}; margin: 5px;
+            }}
         """)
     
     def setup_menu(self):
         """Configura o menu dropdown"""
         self.menu = QMenu(self)
-        self.menu.setStyleSheet("""
-            QMenu {
-                background-color: #1e1e1e;
-                color: #f0f0f0;
-                border: 1px solid #333;
-                border-radius: 8px;
-                padding: 8px;
-                min-width: 160px;
-            }
-            QMenu::item {
-                padding: 12px 16px;
-                border-radius: 6px;
-                margin: 2px;
-            }
-            QMenu::item:selected {
-                background-color: #2d2d2d;
-                color: #0d6efd;
-            }
-            QMenu::separator {
-                height: 1px;
-                background-color: #333;
-                margin: 8px 4px;
-            }
-        """)
-        
-        # Adicionar ações ao menu
         self.add_menu_actions()
     
     def add_menu_actions(self):
         """Adiciona as ações ao menu"""
-        # Ação de perfil
-        profile_action = QAction(IconProvider.create_icon('profile'), "Meu Perfil", self)
+        text_color = self.theme_colors.get('text_color', '#cdd9e5')
+        
+        # Ação de perfil - USA ICONMANAGER
+        profile_action = QAction(IconManager.get_icon('profile', color=text_color), "Meu Perfil", self)
         profile_action.triggered.connect(self.profile_requested.emit)
         self.menu.addAction(profile_action)
         
-        # Ação de alterar senha
-        password_action = QAction(IconProvider.create_icon('password'), "Alterar Senha", self)
+        # Ação de alterar senha - USA ICONMANAGER
+        password_action = QAction(IconManager.get_icon('password', color=text_color), "Alterar Senha", self)
         password_action.triggered.connect(self.password_change_requested.emit)
         self.menu.addAction(password_action)
         
         # Separador e ação de admin (se aplicável)
         if self.is_admin():
             self.menu.addSeparator()
-            admin_action = QAction(IconProvider.create_icon('admin'), "Administração", self)
+            # USA ICONMANAGER
+            admin_action = QAction(IconManager.get_icon('admin', color=text_color), "Administração", self)
             admin_action.triggered.connect(self.admin_requested.emit)
             self.menu.addAction(admin_action)
         
         # Separador e logout
         self.menu.addSeparator()
-        logout_action = QAction(IconProvider.create_icon('logout'), "Sair", self)
+        # USA ICONMANAGER
+        logout_action = QAction(IconManager.get_icon('logout', color=text_color), "Sair", self)
         logout_action.triggered.connect(self.logout_requested.emit)
         self.menu.addAction(logout_action)
     
     def show_menu(self):
         """Exibe o menu dropdown"""
-        # Posicionar o menu abaixo do widget
         menu_pos = self.mapToGlobal(self.rect().bottomLeft())
-        menu_pos.setX(menu_pos.x() - 10)  # Pequeno ajuste horizontal
+        menu_pos.setX(menu_pos.x() - 10)
         self.menu.exec_(menu_pos)
     
     def on_click(self, event):
@@ -1268,10 +1092,9 @@ class UserMenuWidget(QFrame):
         except (KeyError, AttributeError):
             return False
 
-
 class UserManager:
     """Gerenciador principal do usuário na aplicação"""
-    
+
     def __init__(self, main_window, db):
         self.main_window = main_window
         self.db = db
@@ -1342,21 +1165,20 @@ class UserManager:
             
             from ui.profile_window import ProfileWindow
             
-            profile_dialog = ProfileWindow(self.db, self.usuario)
-            self.active_dialogs['profile'] = profile_dialog
+            # ATUALIZAÇÃO: Passe self.main_window.theme_colors
+            profile_dialog = ProfileWindow(self.db, self.usuario, self.main_window.theme_colors)
             
-            # Conectar sinal de finalização
+            self.active_dialogs['profile'] = profile_dialog
             profile_dialog.finished.connect(lambda: self.cleanup_dialog('profile'))
             
-            result = profile_dialog.exec_()
-            
-            if result == QDialog.Accepted:
-                # Atualizar informações do usuário
+            if profile_dialog.exec_() == QDialog.Accepted:
                 self.update_user_info()
                 
         except Exception as e:
             QMessageBox.critical(self.main_window, "Erro", f"Erro ao abrir perfil: {str(e)}")
     
+    # Em ui/main_window.py, dentro da classe UserManager
+
     def change_password(self):
         """Abre a janela de alteração de senha"""
         try:
@@ -1366,7 +1188,11 @@ class UserManager:
             
             from ui.change_password_window import ChangePasswordWindow
             
-            password_dialog = ChangePasswordWindow(self.db, self.usuario['id'])
+            # --- CORREÇÃO PRINCIPAL AQUI ---
+            # A MainWindow é referenciada como self.main_window.
+            # Passamos o dicionário de temas dela para o diálogo.
+            password_dialog = ChangePasswordWindow(self.db, self.usuario['id'], self.main_window.theme_colors)
+            
             self.active_dialogs['password'] = password_dialog
             
             # Conectar sinal de finalização
@@ -1380,10 +1206,8 @@ class UserManager:
     def open_admin(self):
         """Abre a janela de administração"""
         try:
-            # ## LINHA CORRIGIDA ABAIXO ##
-            # Em vez de perguntar ao widget, verificamos diretamente os dados do usuário.
             if self.usuario.get('tipo', '').lower() != 'admin':
-                QMessageBox.warning(self.main_window, "Acesso Negado", 
+                QMessageBox.warning(self.main_window, "Acesso Negado",
                                   "Você não tem permissões de administrador.")
                 return
             
@@ -1391,15 +1215,14 @@ class UserManager:
                 self.active_dialogs['admin'].raise_()
                 return
             
-            # O import deve ser local para evitar dependência circular
             from ui.admin_window import AdminWindow
             
-            admin_dialog = AdminWindow(self.db, self.usuario)
+            # --- ATUALIZAÇÃO PRINCIPAL AQUI ---
+            # Passe o dicionário de temas da janela principal para a AdminWindow
+            admin_dialog = AdminWindow(self.db, self.usuario, self.main_window.theme_colors)
+            
             self.active_dialogs['admin'] = admin_dialog
-            
-            # Conectar sinal de finalização
             admin_dialog.finished.connect(lambda: self.cleanup_dialog('admin'))
-            
             admin_dialog.exec_()
             
         except Exception as e:

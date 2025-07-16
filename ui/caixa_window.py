@@ -7,13 +7,16 @@ from PyQt5.QtCore import Qt, QDate, QDateTime, QMarginsF
 from PyQt5.QtGui import QIcon, QColor, QFont, QTextDocument, QPageSize, QPageLayout, QIcon
 from PyQt5.QtPrintSupport import QPrinter
 import os
+from ui.icon_manager import IconManager
+
 
 import datetime
 
 class CaixaWindow(QWidget):
-    def __init__(self, db):
+    def __init__(self, db, theme_colors):
         super().__init__()
         self.db = db
+        self.theme_colors = theme_colors
         self.caixa_atual = None
         self.itens_venda = []
         self.total_venda = 0.0
