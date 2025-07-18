@@ -1,13 +1,84 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                            QPushButton, QTableWidget, QTableWidgetItem, QFormLayout,
                            QDateEdit, QComboBox, QMessageBox, QHeaderView, QDoubleSpinBox,
-                           QDialog, QFrame, QTabWidget, QRadioButton, QButtonGroup, QFileDialog, QSizePolicy, QGroupBox)
-from PyQt5.QtCore import Qt, QDate
+                           QDialog, QFrame, QTabWidget, QRadioButton, QFileDialog, 
+                           QSizePolicy, QGroupBox, QProgressDialog)
+from PyQt5.QtCore import Qt, QDate, QThread, pyqtSignal
 from PyQt5.QtGui import QFont
 from datetime import datetime, timedelta
 import csv
 import os
+import math
+
+# Importações necessárias
 from ui.icon_manager import IconManager
+from database.db_manager import DatabaseManager
+
+# ================================================================= #
+#       CLASSE WORKER PARA IMPORTAÇÃO DE CSV EM THREAD              #
+# ================================================================= #
+
+class PromocaoCsvImportWorker(QThread):
+    progress = pyqtSignal(int)
+    finished = pyqtSignal(int, int, list)
+
+    def __init__(self, db_path, file_path):
+        super().__init__()
+        self.db_path = db_path
+        self.file_path = file_path
+        self.local_db = None
+
+    def run(self):
+        importadas = 0
+        erros = 0
+        detalhes_erros = []
+        try:
+            self.local_db = DatabaseManager(self.db_path)
+            
+            with open(self.file_path, 'r', encoding='utf-8') as f:
+                total_linhas = max(1, sum(1 for _ in f) - 1)
+
+            with open(self.file_path, 'r', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                self.local_db.begin_transaction()
+                
+                for i, row in enumerate(reader):
+                    try:
+                        produto_nome = row.get('Produto', '').strip()
+                        if not produto_nome:
+                            raise ValueError("Nome do produto é obrigatório.")
+                        
+                        produto = self.local_db.buscar_produto_por_nome_exato(produto_nome)
+                        if not produto:
+                            raise ValueError(f"Produto '{produto_nome}' não encontrado.")
+
+                        preco_antigo = float(row['Preço Antigo'].replace(',', '.'))
+                        preco_promo = float(row['Preço Promocional'].replace(',', '.'))
+                        data_inicio = datetime.strptime(row['Data Início'], '%d/%m/%Y').strftime('%Y-%m-%d')
+                        data_fim = datetime.strptime(row['Data Fim'], '%d/%m/%Y').strftime('%Y-%m-%d')
+
+                        self.local_db.adicionar_promocao(
+                            produto_id=produto['id'],
+                            preco_antigo=preco_antigo,
+                            preco_promocional=preco_promo,
+                            data_inicio=data_inicio,
+                            data_fim=data_fim,
+                            descricao=row.get('Descrição', '').strip()
+                        )
+                        importadas += 1
+                    except Exception as e:
+                        erros += 1
+                        detalhes_erros.append(f"Linha {i+2}: {e}")
+                    self.progress.emit(int(((i + 1) / total_linhas) * 100))
+                
+                self.local_db.commit_transaction()
+        except Exception as e:
+            if self.local_db: self.local_db.rollback_transaction()
+            detalhes_erros.append(f"Erro geral: {e}")
+        finally:
+            if self.local_db: self.local_db.fechar()
+        
+        self.finished.emit(importadas, erros, detalhes_erros)
 
 
 class PromocoesWindow(QWidget):
@@ -15,13 +86,17 @@ class PromocoesWindow(QWidget):
         super().__init__()
         self.db = db
         self.theme_colors = theme_colors
+        self.pagina_atual = 1
+        self.itens_por_pagina = 50
+        self.total_paginas = 1
+
         self.initUI()
-        self.carregar_dados()
+        self.atualizar_visualizacao_dados()
 
     def set_theme(self, theme_colors):
         self.theme_colors = theme_colors
         self.update_button_icons()
-        self.carregar_dados()
+        self.atualizar_visualizacao_dados()
 
     def update_button_icons(self):
         icon_color = self.theme_colors.get('text_color', '#000')
@@ -29,9 +104,11 @@ class PromocoesWindow(QWidget):
         self.search_button.setIcon(IconManager.get_icon('search', icon_color))
         self.exportar_button.setIcon(IconManager.get_icon('export', icon_color))
         self.importar_button.setIcon(IconManager.get_icon('import', icon_color))
-        self.produtos_especiais_button.setIcon(IconManager.get_icon('tags', icon_color))
+        # A linha do 'produtos_especiais_button' foi removida.
 
         self.add_button.setIcon(IconManager.get_icon('add', 'white'))
+        self.prev_page_btn.setIcon(IconManager.get_icon('angle-left', icon_color))
+        self.next_page_btn.setIcon(IconManager.get_icon('angle-right', icon_color))
 
     def initUI(self):
         layout = QVBoxLayout(self)
@@ -43,6 +120,7 @@ class PromocoesWindow(QWidget):
         search_layout = QHBoxLayout(search_group)
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Pesquisar promoção pelo nome do produto...")
+        self.search_input.returnPressed.connect(self.pesquisar_promocoes)
         self.search_button = QPushButton()
         self.search_button.setToolTip("Buscar")
         self.search_button.clicked.connect(self.pesquisar_promocoes)
@@ -56,48 +134,80 @@ class PromocoesWindow(QWidget):
         self.tabela.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.tabela.verticalHeader().setVisible(False)
         layout.addWidget(self.tabela)
+        
+        paginacao_layout = QHBoxLayout()
+        # O espaço no texto ajuda a separar o ícone do texto visualmente
+        self.prev_page_btn = QPushButton(" Anterior")
+        self.prev_page_btn.clicked.connect(self.ir_pagina_anterior)
+        
+        self.page_label = QLabel(f"Página {self.pagina_atual} de {self.total_paginas}")
+        
+        self.next_page_btn = QPushButton("Próxima ")
+        # Garante que o ícone fique à direita do texto
+        self.next_page_btn.setLayoutDirection(Qt.RightToLeft)
+        self.next_page_btn.clicked.connect(self.ir_proxima_pagina)
+        
+        paginacao_layout.addWidget(self.prev_page_btn)
+        paginacao_layout.addStretch()
+        paginacao_layout.addWidget(self.page_label)
+        paginacao_layout.addStretch()
+        paginacao_layout.addWidget(self.next_page_btn)
+        layout.addLayout(paginacao_layout)
 
         action_layout = QHBoxLayout()
         action_layout.setSpacing(10)
-        botoes_acao = []
-
-        self.add_button = QPushButton()
-        self.add_button.setText(" Adicionar Promoção")
+        
+        self.add_button = QPushButton(" Adicionar Promoção")
         self.add_button.setObjectName("primaryActionButton")
         self.add_button.clicked.connect(self.abrir_formulario_promocao)
-        botoes_acao.append(self.add_button)
-
-        self.produtos_especiais_button = QPushButton()
-        self.produtos_especiais_button.setText(" Promoções Especiais")
-        self.produtos_especiais_button.clicked.connect(self.abrir_promocoes_especiais)
-        botoes_acao.append(self.produtos_especiais_button)
         
-        self.exportar_button = QPushButton()
-        self.exportar_button.setText(" Exportar CSV")
+        self.exportar_button = QPushButton(" Exportar CSV")
         self.exportar_button.clicked.connect(self.exportar_csv)
-        botoes_acao.append(self.exportar_button)
         
-        self.importar_button = QPushButton()
-        self.importar_button.setText(" Importar CSV")
+        self.importar_button = QPushButton(" Importar CSV")
         self.importar_button.clicked.connect(self.importar_csv)
-        botoes_acao.append(self.importar_button)
+
+        botoes_acao = [self.add_button, self.exportar_button, self.importar_button]
 
         for btn in botoes_acao:
             btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
             action_layout.addWidget(btn)
             
         layout.addLayout(action_layout)
+        # Esta chamada garante que os ícones sejam carregados na inicialização
         self.update_button_icons()
-    
+
+    def ir_pagina_anterior(self):
+        if self.pagina_atual > 1:
+            self.pagina_atual -= 1
+            self.atualizar_visualizacao_dados()
+
+    def ir_proxima_pagina(self):
+        if self.pagina_atual < self.total_paginas:
+            self.pagina_atual += 1
+            self.atualizar_visualizacao_dados()
+
     def carregar_dados(self):
-        promocoes = self.db.listar_promocoes()
-        self.atualizar_tabela(promocoes)
-    
+        self.pagina_atual = 1
+        self.search_input.clear()
+        self.atualizar_visualizacao_dados()
+
     def pesquisar_promocoes(self):
-        termo = self.search_input.text()
-        promocoes = self.db.listar_promocoes(filtro=termo) if termo else self.db.listar_promocoes()
+        self.pagina_atual = 1
+        self.atualizar_visualizacao_dados()
+
+    def atualizar_visualizacao_dados(self):
+        filtros = {'termo_pesquisa': self.search_input.text()}
+        total_itens = self.db.contar_promocoes_filtradas(filtros)
+        promocoes = self.db.listar_promocoes_paginado_e_filtrado(
+            filtros, self.pagina_atual, self.itens_por_pagina
+        )
         self.atualizar_tabela(promocoes)
-    
+        self.total_paginas = math.ceil(total_itens / self.itens_por_pagina) or 1
+        self.page_label.setText(f"Página {self.pagina_atual} de {self.total_paginas}")
+        self.prev_page_btn.setEnabled(self.pagina_atual > 1)
+        self.next_page_btn.setEnabled(self.pagina_atual < self.total_paginas)
+
     def atualizar_tabela(self, promocoes):
         self.tabela.setRowCount(0)
         icon_color = self.theme_colors.get('text_color', '#000')
@@ -137,15 +247,11 @@ class PromocoesWindow(QWidget):
             
     # ... O restante do código (abrir formulários, excluir, importar, exportar) permanece o mesmo ...
     def abrir_formulario_promocao(self, promocao_id=None):
-        dialog = FormularioPromocao(self.db, promocao_id)
+        # A chamada agora passa o parent, como corrigido anteriormente
+        dialog = FormularioPromocao(self.db, self.theme_colors, promocao_id, parent=self)
         if dialog.exec_() == QDialog.Accepted:
-            self.carregar_dados()
-    
-    def abrir_promocoes_especiais(self):
-        dialog = PromocoesEspeciaisDialog(self.db)
-        if dialog.exec_() == QDialog.Accepted:
-            self.carregar_dados()
-    
+            self.atualizar_visualizacao_dados()
+            
     def excluir_promocao(self, promocao_id):
         confirmacao = QMessageBox.question(
             self, 
@@ -155,8 +261,8 @@ class PromocoesWindow(QWidget):
         )
         if confirmacao == QMessageBox.Yes:
             if self.db.excluir_promocao(promocao_id):
-                QMessageBox.information(self, "Sucesso", "Promoção excluída com sucesso!")
-                self.carregar_dados()
+                QMessageBox.information(self, "Sucesso", "Promoção excluída.")
+                self.atualizar_visualizacao_dados()
             else:
                 QMessageBox.warning(self, "Erro", "Não foi possível excluir a promoção.")
     
@@ -198,387 +304,192 @@ class PromocoesWindow(QWidget):
             QMessageBox.critical(self, "Erro", f"Erro ao exportar CSV:\n{str(e)}")
 
     def importar_csv(self):
-        try:
-            arquivo, _ = QFileDialog.getOpenFileName(
-                self, "Importar Promoções", "", "Arquivos CSV (*.csv)"
-            )
-            if not arquivo: return
-            
-            confirmacao = QMessageBox.question(
-                self, "Confirmar Importação", "Esta operação irá adicionar novas promoções.\nDeseja continuar?",
-                QMessageBox.Yes | QMessageBox.No
-            )
-            if confirmacao != QMessageBox.Yes: return
-            
-            promocoes_importadas, erros = 0, []
-            
-            with open(arquivo, 'r', encoding='utf-8') as csvfile:
-                reader = csv.DictReader(csvfile)
-                for linha_num, row in enumerate(reader, start=2):
-                    try:
-                        if not all(k in row for k in ['Produto', 'Preço Antigo', 'Preço Promocional', 'Data Início', 'Data Fim']):
-                            erros.append(f"Linha {linha_num}: Campos obrigatórios faltando")
-                            continue
-                        
-                        produto_result = self.db.buscar_produto_por_nome_exato(row['Produto'].strip())
-                        if not produto_result:
-                            erros.append(f"Linha {linha_num}: Produto '{row['Produto']}' não encontrado")
-                            continue
-                        
-                        produto = {'id': produto_result[0], 'nome': produto_result[1]}
-                        
-                        try:
-                            preco_antigo = float(row['Preço Antigo'].replace(',', '.'))
-                            preco_promocional = float(row['Preço Promocional'].replace(',', '.'))
-                        except ValueError:
-                            erros.append(f"Linha {linha_num}: Preços inválidos")
-                            continue
-                        
-                        if not (0 < preco_promocional < preco_antigo):
-                            erros.append(f"Linha {linha_num}: Preços inválidos (promocional deve ser menor que antigo e ambos > 0)")
-                            continue
-                        
-                        data_inicio, data_fim = row['Data Início'].strip(), row['Data Fim'].strip()
-                        valid_date = False
-                        for formato in ['%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y']:
-                            try:
-                                datetime.strptime(data_inicio, formato)
-                                datetime.strptime(data_fim, formato)
-                                if formato != '%Y-%m-%d':
-                                    data_inicio = datetime.strptime(data_inicio, formato).strftime('%Y-%m-%d')
-                                    data_fim = datetime.strptime(data_fim, formato).strftime('%Y-%m-%d')
-                                valid_date = True
-                                break
-                            except ValueError: continue
-                        if not valid_date:
-                            erros.append(f"Linha {linha_num}: Formato de data inválido")
-                            continue
-                        
-                        if self.db.adicionar_promocao(
-                            produto['id'], preco_antigo, preco_promocional, data_inicio, data_fim, row.get('Descrição', '').strip()
-                        ): promocoes_importadas += 1
-                        else: erros.append(f"Linha {linha_num}: Erro ao salvar no banco de dados")
-                    
-                    except Exception as e:
-                        erros.append(f"Linha {linha_num}: Erro inesperado - {str(e)}")
-            
-            self.carregar_dados()
-            
-            mensagem = f"Importação concluída!\nPromoções importadas: {promocoes_importadas}\n"
-            if erros:
-                mensagem += f"Erros: {len(erros)}\n\nPrimeiros 10 erros:\n" + "\n".join(erros[:10])
-                if len(erros) > 10: mensagem += f"\n... e mais {len(erros) - 10} erros."
-                QMessageBox.warning(self, "Importação com Erros", mensagem)
-            else:
-                QMessageBox.information(self, "Sucesso", mensagem)
-        
-        except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Erro ao importar CSV:\n{str(e)}")
+        file_path, _ = QFileDialog.getOpenFileName(self, "Importar Promoções CSV", "", "CSV Files (*.csv)")
+        if not file_path: return
 
+        self.progress_dialog = QProgressDialog("Importando promoções...", "Cancelar", 0, 100, self)
+        self.progress_dialog.setWindowModality(Qt.WindowModal)
+        
+        self.import_thread = PromocaoCsvImportWorker(self.db.db_path, file_path)
+        self.import_thread.progress.connect(self.progress_dialog.setValue)
+        self.import_thread.finished.connect(self.importacao_concluida)
+        self.progress_dialog.canceled.connect(self.import_thread.terminate)
+        self.import_thread.start()
+        self.progress_dialog.exec_()
 
-class PromocoesEspeciaisDialog(QDialog):
-    def __init__(self, db):
-        super().__init__()
-        self.db = db
-        self.initUI()
-        self.carregar_produtos_especiais()
-    
-    def initUI(self):
-        self.setWindowTitle("Promoções Especiais")
-        self.setMinimumWidth(800)
-        self.setMinimumHeight(500)
-        layout = QVBoxLayout(self)
-        
-        self.tabs = QTabWidget()
-        self.tab_estoque_baixo = QWidget()
-        self.tab_vencimento = QWidget()
-        
-        self.setup_tab_estoque_baixo()
-        self.setup_tab_vencimento()
-        
-        self.tabs.addTab(self.tab_estoque_baixo, "Estoque Baixo")
-        self.tabs.addTab(self.tab_vencimento, "Próximos ao Vencimento")
-        layout.addWidget(self.tabs)
-        
-        desconto_group = QFrame()
-        desconto_layout = QHBoxLayout(desconto_group)
-        desconto_label = QLabel("Taxa de Desconto Padrão:")
-        self.taxa_desconto_input = QDoubleSpinBox()
-        self.taxa_desconto_input.setRange(0, 100)
-        self.taxa_desconto_input.setSuffix("%")
-        self.taxa_desconto_input.setValue(10)
-        self.taxa_desconto_input.valueChanged.connect(self.atualizar_precos_promocionais)
-        desconto_layout.addWidget(desconto_label)
-        desconto_layout.addWidget(self.taxa_desconto_input)
-        desconto_layout.addStretch()
-        layout.addWidget(desconto_group)
-        
-        buttons_layout = QHBoxLayout()
-        self.aplicar_button = QPushButton(IconManager.get_icon('confirm', 'white'), " Aplicar Promoções")
-        self.aplicar_button.setObjectName("primaryActionButton")
-        self.aplicar_button.clicked.connect(self.aplicar_promocoes)
-        
-        self.cancelar_button = QPushButton(IconManager.get_icon('cancel'), " Cancelar")
-        self.cancelar_button.clicked.connect(self.reject)
-        
-        buttons_layout.addStretch()
-        buttons_layout.addWidget(self.aplicar_button)
-        buttons_layout.addWidget(self.cancelar_button)
-        layout.addLayout(buttons_layout)
-        
-    # ... O restante da classe PromocoesEspeciaisDialog permanece o mesmo ...
-    def setup_tab_estoque_baixo(self):
-        layout = QVBoxLayout(self.tab_estoque_baixo)
-        self.tabela_estoque_baixo = QTableWidget()
-        self.tabela_estoque_baixo.setColumnCount(8)
-        self.tabela_estoque_baixo.setHorizontalHeaderLabels([
-            "Selecionar", "ID", "Produto", "Quantidade", "Estoque Mínimo", 
-            "Preço Atual", "Taxa de Desconto", "Preço Promocional"
-        ])
-        self.tabela_estoque_baixo.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.tabela_estoque_baixo.setEditTriggers(QTableWidget.NoEditTriggers)
-        layout.addWidget(self.tabela_estoque_baixo)
-    
-    def setup_tab_vencimento(self):
-        layout = QVBoxLayout(self.tab_vencimento)
-        periodo_layout = QHBoxLayout()
-        periodo_label = QLabel("Considerar produtos que vencem em:")
-        self.periodo_combo = QComboBox()
-        self.periodo_combo.addItem("7 dias", 7)
-        self.periodo_combo.addItem("15 dias", 15)
-        self.periodo_combo.addItem("30 dias", 30)
-        self.periodo_combo.addItem("60 dias", 60)
-        self.periodo_combo.setCurrentIndex(2)
-        self.periodo_combo.currentIndexChanged.connect(self.carregar_produtos_vencimento)
-        periodo_layout.addWidget(periodo_label)
-        periodo_layout.addWidget(self.periodo_combo)
-        periodo_layout.addStretch()
-        layout.addLayout(periodo_layout)
-        self.tabela_vencimento = QTableWidget()
-        self.tabela_vencimento.setColumnCount(9)
-        self.tabela_vencimento.setHorizontalHeaderLabels([
-            "Selecionar", "ID", "Produto", "Data Validade", "Dias Restantes", "Quantidade",
-            "Preço Atual", "Taxa de Desconto", "Preço Promocional"
-        ])
-        self.tabela_vencimento.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.tabela_vencimento.setEditTriggers(QTableWidget.NoEditTriggers)
-        layout.addWidget(self.tabela_vencimento)
-    
-    def carregar_produtos_especiais(self):
-        self.carregar_produtos_estoque_baixo()
-        self.carregar_produtos_vencimento()
-    
-    def carregar_produtos_estoque_baixo(self):
-        produtos = self.db.verificar_produtos_estoque_baixo()
-        self.tabela_estoque_baixo.setRowCount(0)
-        for row, produto in enumerate(produtos):
-            self.tabela_estoque_baixo.insertRow(row)
-            checkbox = QWidget()
-            checkbox_layout = QHBoxLayout(checkbox)
-            checkbox_layout.setAlignment(Qt.AlignCenter)
-            checkbox_layout.setContentsMargins(0, 0, 0, 0)
-            check = QRadioButton()
-            checkbox_layout.addWidget(check)
-            preco_atual = produto['preco_venda']
-            taxa_desconto = self.taxa_desconto_input.value()
-            preco_promocional = preco_atual * (1 - taxa_desconto / 100)
-            self.tabela_estoque_baixo.setCellWidget(row, 0, checkbox)
-            self.tabela_estoque_baixo.setItem(row, 1, QTableWidgetItem(str(produto['id'])))
-            self.tabela_estoque_baixo.setItem(row, 2, QTableWidgetItem(produto['nome']))
-            self.tabela_estoque_baixo.setItem(row, 3, QTableWidgetItem(str(produto['quantidade'])))
-            self.tabela_estoque_baixo.setItem(row, 4, QTableWidgetItem(str(produto['estoque_minimo'])))
-            self.tabela_estoque_baixo.setItem(row, 5, QTableWidgetItem(f"R$ {preco_atual:.2f}"))
-            taxa_desconto_widget = QWidget()
-            taxa_layout = QHBoxLayout(taxa_desconto_widget)
-            taxa_layout.setContentsMargins(0, 0, 0, 0)
-            taxa_spin = QDoubleSpinBox()
-            taxa_spin.setRange(0, 100)
-            taxa_spin.setSuffix("%")
-            taxa_spin.setValue(taxa_desconto)
-            taxa_spin.valueChanged.connect(lambda value, r=row: self.atualizar_preco_promocional_item(r, value))
-            taxa_layout.addWidget(taxa_spin)
-            self.tabela_estoque_baixo.setCellWidget(row, 6, taxa_desconto_widget)
-            self.tabela_estoque_baixo.setItem(row, 7, QTableWidgetItem(f"R$ {preco_promocional:.2f}"))
-    
-    def carregar_produtos_vencimento(self):
-        dias = self.periodo_combo.currentData()
-        produtos = self.db.verificar_produtos_vencendo(dias)
-        self.tabela_vencimento.setRowCount(0)
-        hoje = datetime.now().date()
-        for row, produto in enumerate(produtos):
-            self.tabela_vencimento.insertRow(row)
-            checkbox = QWidget()
-            checkbox_layout = QHBoxLayout(checkbox)
-            checkbox_layout.setAlignment(Qt.AlignCenter)
-            checkbox_layout.setContentsMargins(0, 0, 0, 0)
-            check = QRadioButton()
-            checkbox_layout.addWidget(check)
-            data_validade = datetime.strptime(produto['data_validade'], '%Y-%m-%d').date()
-            dias_restantes = (data_validade - hoje).days
-            taxa_desconto_sugerida = min(50, int(50 * (1 - dias_restantes / dias))) if dias_restantes > 0 else 50
-            preco_atual = produto['preco_venda']
-            preco_promocional = preco_atual * (1 - taxa_desconto_sugerida / 100)
-            self.tabela_vencimento.setCellWidget(row, 0, checkbox)
-            self.tabela_vencimento.setItem(row, 1, QTableWidgetItem(str(produto['id'])))
-            self.tabela_vencimento.setItem(row, 2, QTableWidgetItem(produto['nome']))
-            self.tabela_vencimento.setItem(row, 3, QTableWidgetItem(produto['data_validade']))
-            self.tabela_vencimento.setItem(row, 4, QTableWidgetItem(str(dias_restantes)))
-            self.tabela_vencimento.setItem(row, 5, QTableWidgetItem(str(produto['quantidade'])))
-            self.tabela_vencimento.setItem(row, 6, QTableWidgetItem(f"R$ {preco_atual:.2f}"))
-            taxa_desconto_widget = QWidget()
-            taxa_layout = QHBoxLayout(taxa_desconto_widget)
-            taxa_layout.setContentsMargins(0, 0, 0, 0)
-            taxa_spin = QDoubleSpinBox()
-            taxa_spin.setRange(0, 100)
-            taxa_spin.setSuffix("%")
-            taxa_spin.setValue(taxa_desconto_sugerida)
-            taxa_spin.valueChanged.connect(lambda value, r=row: self.atualizar_preco_promocional_vencimento(r, value))
-            taxa_layout.addWidget(taxa_spin)
-            self.tabela_vencimento.setCellWidget(row, 7, taxa_desconto_widget)
-            self.tabela_vencimento.setItem(row, 8, QTableWidgetItem(f"R$ {preco_promocional:.2f}"))
-    
-    def atualizar_precos_promocionais(self):
-        for row in range(self.tabela_estoque_baixo.rowCount()):
-            taxa_widget = self.tabela_estoque_baixo.cellWidget(row, 6)
-            if taxa_widget and (taxa_spin := taxa_widget.findChild(QDoubleSpinBox)):
-                taxa_spin.setValue(self.taxa_desconto_input.value())
-    
-    def atualizar_preco_promocional_item(self, row, taxa_desconto):
-        preco_texto = self.tabela_estoque_baixo.item(row, 5).text().replace('R$', '').strip()
-        try:
-            preco_atual = float(preco_texto)
-            preco_promocional = preco_atual * (1 - taxa_desconto / 100)
-            self.tabela_estoque_baixo.setItem(row, 7, QTableWidgetItem(f"R$ {preco_promocional:.2f}"))
-        except (ValueError, AttributeError): pass
-    
-    def atualizar_preco_promocional_vencimento(self, row, taxa_desconto):
-        preco_texto = self.tabela_vencimento.item(row, 6).text().replace('R$', '').strip()
-        try:
-            preco_atual = float(preco_texto)
-            preco_promocional = preco_atual * (1 - taxa_desconto / 100)
-            self.tabela_vencimento.setItem(row, 8, QTableWidgetItem(f"R$ {preco_promocional:.2f}"))
-        except (ValueError, AttributeError): pass
-    
-    def aplicar_promocoes(self):
-        produtos_selecionados = []
-        tabela_ativa = self.tabela_estoque_baixo if self.tabs.currentIndex() == 0 else self.tabela_vencimento
-        
-        for row in range(tabela_ativa.rowCount()):
-            if (cb_widget := tabela_ativa.cellWidget(row, 0)) and (checkbox := cb_widget.findChild(QRadioButton)) and checkbox.isChecked():
-                produto_id = int(tabela_ativa.item(row, 1).text())
-                preco_antigo_str = tabela_ativa.item(row, 5).text() if self.tabs.currentIndex() == 0 else tabela_ativa.item(row, 6).text()
-                preco_antigo = float(preco_antigo_str.replace('R$', '').strip())
-                taxa_widget = tabela_ativa.cellWidget(row, 6) if self.tabs.currentIndex() == 0 else tabela_ativa.cellWidget(row, 7)
-                taxa_desconto = taxa_widget.findChild(QDoubleSpinBox).value()
-                preco_promo_str = tabela_ativa.item(row, 7).text() if self.tabs.currentIndex() == 0 else tabela_ativa.item(row, 8).text()
-                preco_promocional = float(preco_promo_str.replace('R$', '').strip())
-                
-                if self.tabs.currentIndex() == 0:
-                    descricao = f"Promoção por estoque baixo - {taxa_desconto:.1f}% de desconto"
-                else:
-                    data_validade = tabela_ativa.item(row, 3).text()
-                    descricao = f"Promoção por vencimento em {data_validade} - {taxa_desconto:.1f}% de desconto"
-
-                produtos_selecionados.append({
-                    'produto_id': produto_id, 'preco_antigo': preco_antigo,
-                    'preco_promocional': preco_promocional, 'descricao': descricao
-                })
-        
-        if not produtos_selecionados:
-            QMessageBox.warning(self, "Aviso", "Nenhum produto selecionado!")
-            return
-        
-        confirmacao = QMessageBox.question(self, "Confirmar Promoções", f"Deseja aplicar promoções para {len(produtos_selecionados)} produtos?", QMessageBox.Yes | QMessageBox.No)
-        if confirmacao == QMessageBox.Yes:
-            data_inicio = datetime.now().strftime('%Y-%m-%d')
-            data_fim = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
-            sucesso = all(self.db.adicionar_promocao(p['produto_id'], p['preco_antigo'], p['preco_promocional'], data_inicio, data_fim, p['descricao']) for p in produtos_selecionados)
-            if sucesso:
-                QMessageBox.information(self, "Sucesso", "Promoções aplicadas com sucesso!")
-                self.accept()
-            else:
-                QMessageBox.warning(self, "Erro", "Ocorreu um erro ao aplicar algumas promoções.")
-
+    def importacao_concluida(self, importadas, erros, detalhes):
+        self.progress_dialog.close()
+        self.atualizar_visualizacao_dados()
+        msg = f"Importação concluída!\n\nSucesso: {importadas}\nFalhas: {erros}"
+        if erros > 0:
+            msg += "\n\nPrimeiros erros:\n" + "\n".join(detalhes[:5])
+            QMessageBox.warning(self, "Importação com Erros", msg)
+        else:
+            QMessageBox.information(self, "Importação Concluída", msg)
 
 class FormularioPromocao(QDialog):
-    def __init__(self, db, promocao_id=None):
-        super().__init__()
+    def __init__(self, db, theme_colors, promocao_id=None, parent=None):
+        super().__init__(parent)
         self.db = db
+        self.theme_colors = theme_colors
         self.promocao_id = promocao_id
         self.promocao = None
-        
+        self.produto_selecionado_id = None # Armazena o ID do produto escolhido
+
         if promocao_id:
             self.promocao = self.db.obter_promocao(promocao_id)
-            if not self.promocao:
-                QMessageBox.warning(self, "Erro", "Promoção não encontrada!")
-                self.reject()
-        
+            if self.promocao:
+                self.produto_selecionado_id = self.promocao['produto_id']
+
         self.initUI()
+        self.apply_styles()
         
         if self.promocao:
             self.carregar_dados_promocao()
+        else:
+            self.carregar_produtos_recomendados()
+            self.carregar_todos_os_produtos()
     
     def initUI(self):
         self.setWindowTitle("Cadastro de Promoção")
-        self.setFixedWidth(500)
+        self.setMinimumSize(600, 650)
         layout = QVBoxLayout(self)
+
+        # --- SELEÇÃO DE PRODUTO (NOVA ABORDAGEM COM ABAS) ---
+        produto_group = QGroupBox("1. Selecione o Produto", self)
+        produto_layout = QVBoxLayout(produto_group)
         
-        form_group = QGroupBox("Detalhes da Promoção")
-        form_layout = QFormLayout(form_group)
+        self.tabs_selecao_produto = QTabWidget(self)
         
-        self.produto_combo = QComboBox()
-        self.carregar_produtos()
+        # Aba 1: Produtos Recomendados
+        tab_recomendados = QWidget()
+        layout_recomendados = QVBoxLayout(tab_recomendados)
+        self.tabela_recomendados = QTableWidget(self)
+        self.tabela_recomendados.setColumnCount(4)
+        self.tabela_recomendados.setHorizontalHeaderLabels(["Produto", "Motivo", "Estoque/Validade", "Preço Atual"])
+        self.tabela_recomendados.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.tabela_recomendados.setSelectionBehavior(QTableWidget.SelectRows)
+        self.tabela_recomendados.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.tabela_recomendados.cellClicked.connect(self.selecionar_produto_pela_tabela)
+        layout_recomendados.addWidget(self.tabela_recomendados)
         
-        self.preco_antigo_input = QDoubleSpinBox()
-        self.preco_antigo_input.setReadOnly(True) # Preço antigo não deve ser editável
-        self.preco_antigo_input.setRange(0, 99999.99)
-        self.preco_antigo_input.setPrefix("R$ ")
-        self.preco_antigo_input.setDecimals(2)
+        # Aba 2: Todos os Produtos
+        tab_todos = QWidget()
+        layout_todos = QVBoxLayout(tab_todos)
+        self.combo_todos_produtos = QComboBox(self)
+        self.combo_todos_produtos.currentIndexChanged.connect(self.selecionar_produto_pelo_combo)
+        layout_todos.addWidget(QLabel("Buscar e selecionar um produto específico:", self))
+        layout_todos.addWidget(self.combo_todos_produtos)
+        layout_todos.addStretch()
+
+        self.tabs_selecao_produto.addTab(tab_recomendados, "Recomendados")
+        self.tabs_selecao_produto.addTab(tab_todos, "Todos os Produtos")
+        produto_layout.addWidget(self.tabs_selecao_produto)
+        layout.addWidget(produto_group)
+
+        # --- DETALHES DA PROMOÇÃO ---
+        detalhes_group = QGroupBox("2. Defina os Detalhes da Promoção", self)
+        form_layout = QFormLayout(detalhes_group)
+
+        self.produto_selecionado_label = QLabel("Nenhum produto selecionado")
+        self.produto_selecionado_label.setStyleSheet("font-weight: bold;")
         
-        self.taxa_desconto_input = QDoubleSpinBox()
-        self.taxa_desconto_input.setRange(0, 100)
-        self.taxa_desconto_input.setSuffix("%")
+        self.preco_antigo_input = QDoubleSpinBox(self)
+        self.preco_antigo_input.setReadOnly(True)
+        self.preco_antigo_input.setRange(0, 99999.99); self.preco_antigo_input.setPrefix("R$ ")
+        
+        self.taxa_desconto_input = QDoubleSpinBox(self)
+        self.taxa_desconto_input.setRange(0.1, 100); self.taxa_desconto_input.setSuffix(" %")
         self.taxa_desconto_input.setValue(10)
         self.taxa_desconto_input.valueChanged.connect(self.calcular_preco_promocional)
         
-        self.preco_promocional_input = QDoubleSpinBox()
-        self.preco_promocional_input.setRange(0, 99999.99)
-        self.preco_promocional_input.setPrefix("R$ ")
-        self.preco_promocional_input.setDecimals(2)
+        self.preco_promocional_input = QDoubleSpinBox(self)
+        self.preco_promocional_input.setRange(0, 99999.99); self.preco_promocional_input.setPrefix("R$ ")
         self.preco_promocional_input.valueChanged.connect(self.calcular_taxa_desconto)
         
         self.data_inicio_input = QDateEdit(calendarPopup=True, date=QDate.currentDate())
         self.data_inicio_input.setDisplayFormat("dd/MM/yyyy")
-        
         self.data_fim_input = QDateEdit(calendarPopup=True, date=QDate.currentDate().addDays(30))
         self.data_fim_input.setDisplayFormat("dd/MM/yyyy")
-        
-        self.descricao_input = QLineEdit()
-        
-        form_layout.addRow("Produto:", self.produto_combo)
+        self.descricao_input = QLineEdit(self)
+
+        form_layout.addRow("Produto em Promoção:", self.produto_selecionado_label)
         form_layout.addRow("Preço Original:", self.preco_antigo_input)
         form_layout.addRow("Taxa de Desconto:", self.taxa_desconto_input)
         form_layout.addRow("Preço Promocional:", self.preco_promocional_input)
         form_layout.addRow("Data de Início:", self.data_inicio_input)
         form_layout.addRow("Data de Fim:", self.data_fim_input)
         form_layout.addRow("Descrição:", self.descricao_input)
-        layout.addWidget(form_group)
+        layout.addWidget(detalhes_group)
 
+        # --- BOTÕES DE AÇÃO ---
         button_layout = QHBoxLayout()
-        self.salvar_btn = QPushButton(IconManager.get_icon('save', 'white'), " Salvar")
+        self.salvar_btn = QPushButton(" Salvar Promoção")
         self.salvar_btn.setObjectName("primaryActionButton")
         self.salvar_btn.clicked.connect(self.salvar_promocao)
         
-        self.cancelar_btn = QPushButton(IconManager.get_icon('cancel'), " Cancelar")
+        self.cancelar_btn = QPushButton(" Cancelar")
         self.cancelar_btn.clicked.connect(self.reject)
         
         button_layout.addStretch()
         button_layout.addWidget(self.salvar_btn)
         button_layout.addWidget(self.cancelar_btn)
         layout.addLayout(button_layout)
+    
+    def apply_styles(self):
+        """Aplica os estilos do tema principal a todos os componentes do diálogo."""
+        colors = self.theme_colors
+        # Estilo completo para garantir que todos os widgets herdem a aparência.
+        style = f"""
+            QDialog {{
+                background-color: {colors.get('bg_color', '#fff')};
+                color: {colors.get('text_color', '#000')};
+            }}
+            QGroupBox {{
+                border: 1px solid {colors.get('border_color', '#ccc')};
+                border-radius: 6px; margin-top: 15px; padding: 10px; font-weight: bold;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin; subcontrol-position: top center;
+                padding: 0 10px; background-color: {colors.get('bg_color', '#fff')};
+                color: {colors.get('text_secondary', '#333')};
+            }}
+            QTableWidget {{
+                background-color: {colors.get('surface_color', '#f2f2f7')};
+                border: 1px solid {colors.get('border_color', '#d1d1d6')};
+                gridline-color: {colors.get('border_color', '#d1d1d6')};
+            }}
+            QHeaderView::section {{
+                background-color: {colors.get('bg_color', '#fff')};
+                color: {colors.get('text_color', '#000')};
+                padding: 5px; border: 1px solid {colors.get('border_color', '#d1d1d6')};
+                font-weight: bold;
+            }}
+            QComboBox, QDoubleSpinBox, QDateEdit, QLineEdit {{
+                background-color: {colors.get('bg_color', '#fff')};
+                color: {colors.get('text_color', '#000')};
+                border: 1px solid {colors.get('border_color', '#ccc')};
+                border-radius: 4px; padding: 5px;
+            }}
+            QPushButton {{
+                background-color: transparent; color: {colors.get('text_color', '#000')};
+                border: 1px solid {colors.get('border_color', '#ccc')};
+                padding: 8px 12px; border-radius: 4px; font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {colors.get('button_hover', '#e0e0e0')};
+                border: 1px solid {colors.get('accent_color', '#007aff')};
+            }}
+            #primaryActionButton {{
+                background-color: {colors.get('accent_color', '#007aff')};
+                color: white; border: none;
+            }}
+            #primaryActionButton:hover {{ background-color: #0069d9; }}
+        """
+        self.setStyleSheet(style)
+        self.salvar_btn.setIcon(IconManager.get_icon('save', 'white'))
+        self.cancelar_btn.setIcon(IconManager.get_icon('cancel', colors.get('text_color', '#000')))
         
-        self.produto_combo.currentIndexChanged.connect(self.atualizar_preco_antigo)
-
     # ... O restante da classe FormularioPromocao permanece o mesmo ...
     def calcular_preco_promocional(self):
         preco_antigo = self.preco_antigo_input.value()
@@ -606,72 +517,125 @@ class FormularioPromocao(QDialog):
             self.preco_antigo_input.setValue(0)
             self.preco_promocional_input.setValue(0)
     
+    def carregar_produtos_recomendados(self):
+        self.tabela_recomendados.setRowCount(0)
+        hoje = datetime.now().date()
+        
+        produtos_estoque_baixo = self.db.verificar_produtos_estoque_baixo()
+        produtos_vencendo = self.db.verificar_produtos_vencendo(dias=30)
+        
+        # Adiciona produtos de estoque baixo
+        for produto in produtos_estoque_baixo:
+            row = self.tabela_recomendados.rowCount()
+            self.tabela_recomendados.insertRow(row)
+            self.tabela_recomendados.setItem(row, 0, QTableWidgetItem(produto['nome']))
+            self.tabela_recomendados.setItem(row, 1, QTableWidgetItem("Estoque Baixo"))
+            self.tabela_recomendados.setItem(row, 2, QTableWidgetItem(f"{produto['quantidade']} / {produto['estoque_minimo']}"))
+            self.tabela_recomendados.setItem(row, 3, QTableWidgetItem(f"R$ {produto['preco_venda']:.2f}"))
+            self.tabela_recomendados.item(row, 0).setData(Qt.UserRole, produto['id']) # Armazena o ID
+
+        # Adiciona produtos perto do vencimento (evitando duplicatas)
+        ids_ja_na_tabela = {self.tabela_recomendados.item(r, 0).data(Qt.UserRole) for r in range(self.tabela_recomendados.rowCount())}
+        for produto in produtos_vencendo:
+            if produto['id'] in ids_ja_na_tabela: continue
+            row = self.tabela_recomendados.rowCount()
+            self.tabela_recomendados.insertRow(row)
+            dias_restantes = (datetime.strptime(produto['data_validade'], '%Y-%m-%d').date() - hoje).days
+            self.tabela_recomendados.setItem(row, 0, QTableWidgetItem(produto['nome']))
+            self.tabela_recomendados.setItem(row, 1, QTableWidgetItem("Vencimento Próximo"))
+            self.tabela_recomendados.setItem(row, 2, QTableWidgetItem(f"{dias_restantes} dias"))
+            self.tabela_recomendados.setItem(row, 3, QTableWidgetItem(f"R$ {produto['preco_venda']:.2f}"))
+            self.tabela_recomendados.item(row, 0).setData(Qt.UserRole, produto['id'])
+
+    def carregar_todos_os_produtos(self):
+        self.combo_todos_produtos.blockSignals(True)
+        self.combo_todos_produtos.clear()
+        self.combo_todos_produtos.addItem("Selecione um produto...", None)
+        produtos = self.db.listar_produtos()
+        for produto in produtos:
+            self.combo_todos_produtos.addItem(produto['nome'], produto['id'])
+        self.combo_todos_produtos.blockSignals(False)
+
+    def selecionar_produto_pela_tabela(self, row, column):
+        item = self.tabela_recomendados.item(row, 0)
+        produto_id = item.data(Qt.UserRole)
+        self.selecionar_produto(produto_id)
+
+    def selecionar_produto_pelo_combo(self, index):
+        produto_id = self.combo_todos_produtos.itemData(index)
+        self.selecionar_produto(produto_id)
+        
+    def selecionar_produto(self, produto_id):
+        if not produto_id:
+            self.produto_selecionado_id = None
+            self.produto_selecionado_label.setText("Nenhum produto selecionado")
+            self.preco_antigo_input.setValue(0)
+            return
+
+        produto = self.db.obter_produto(produto_id)
+        if produto:
+            self.produto_selecionado_id = produto['id']
+            self.produto_selecionado_label.setText(produto['nome'])
+            self.preco_antigo_input.setValue(produto['preco_venda'])
+            self.calcular_preco_promocional() # Recalcula o preço com o desconto padrão
+
+    def carregar_dados_promocao(self):
+        if not self.promocao: return
+        self.tabs_selecao_produto.setEnabled(False) # Não permite trocar o produto de uma promoção existente
+        self.selecionar_produto(self.promocao['produto_id']) # Popula os campos do produto
+        
+        self.preco_promocional_input.setValue(self.promocao['preco_promocional'])
+        self.calcular_taxa_desconto() # Calcula a taxa com base nos preços carregados
+        self.data_inicio_input.setDate(QDate.fromString(self.promocao['data_inicio'], "yyyy-MM-dd"))
+        self.data_fim_input.setDate(QDate.fromString(self.promocao['data_fim'], "yyyy-MM-dd"))
+        self.descricao_input.setText(self.promocao['descricao'])
+        
     def salvar_promocao(self):
-        produto_id = self.produto_combo.currentData()
+        """
+        Coleta os dados, valida e salva a promoção no banco de dados.
+        Esta é a implementação completa.
+        """
+        # 1. Validação inicial
+        if not self.produto_selecionado_id:
+            QMessageBox.warning(self, "Ação Necessária", "Por favor, selecione um produto para a promoção.")
+            return
+        
+        # 2. Coletar dados dos widgets
         preco_antigo = self.preco_antigo_input.value()
         preco_promocional = self.preco_promocional_input.value()
         data_inicio = self.data_inicio_input.date().toString("yyyy-MM-dd")
         data_fim = self.data_fim_input.date().toString("yyyy-MM-dd")
-        descricao = self.descricao_input.text()
-        
-        if not produto_id:
-            QMessageBox.warning(self, "Erro", "Selecione um produto!")
-            return
+        descricao = self.descricao_input.text().strip()
+
+        # 3. Validação dos dados
         if not (0 < preco_promocional < preco_antigo):
-            QMessageBox.warning(self, "Erro", "Preço promocional deve ser menor que o preço antigo e ambos maiores que zero!")
+            QMessageBox.warning(self, "Dados Inválidos", "O preço promocional deve ser maior que zero e menor que o preço original.")
             return
+        
         if self.data_inicio_input.date() > self.data_fim_input.date():
-            QMessageBox.warning(self, "Erro", "A data de início deve ser anterior à data de fim!")
+            QMessageBox.warning(self, "Dados Inválidos", "A data de fim da promoção deve ser igual ou posterior à data de início.")
             return
-        
-        if self.promocao_id:
-            resultado = self.db.atualizar_promocao(self.promocao_id, produto_id, preco_antigo, preco_promocional, data_inicio, data_fim, descricao)
-            mensagem = "Promoção atualizada com sucesso!" if resultado else "Erro ao atualizar promoção!"
-        else:
-            resultado = self.db.adicionar_promocao(produto_id, preco_antigo, preco_promocional, data_inicio, data_fim, descricao)
-            mensagem = "Promoção adicionada com sucesso!" if resultado else "Erro ao adicionar promoção!"
-        
-        if resultado:
-            QMessageBox.information(self, "Sucesso", mensagem)
-            self.accept()
-        else:
-            QMessageBox.warning(self, "Erro", mensagem)
 
-    def carregar_dados_promocao(self):
-        if not self.promocao: return
-        
-        if (index := self.produto_combo.findData(self.promocao['produto_id'])) >= 0:
-            self.produto_combo.setCurrentIndex(index)
-        
-        self.preco_antigo_input.setValue(self.promocao['preco_antigo'])
-        self.preco_promocional_input.setValue(self.promocao['preco_promocional'])
-        self.calcular_taxa_desconto()
-        
-        self.data_inicio_input.setDate(QDate.fromString(self.promocao['data_inicio'], "yyyy-MM-dd"))
-        self.data_fim_input.setDate(QDate.fromString(self.promocao['data_fim'], "yyyy-MM-dd"))
-        self.descricao_input.setText(self.promocao['descricao'])
-
-    def carregar_produtos(self):
-        self.produto_combo.clear()
-        self.produto_combo.addItem("Selecione um produto", None)
-        
-        def add_separator_and_title(title):
-            self.produto_combo.insertSeparator(self.produto_combo.count())
-            self.produto_combo.addItem(title, None)
+        # 4. Lógica de salvar (Adicionar ou Atualizar)
+        try:
+            if self.promocao_id:
+                sucesso = self.db.atualizar_promocao(
+                    self.promocao_id, self.produto_selecionado_id, preco_antigo, 
+                    preco_promocional, data_inicio, data_fim, descricao
+                )
+                mensagem = "Promoção atualizada com sucesso!"
+            else:
+                sucesso = self.db.adicionar_promocao(
+                    self.produto_selecionado_id, preco_antigo, preco_promocional, 
+                    data_inicio, data_fim, descricao
+                )
+                mensagem = "Promoção cadastrada com sucesso!"
             
-        produtos_estoque_baixo = self.db.verificar_produtos_estoque_baixo()
-        if produtos_estoque_baixo:
-            add_separator_and_title("--- PRODUTOS COM ESTOQUE BAIXO ---")
-            for p in produtos_estoque_baixo: self.produto_combo.addItem(f"{p['nome']} (Estoque: {p['quantidade']})", p['id'])
+            if sucesso:
+                QMessageBox.information(self, "Sucesso", mensagem)
+                self.accept()
+            else:
+                QMessageBox.warning(self, "Erro no Banco de Dados", "Não foi possível salvar a promoção.")
         
-        produtos_vencendo = self.db.verificar_produtos_vencendo(30)
-        if produtos_vencendo:
-            add_separator_and_title("--- PRODUTOS PRÓXIMOS AO VENCIMENTO ---")
-            for p in produtos_vencendo: self.produto_combo.addItem(f"{p['nome']} (Validade: {p['data_validade']})", p['id'])
-        
-        add_separator_and_title("--- TODOS OS PRODUTOS ---")
-        produtos = self.db.listar_produtos()
-        ids_ja_listados = {p['id'] for p in produtos_estoque_baixo} | {p['id'] for p in produtos_vencendo}
-        for p in produtos:
-            if p['id'] not in ids_ja_listados:
-                self.produto_combo.addItem(p['nome'], p['id'])
+        except Exception as e:
+            QMessageBox.critical(self, "Erro Inesperado", f"Ocorreu um erro ao salvar a promoção:\n{str(e)}")

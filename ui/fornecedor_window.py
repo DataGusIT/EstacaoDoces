@@ -1,26 +1,88 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                            QPushButton, QTableWidget, QTableWidgetItem, QFormLayout,
                            QMessageBox, QHeaderView, QDialog, QFrame, QComboBox, QFileDialog,
-                           QTextEdit, QSpinBox, QCheckBox, QGroupBox, QProgressBar, QSizePolicy)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QFont
+                           QTextEdit, QSpinBox, QCheckBox, QGroupBox, QProgressDialog, QSizePolicy, QProgressBar) # QProgressDialog
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
+from PyQt5.QtGui import QFont, QIcon
 import csv
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email import encoders
 import os
 from datetime import datetime
+import math # Adicionado para paginação
 
-from ui.icon_manager import IconManager # LINHA CORRETA
+# Importações necessárias
+from ui.icon_manager import IconManager
+from database.db_manager import DatabaseManager # Importante para a thread
+
+class FornecedorCsvImportWorker(QThread):
+    """Executa a importação de CSV de fornecedores em uma thread."""
+    progress = pyqtSignal(int)
+    finished = pyqtSignal(int, int, list)
+
+    def __init__(self, db_path, file_path):
+        super().__init__()
+        self.db_path = db_path
+        self.file_path = file_path
+        self.local_db = None
+
+    def run(self):
+        importados = 0
+        erros = 0
+        detalhes_erros = []
+        try:
+            self.local_db = DatabaseManager(self.db_path)
+            
+            with open(self.file_path, 'r', encoding='utf-8') as f:
+                total_linhas = max(1, sum(1 for _ in f) - 1)
+
+            with open(self.file_path, 'r', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                self.local_db.begin_transaction()
+                
+                for i, row in enumerate(reader):
+                    try:
+                        if not row.get('empresa', '').strip():
+                            raise ValueError("Nome da empresa é obrigatório.")
+                        
+                        self.local_db.adicionar_fornecedor(
+                            empresa=row.get('empresa', '').strip(),
+                            representante=row.get('representante', '').strip(),
+                            frequencia_compra=row.get('frequencia_compra', '').strip(),
+                            telefone=row.get('telefone', '').strip(),
+                            email=row.get('email', '').strip(),
+                            endereco=row.get('endereco', '').strip(),
+                            contato=row.get('contato', '').strip()
+                        )
+                        importados += 1
+                    except Exception as e:
+                        erros += 1
+                        detalhes_erros.append(f"Linha {i+2}: {e}")
+                    self.progress.emit(int(((i + 1) / total_linhas) * 100))
+                
+                self.local_db.commit_transaction()
+        except Exception as e:
+            if self.local_db: self.local_db.rollback_transaction()
+            detalhes_erros.append(f"Erro geral: {e}")
+        finally:
+            if self.local_db: self.local_db.fechar()
+        
+        self.finished.emit(importados, erros, detalhes_erros)
 
 class FornecedorWindow(QWidget):
     def __init__(self, db, theme_colors):
         super().__init__()
         self.theme_colors = theme_colors 
         self.db = db
+        # Estado da Paginação
+        self.pagina_atual = 1
+        self.itens_por_pagina = 50
+        self.total_paginas = 1
+        
         self.initUI()
+        self.atualizar_visualizacao_dados()
+        self.update_button_icons()
         self.carregar_dados()
         
     # NOVO MÉTODO: Centraliza a estilização dos botões (copiado da outra classe)
@@ -53,6 +115,45 @@ class FornecedorWindow(QWidget):
         text, bg, hover, pressed = styles.get(style_type, ("black", "#f0f0f0", "#e0e0e0", "#d0d0d0"))
         return base_style.format(text_color=text, bg_color=bg, hover_color=hover, pressed_color=pressed)
     
+    def _get_flat_button_style(self):
+        """Retorna uma string de estilo CSS para botões 'flat' (transparentes)."""
+        text_color = self.theme_colors.get('text_color', '#000000')
+        border_color = self.theme_colors.get('border_color', '#cccccc')
+        hover_color = self.theme_colors.get('highlight_color', 'rgba(128, 128, 128, 0.2)')
+        
+        style = f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {text_color};
+                border: 1px solid {border_color};
+                padding: 8px 12px;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {hover_color};
+                border: 1px solid {text_color};
+            }}
+            QPushButton:pressed {{
+                background-color: {border_color};
+            }}
+        """
+        return style
+    
+    def apply_styles(self):
+        """Aplica todos os estilos aos widgets da janela."""
+        # Botão primário (colorido)
+        self.add_button.setStyleSheet(self._get_button_style("add"))
+        
+        # Botões de ação secundários (transparentes/flat)
+        flat_style = self._get_flat_button_style()
+        self.importar_csv_btn.setStyleSheet(flat_style)
+        self.exportar_csv_btn.setStyleSheet(flat_style)
+        self.verificar_estoque_btn.setStyleSheet(flat_style)
+
+        # Atualiza ícones para a cor do tema
+        self.update_button_icons()
+
     def set_theme(self, theme_colors):
         """Atualiza as cores do tema e os ícones."""
         self.theme_colors = theme_colors
@@ -61,17 +162,22 @@ class FornecedorWindow(QWidget):
         self.carregar_dados()
 
     def update_button_icons(self):
-        """Atualiza os ícones dos botões para refletir o novo tema."""
+        """Atualiza apenas os ícones dos botões."""
         icon_color = self.theme_colors.get('text_color', '#000')
 
         self.search_button.setIcon(IconManager.get_icon('search', icon_color))
-        # Botões de ação principais herdam a cor do tema
+        
+        # O botão primário sempre terá um ícone branco
+        self.add_button.setIcon(IconManager.get_icon('add', 'white'))
+        
+        # Os ícones dos botões flat seguem a cor do texto do tema
         self.importar_csv_btn.setIcon(IconManager.get_icon('import', icon_color))
         self.exportar_csv_btn.setIcon(IconManager.get_icon('export', icon_color))
         self.verificar_estoque_btn.setIcon(IconManager.get_icon('check_stock', icon_color))
         
-        # O botão primário sempre terá um ícone branco para contrastar com o fundo
-        self.add_button.setIcon(IconManager.get_icon('add', 'white'))
+        # Ícones de paginação
+        self.prev_page_btn.setIcon(IconManager.get_icon('angle-left', icon_color))
+        self.next_page_btn.setIcon(IconManager.get_icon('angle-right', icon_color))
     
     def initUI(self):
         layout = QVBoxLayout(self)
@@ -82,7 +188,8 @@ class FornecedorWindow(QWidget):
         search_group = QGroupBox("Pesquisa")
         search_layout = QHBoxLayout(search_group)
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Pesquisar fornecedor...")
+        self.search_input.setPlaceholderText("Pesquisar por empresa, representante ou email...")
+        self.search_input.returnPressed.connect(self.pesquisar_fornecedores)
         self.search_button = QPushButton()
         self.search_button.setToolTip("Buscar Fornecedor")
         self.search_button.clicked.connect(self.pesquisar_fornecedores)
@@ -93,55 +200,79 @@ class FornecedorWindow(QWidget):
         self.tabela = QTableWidget()
         self.tabela.setColumnCount(7)
         self.tabela.setHorizontalHeaderLabels(["ID", "Empresa", "Representante", "Frequência", "Telefone", "Email", "Ações"])
-
-        # Esta linha agora se aplica a TODAS as colunas, incluindo a coluna "Ações"
         self.tabela.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-
         self.tabela.verticalHeader().setVisible(False)
         layout.addWidget(self.tabela)
 
-        action_layout = QHBoxLayout()
-        action_layout.setSpacing(10)
-        botoes_acao = []
+        # Controles de Paginação
+        paginacao_layout = QHBoxLayout()
+        self.prev_page_btn = QPushButton(IconManager.get_icon('angle-left'), " Anterior")
+        self.prev_page_btn.clicked.connect(self.ir_pagina_anterior)
+        self.page_label = QLabel(f"Página {self.pagina_atual} de {self.total_paginas}")
+        self.next_page_btn = QPushButton(IconManager.get_icon('angle-right'), "Próxima")
+        self.next_page_btn.setLayoutDirection(Qt.RightToLeft)
+        self.next_page_btn.clicked.connect(self.ir_proxima_pagina)
+        paginacao_layout.addWidget(self.prev_page_btn)
+        paginacao_layout.addStretch()
+        paginacao_layout.addWidget(self.page_label)
+        paginacao_layout.addStretch()
+        paginacao_layout.addWidget(self.next_page_btn)
+        layout.addLayout(paginacao_layout)
 
-        self.add_button = QPushButton()
-        self.add_button.setText(" Adicionar Fornecedor")
+        action_layout = QHBoxLayout()
+        self.add_button = QPushButton(" Adicionar Fornecedor")
         self.add_button.setObjectName("primaryActionButton")
         self.add_button.clicked.connect(self.abrir_formulario_fornecedor)
-        botoes_acao.append(self.add_button)
 
-        self.importar_csv_btn = QPushButton()
-        self.importar_csv_btn.setText(" Importar CSV")
+        self.importar_csv_btn = QPushButton(" Importar CSV")
         self.importar_csv_btn.clicked.connect(self.importar_csv)
-        botoes_acao.append(self.importar_csv_btn)
 
-        self.exportar_csv_btn = QPushButton()
-        self.exportar_csv_btn.setText(" Exportar CSV")
+        self.exportar_csv_btn = QPushButton(" Exportar CSV")
         self.exportar_csv_btn.clicked.connect(self.exportar_csv)
-        botoes_acao.append(self.exportar_csv_btn)
 
-        self.verificar_estoque_btn = QPushButton()
-        self.verificar_estoque_btn.setText(" Verificar Estoque Baixo")
+        self.verificar_estoque_btn = QPushButton(" Verificar Estoque Baixo")
         self.verificar_estoque_btn.clicked.connect(self.verificar_estoque_baixo)
-        botoes_acao.append(self.verificar_estoque_btn)
-
-        for btn in botoes_acao:
-            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-            action_layout.addWidget(btn)
-
+        
+        action_layout.addWidget(self.add_button)
+        action_layout.addWidget(self.importar_csv_btn)
+        action_layout.addWidget(self.exportar_csv_btn)
+        action_layout.addWidget(self.verificar_estoque_btn)
         layout.addLayout(action_layout)
-        self.update_button_icons() # Define os ícones iniciais
     
+    def ir_pagina_anterior(self):
+        if self.pagina_atual > 1:
+            self.pagina_atual -= 1
+            self.atualizar_visualizacao_dados()
+
+    def ir_proxima_pagina(self):
+        if self.pagina_atual < self.total_paginas:
+            self.pagina_atual += 1
+            self.atualizar_visualizacao_dados()
+            
     def carregar_dados(self):
-        """Carrega os fornecedores do banco de dados para a tabela."""
-        fornecedores = self.db.listar_fornecedores()
-        self.atualizar_tabela(fornecedores)
-    
+        self.pagina_atual = 1
+        self.search_input.clear()
+        self.atualizar_visualizacao_dados()
+
     def pesquisar_fornecedores(self):
-        """Pesquisa fornecedores pelo termo digitado."""
-        termo = self.search_input.text()
-        fornecedores = self.db.listar_fornecedores(filtro=termo) if termo else self.db.listar_fornecedores()
+        self.pagina_atual = 1
+        self.atualizar_visualizacao_dados()
+        
+    def atualizar_visualizacao_dados(self):
+        """Função central que busca, filtra e pagina os dados."""
+        filtros = {'termo_pesquisa': self.search_input.text()}
+        
+        total_itens = self.db.contar_fornecedores_filtrados(filtros)
+        fornecedores = self.db.listar_fornecedores_paginado_e_filtrado(
+            filtros, self.pagina_atual, self.itens_por_pagina
+        )
+        
         self.atualizar_tabela(fornecedores)
+        
+        self.total_paginas = math.ceil(total_itens / self.itens_por_pagina) or 1
+        self.page_label.setText(f"Página {self.pagina_atual} de {self.total_paginas}")
+        self.prev_page_btn.setEnabled(self.pagina_atual > 1)
+        self.next_page_btn.setEnabled(self.pagina_atual < self.total_paginas)
     
     def atualizar_tabela(self, fornecedores):
         self.tabela.setRowCount(0)
@@ -177,25 +308,16 @@ class FornecedorWindow(QWidget):
             self.tabela.setCellWidget(row, 6, acoes_widget)
     
     def abrir_formulario_fornecedor(self, fornecedor_id=None):
-        """Abre o formulário para adicionar ou editar um fornecedor."""
         dialog = FormularioFornecedor(self.db, fornecedor_id)
         if dialog.exec_() == QDialog.Accepted:
-            self.carregar_dados()
-    
+            self.atualizar_visualizacao_dados() # Recarrega a view atual
+
     def excluir_fornecedor(self, fornecedor_id):
-        """Exclui um fornecedor após confirmação."""
-        confirmacao = QMessageBox.question(
-            self,
-            "Confirmar Exclusão",
-            "Tem certeza que deseja excluir este fornecedor? Isso pode afetar produtos associados.",
-            QMessageBox.Yes | QMessageBox.No
-        )
+        confirmacao = QMessageBox.question(self, "Confirmar Exclusão", "...", QMessageBox.Yes | QMessageBox.No)
         if confirmacao == QMessageBox.Yes:
             if self.db.excluir_fornecedor(fornecedor_id):
-                QMessageBox.information(self, "Sucesso", "Fornecedor excluído com sucesso!")
-                self.carregar_dados()
-            else:
-                QMessageBox.warning(self, "Erro", "Não foi possível excluir o fornecedor.")
+                QMessageBox.information(self, "Sucesso", "Fornecedor excluído.")
+                self.atualizar_visualizacao_dados() # Recarrega a view
 
     # ... O restante do código de FornecedorWindow permanece o mesmo (importar, exportar, etc.) ...
     def importar_csv(self):
