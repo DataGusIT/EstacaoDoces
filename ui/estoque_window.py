@@ -2,8 +2,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdi
                            QPushButton, QTableWidget, QTableWidgetItem, QFormLayout,
                            QDateEdit, QComboBox, QMessageBox, QHeaderView, QSpinBox,
                            QDoubleSpinBox, QDialog, QFrame, QToolButton, QGroupBox,
-                           QFileDialog, QCheckBox)
-from PyQt5.QtCore import Qt, QDate
+                           QFileDialog, QCheckBox, QProgressDialog, QGridLayout)
+from PyQt5.QtCore import Qt, QDate, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QIcon, QColor, QBrush
 import os
 from datetime import datetime, timedelta
@@ -14,38 +14,154 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 import csv
 import qtawesome as qta
-from ui.icon_manager import IconManager # LINHA CORRETA
+import math
+from ui.icon_manager import IconManager
+from database.db_manager import DatabaseManager 
 
-class IconManager:
-    """Centraliza a criação de ícones para a tela de Estoque."""
-    ICONS = {
-        'search': 'fa5s.search',
-        'filter': 'fa5s.filter',
-        'clear': 'fa5s.broom',
-        'add': 'fa5s.plus-circle',
-        'report': 'fa5s.file-pdf',
-        'export': 'fa5s.file-csv',
-        'import': 'fa5s.file-upload',
-        'edit': 'fa5s.pencil-alt',
-        'delete': 'fa5s.trash-alt',
-        'break': 'fa5s.unlink', # Ícone para "quebrar" embalagem
-        'save': 'fa5s.save',
-        'cancel': 'fa5s.times-circle',
-        'confirm': 'fa5s.check-circle'
-    }
 
-    @staticmethod
-    def get_icon(name, color='#000000'):
-        icon_name = IconManager.ICONS.get(name, 'fa5s.question-circle')
-        return qta.icon(icon_name, color=color)
+# ================================================================= #
+#       CLASSE CSV IMPORT WORKER TOTALMENTE IMPLEMENTADA            #
+# ================================================================= #
+class CsvImportWorker(QThread):
+    """
+    Executa a importação de CSV em uma thread para não congelar a UI.
+    """
+    progress = pyqtSignal(int)
+    finished = pyqtSignal(int, int, list)
+
+    # MUDANÇA 1: O __init__ agora recebe db_path em vez de um objeto db
+    def __init__(self, db_path, file_path):
+        super().__init__()
+        self.db_path = db_path
+        self.file_path = file_path
+        self.local_db = None # Será a nossa conexão local
+
+    def run(self):
+        produtos_importados = 0
+        produtos_erro = 0
+        erros_detalhes = []
+
+        try:
+            # MUDANÇA 2: Crie uma nova instância do DatabaseManager DENTRO da thread.
+            # Isso cria uma nova conexão que pertence a ESTA thread.
+            self.local_db = DatabaseManager(self.db_path)
+
+            with open(self.file_path, 'r', encoding='utf-8') as f:
+                # Corrigindo um potencial erro se o arquivo estiver vazio
+                linhas = list(f)
+                total_linhas = max(1, len(linhas) - 1)
+
+            with open(self.file_path, 'r', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                
+                # MUDANÇA 3: Use a conexão local (local_db) para todas as operações
+                self.local_db.begin_transaction() 
+
+                for i, row in enumerate(reader):
+                    try:
+                        if not row.get('nome', '').strip():
+                            raise ValueError("Nome do produto é obrigatório")
+
+                        # Adapte esta parte para usar os métodos de extração que você já tem
+                        # (tornando-os estáticos ou recriando a lógica aqui)
+                        preco_compra = self._extrair_preco(row.get('preco_compra', '0'))
+                        preco_venda = self._extrair_preco(row.get('preco_venda', '0'))
+                        margem_lucro = self._extrair_margem(row.get('margem', '0'))
+                        quantidade = self._extrair_quantidade_do_estoque_detalhado(row.get('estoque_detalhado', '0'))
+                        data_validade = self._formatar_data_validade(row.get('validade', ''))
+
+                        produto_data = {
+                            'codigo_barras': row.get('codigo_barras', '').strip(),
+                            'nome': row.get('nome', '').strip(),
+                            'descricao': row.get('descricao', ''),
+                            'quantidade': quantidade,
+                            'estoque_minimo': int(row.get('estoque_minimo', '0') or 0),
+                            'preco_compra': preco_compra,
+                            'margem_lucro': margem_lucro,
+                            'preco_venda': preco_venda,
+                            'data_validade': data_validade,
+                            'localizacao': row.get('localizacao', '').strip() or None,
+                            'fornecedor_id': None,
+                            'categoria': row.get('categoria', '').strip() or None,
+                            'fracionado': 0,
+                            'unidade_medida': 'unidade',
+                            'qtd_por_embalagem': 1,
+                            'preco_unitario_fracao': 0,
+                            'estoque_fracionado': 0
+                        }
+                        
+                        produto_existente = None
+                        if produto_data['codigo_barras']:
+                            produto_existente = self.local_db.buscar_produto_por_codigo_barras(produto_data['codigo_barras'])
+                        if not produto_existente:
+                            produto_existente = self.local_db.buscar_produto_por_nome_exato(produto_data['nome'])
+
+                        if produto_existente:
+                            # A sua função de atualizar espera os parâmetros um por um
+                            self.local_db.atualizar_produto(produto_existente['id'], **produto_data)
+                        else:
+                            # A sua função de adicionar espera os parâmetros um por um
+                            self.local_db.adicionar_produto(**produto_data)
+                        
+                        produtos_importados += 1
+                    except Exception as e:
+                        produtos_erro += 1
+                        erros_detalhes.append(f"Linha {i+2}: {str(e)}")
+                    
+                    self.progress.emit(int(((i + 1) / total_linhas) * 100))
+                
+                self.local_db.commit_transaction()
+
+        except Exception as e:
+            if self.local_db:
+                self.local_db.rollback_transaction()
+            erros_detalhes.append(f"Erro geral: {str(e)}")
+        finally:
+            # MUDANÇA 4: Garanta que a conexão local seja fechada
+            if self.local_db:
+                self.local_db.fechar()
+
+        self.finished.emit(produtos_importados, produtos_erro, erros_detalhes)
+    
+    # Copiei seus métodos de extração aqui para a lógica funcionar
+    def _extrair_quantidade_do_estoque_detalhado(self, estoque_str):
+        try:
+            if estoque_str.isdigit(): return int(estoque_str)
+            import re
+            numeros = re.findall(r'\d+', estoque_str)
+            return int(numeros[0]) if numeros else 0
+        except: return 0
+
+    def _extrair_preco(self, preco_str):
+        try:
+            return float(preco_str.replace('R$', '').replace(' ', '').replace(',', '.'))
+        except: return 0.0
+
+    def _extrair_margem(self, margem_str):
+        try:
+            return float(margem_str.replace('%', '').replace(' ', '').replace(',', '.'))
+        except: return 0.0
+
+    def _formatar_data_validade(self, data_str):
+        if not data_str or not data_str.strip(): return None
+        try:
+            if '/' in data_str: return datetime.strptime(data_str, "%d/%m/%Y").strftime("%Y-%m-%d")
+            return datetime.strptime(data_str, "%Y-%m-%d").strftime("%Y-%m-%d")
+        except: return None
     
 class EstoqueWindow(QWidget):
     def __init__(self, db, theme_colors):
         super().__init__()
         self.db = db
         self.theme_colors = theme_colors
+        self.pagina_atual = 1
+        self.itens_por_pagina = 100 
+        self.total_paginas = 1
+
+        # CORREÇÃO: Chamada única para initUI e para o carregamento de dados
         self.initUI()
-        self.carregar_dados()
+        self.set_theme(self.theme_colors) 
+        self.atualizar_visualizacao_dados()
 
     def _get_button_style(self, style_type):
         """Retorna uma string de estilo CSS para um tipo de botão específico."""
@@ -80,37 +196,36 @@ class EstoqueWindow(QWidget):
         """Atualiza o tema da janela, dos ícones e do cabeçalho da tabela."""
         self.theme_colors = theme_colors
         
-        # Define o estilo para o cabeçalho da tabela
+        # CORREÇÃO 1: Estilo do cabeçalho agora usa 'surface_color' para ser distinto do fundo.
         header_style = f"""
             QHeaderView::section {{
-                background-color: {self.theme_colors.get('surface_color', '#f0f0f0')};
+                background-color: {self.theme_colors.get('surface_color', '#e0e0e0')};
                 color: {self.theme_colors.get('text_color', '#000000')};
                 padding: 4px;
-                border: 1px solid {self.theme_colors.get('border_color', '#d0d0d0')};
+                border: 1px solid {self.theme_colors.get('border_color', '#c0c0c0')};
                 font-weight: bold;
             }}
         """
         self.tabela.horizontalHeader().setStyleSheet(header_style)
         
-        # Atualiza os ícones dos botões
         self.update_button_icons()
+        self.atualizar_visualizacao_dados() # Recarrega para aplicar cores nos ícones da tabela
     
     def update_button_icons(self):
         """Atualiza todos os ícones da interface para refletir o novo tema."""
-        # Botões de filtro
-        self.search_button.setIcon(IconManager.get_icon('search', self.theme_colors.get('text_color', '#000')))
-        self.aplicar_filtro_btn.setIcon(IconManager.get_icon('filter', self.theme_colors.get('text_color', '#000')))
-        self.limpar_filtro_btn.setIcon(IconManager.get_icon('clear', self.theme_colors.get('text_color', '#000')))
+        text_color = self.theme_colors.get('text_color', '#000')
+        
+        self.search_button.setIcon(IconManager.get_icon('search', text_color))
+        self.aplicar_filtro_btn.setIcon(IconManager.get_icon('filter', text_color))
+        self.limpar_filtro_btn.setIcon(IconManager.get_icon('clear', text_color))
+        self.prev_page_btn.setIcon(IconManager.get_icon('angle-left', text_color))
+        self.next_page_btn.setIcon(IconManager.get_icon('angle-right', text_color))
 
-        # Botões de ação principais (geralmente com cor de texto fixa para contraste com o fundo)
         self.add_button.setIcon(IconManager.get_icon('add', 'white'))
         self.relatorio_btn.setIcon(IconManager.get_icon('report', 'white'))
         self.relatorio_estoque_btn.setIcon(IconManager.get_icon('report', 'white'))
         self.exportar_csv_btn.setIcon(IconManager.get_icon('export', 'white'))
         self.importar_csv_btn.setIcon(IconManager.get_icon('import', 'white'))
-
-        # Recarregar a tabela para que os ícones internos também sejam atualizados
-        self.pesquisar_produtos()
     
     def initUI(self):
         layout = QVBoxLayout(self)
@@ -126,7 +241,7 @@ class EstoqueWindow(QWidget):
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Pesquisar produto por nome, descrição ou código de barras...")
         
-        self.search_button = QPushButton(IconManager.get_icon('search'), "") # Apenas ícone
+        self.search_button = QPushButton()
         self.search_button.setToolTip("Buscar")
         self.search_button.clicked.connect(self.pesquisar_produtos)
         search_input_layout.addWidget(self.search_input)
@@ -135,27 +250,32 @@ class EstoqueWindow(QWidget):
         
         filter_layout = QHBoxLayout()
         self.estoque_combo = QComboBox()
-        self.estoque_combo.addItems(["Todos os níveis", "Estoque Baixo", "Estoque Médio", "Estoque Alto"])
+        self.estoque_combo.addItem("Todos os níveis", "todos")
+        self.estoque_combo.addItem("Estoque Baixo", "baixo")
+        self.estoque_combo.addItem("Estoque Médio", "medio")
+        self.estoque_combo.addItem("Estoque Alto", "alto")
         filter_layout.addWidget(QLabel("Nível de Estoque:"))
         filter_layout.addWidget(self.estoque_combo)
         
         self.vencimento_combo = QComboBox()
-        self.vencimento_combo.addItems(["Todos", "Vence em 30 dias", "Vence em 15 dias", "Vencidos"])
+        self.vencimento_combo.addItem("Todos", "todos")
+        self.vencimento_combo.addItem("Vence em 30 dias", "30")
+        self.vencimento_combo.addItem("Vence em 15 dias", "15")
+        self.vencimento_combo.addItem("Vencidos", "vencidos")
         filter_layout.addWidget(QLabel("Vencimento:"))
         filter_layout.addWidget(self.vencimento_combo)
 
         self.categoria_combo = QComboBox()
-        self.categoria_combo.addItem("Todas as categorias")
+        self.categoria_combo.addItem("Todas as categorias", "todas")
         self.carregar_categorias()
         filter_layout.addWidget(QLabel("Categoria:"))
         filter_layout.addWidget(self.categoria_combo)
         
-        # Botões de filtro APENAS COM ÍCONES E TOOLTIP
-        self.aplicar_filtro_btn = QPushButton(IconManager.get_icon('filter'), "")
+        self.aplicar_filtro_btn = QPushButton()
         self.aplicar_filtro_btn.setToolTip("Aplicar Filtros")
         self.aplicar_filtro_btn.clicked.connect(self.aplicar_filtros)
         
-        self.limpar_filtro_btn = QPushButton(IconManager.get_icon('clear'), "")
+        self.limpar_filtro_btn = QPushButton()
         self.limpar_filtro_btn.setToolTip("Limpar Filtros")
         self.limpar_filtro_btn.clicked.connect(self.limpar_filtros)
         
@@ -165,7 +285,6 @@ class EstoqueWindow(QWidget):
         search_layout.addLayout(filter_layout)
         layout.addWidget(search_group)
         
-        # Legenda dos ícones
         legenda_layout = QHBoxLayout()
         estoque_baixo_label = QLabel("Estoque Baixo")
         estoque_baixo_label.setStyleSheet("color: red;")
@@ -179,36 +298,53 @@ class EstoqueWindow(QWidget):
         legenda_layout.addStretch()
         layout.addLayout(legenda_layout)
         
-        # Tabela de produtos
         self.tabela = QTableWidget()
-        self.tabela.setColumnCount(13)
+        # CORREÇÃO 3: Reduzido o número de colunas e removido "ID" dos cabeçalhos
+        self.tabela.setColumnCount(12)
         self.tabela.setHorizontalHeaderLabels([
-            "ID", "Código de Barras", "Nome", "Categoria", "Estoque Detalhado", "Estoque Mín.", 
+            "Código de Barras", "Nome", "Categoria", "Estoque Detalhado", "Estoque Mín.", 
             "Preço Compra", "Margem %", "Preço Venda", "Validade", 
             "Localização", "Fornecedor", "Ações"
         ])
         self.tabela.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.tabela.verticalHeader().setVisible(False)
         layout.addWidget(self.tabela)
+
+        paginacao_layout = QHBoxLayout()
+        paginacao_layout.setAlignment(Qt.AlignCenter)
         
-        # Botões de ação - AGORA COM ESTILOS
+        self.prev_page_btn = QPushButton(" Anterior")
+        self.prev_page_btn.clicked.connect(self.ir_pagina_anterior)
+        
+        self.page_label = QLabel(f"Página {self.pagina_atual} de {self.total_paginas}")
+        
+        self.next_page_btn = QPushButton("Próxima")
+        self.next_page_btn.setLayoutDirection(Qt.RightToLeft)
+        self.next_page_btn.clicked.connect(self.ir_proxima_pagina)
+
+        paginacao_layout.addWidget(self.prev_page_btn)
+        paginacao_layout.addStretch()
+        paginacao_layout.addWidget(self.page_label)
+        paginacao_layout.addStretch()
+        paginacao_layout.addWidget(self.next_page_btn)
+        layout.addLayout(paginacao_layout)
+        
         action_layout = QHBoxLayout()
     
-        self.add_button = QPushButton(IconManager.get_icon('add', 'white'), " Adicionar Produto")
-        # Usamos um objectName para que o tema principal possa estilizá-lo
+        self.add_button = QPushButton(" Adicionar Produto")
         self.add_button.setObjectName("primaryActionButton") 
         self.add_button.clicked.connect(self.abrir_formulario_produto)
 
-        self.relatorio_btn = QPushButton(IconManager.get_icon('report'), " Relatório de Vencimentos")
+        self.relatorio_btn = QPushButton(" Relatório de Vencimentos")
         self.relatorio_btn.clicked.connect(self.relatorio_vencimentos)
 
-        self.relatorio_estoque_btn = QPushButton(IconManager.get_icon('report'), " Relatório de Estoque Baixo")
+        self.relatorio_estoque_btn = QPushButton(" Relatório de Estoque Baixo")
         self.relatorio_estoque_btn.clicked.connect(self.relatorio_estoque_baixo)
         
-        self.exportar_csv_btn = QPushButton(IconManager.get_icon('export'), " Exportar CSV")
+        self.exportar_csv_btn = QPushButton(" Exportar CSV")
         self.exportar_csv_btn.clicked.connect(self.exportar_csv)
 
-        self.importar_csv_btn = QPushButton(IconManager.get_icon('import'), " Importar CSV")
+        self.importar_csv_btn = QPushButton(" Importar CSV")
         self.importar_csv_btn.clicked.connect(self.importar_csv)
 
         action_layout.addWidget(self.add_button)
@@ -217,6 +353,17 @@ class EstoqueWindow(QWidget):
         action_layout.addWidget(self.exportar_csv_btn)
         action_layout.addWidget(self.importar_csv_btn)
         layout.addLayout(action_layout)
+        self.update_button_icons()
+
+    def ir_pagina_anterior(self):
+        if self.pagina_atual > 1:
+            self.pagina_atual -= 1
+            self.atualizar_visualizacao_dados()
+
+    def ir_proxima_pagina(self):
+        if self.pagina_atual < self.total_paginas:
+            self.pagina_atual += 1
+            self.atualizar_visualizacao_dados()
 
     def atualizar_categorias_filtro(self):
         categoria_selecionada = self.categoria_combo.currentData()
@@ -227,100 +374,101 @@ class EstoqueWindow(QWidget):
                 self.categoria_combo.setCurrentIndex(index)
     
     def carregar_dados(self):
-        produtos = self.db.listar_produtos_com_fracionamento()
-        self.atualizar_tabela(produtos)
+        """Agora é apenas uma chamada para a função central."""
+        self.pagina_atual = 1
+        self.atualizar_visualizacao_dados()
         self.carregar_categorias()
 
     def carregar_categorias(self):
-        while self.categoria_combo.count() > 1:
-            self.categoria_combo.removeItem(1)
+        # ... (seu método está correto, mas vamos garantir que o dado 'todas' exista) ...
+        current_data = self.categoria_combo.currentData()
+        self.categoria_combo.clear()
+        self.categoria_combo.addItem("Todas as categorias", "todas")
         categorias = self.db.listar_categorias_unicas()
         for categoria in categorias:
             if categoria and categoria.strip():
                 self.categoria_combo.addItem(categoria, categoria)
+        
+        index = self.categoria_combo.findData(current_data)
+        if index != -1:
+            self.categoria_combo.setCurrentIndex(index)
     
     def pesquisar_produtos(self):
-        termo = self.search_input.text()
-        produtos = self.db.listar_produtos_com_fracionamento(filtro=termo) if termo else self.db.listar_produtos_com_fracionamento()
-        self.atualizar_tabela(produtos)
-        self.carregar_categorias()
-    
+        """Apenas reseta a página e atualiza a visualização."""
+        self.pagina_atual = 1
+        self.atualizar_visualizacao_dados()
+
     def aplicar_filtros(self):
-        filtro_estoque = self.estoque_combo.currentData()
-        filtro_vencimento = self.vencimento_combo.currentData()
-        filtro_categoria = self.categoria_combo.currentData()
-        produtos = self.db.listar_produtos_com_fracionamento()
-        produtos_filtrados = []
-        hoje = datetime.now().date()
-        for produto in produtos:
-            if filtro_categoria != "todas":
-                produto_categoria = (produto['categoria'] or '').lower()
-                if not produto_categoria or produto_categoria != filtro_categoria.lower():
-                    continue
-            if filtro_estoque != "todos":
-                estoque_atual = produto['estoque_total_calculado'] if produto['fracionado'] else produto['quantidade']
-                estoque_minimo = produto['estoque_minimo'] or 0
-                if filtro_estoque == "baixo" and estoque_atual > estoque_minimo:
-                    continue
-                elif filtro_estoque == "medio" and (estoque_atual <= estoque_minimo or estoque_atual > estoque_minimo * 2):
-                    continue
-                elif filtro_estoque == "alto" and estoque_atual <= estoque_minimo * 2:
-                    continue
-            if filtro_vencimento != "todos":
-                data_validade = produto['data_validade']
-                if not data_validade:
-                    if filtro_vencimento != "todos": continue
-                else:
-                    try:
-                        data_validade_obj = datetime.strptime(data_validade, "%Y-%m-%d").date()
-                        dias_para_vencer = (data_validade_obj - hoje).days
-                        if filtro_vencimento == "vencidos" and dias_para_vencer > 0: continue
-                        elif filtro_vencimento == "15" and (dias_para_vencer > 15 or dias_para_vencer <= 0): continue
-                        elif filtro_vencimento == "30" and (dias_para_vencer > 30 or dias_para_vencer <= 0): continue
-                    except:
-                        if filtro_vencimento != "todos": continue
-            produtos_filtrados.append(produto)
-        self.atualizar_tabela(produtos_filtrados)
+        """Apenas reseta a página e atualiza a visualização."""
+        self.pagina_atual = 1
+        self.atualizar_visualizacao_dados()
     
     def limpar_filtros(self):
+        """Limpa os campos, reseta a página e atualiza a visualização."""
         self.estoque_combo.setCurrentIndex(0)
         self.vencimento_combo.setCurrentIndex(0)
         self.categoria_combo.setCurrentIndex(0)
         self.search_input.clear()
-        self.carregar_dados()
+        self.pagina_atual = 1
+        self.atualizar_visualizacao_dados()
+        self.carregar_categorias() # Recarrega as categorias após limpar
+    
+    def atualizar_visualizacao_dados(self):
+        """
+        Função central que busca os filtros da UI, consulta o banco de dados
+        com paginação e filtros, e atualiza a tabela e os controles de paginação.
+        """
+        filtros = {
+            'termo_pesquisa': self.search_input.text(),
+            'estoque': self.estoque_combo.currentData(),
+            'vencimento': self.vencimento_combo.currentData(),
+            'categoria': self.categoria_combo.currentData(),
+        }
+
+        produtos = self.db.listar_produtos_paginado_e_filtrado(
+            filtros=filtros,
+            pagina=self.pagina_atual,
+            itens_por_pagina=self.itens_por_pagina
+        )
+        total_itens = self.db.contar_produtos_filtrados(filtros=filtros)
+        self.atualizar_tabela(produtos)
+
+        self.total_paginas = math.ceil(total_itens / self.itens_por_pagina) or 1
+        
+        self.page_label.setText(f"Página {self.pagina_atual} de {self.total_paginas}")
+        self.prev_page_btn.setEnabled(self.pagina_atual > 1)
+        self.next_page_btn.setEnabled(self.pagina_atual < self.total_paginas)
     
     def atualizar_tabela(self, produtos):
         self.tabela.setRowCount(0)
-        self.tabela.setColumnCount(13)
-        self.tabela.setHorizontalHeaderLabels([
-            "ID", "Código de Barras", "Nome", "Categoria", "Estoque Detalhado", "Estoque Mín.", 
-            "Preço Compra", "Margem %", "Preço Venda", "Validade", 
-            "Localização", "Fornecedor", "Ações"
-        ])
-        
+        icon_color = self.theme_colors.get('text_color', '#000')
         hoje = datetime.now().date()
         
         for row, produto in enumerate(produtos):
             self.tabela.insertRow(row)
             
-            # Função auxiliar para obter valores de forma segura
+            # ===== INÍCIO DA CORREÇÃO =====
             def get_value(key, default=""):
+                """
+                Obtém um valor de um objeto sqlite3.Row de forma segura.
+                Verifica se a chave (nome da coluna) existe antes de acessá-la.
+                """
                 return produto[key] if key in produto.keys() else default
+            # ===== FIM DA CORREÇÃO =====
 
-            self.tabela.setItem(row, 0, QTableWidgetItem(str(get_value('id', 0))))
-            self.tabela.setItem(row, 1, QTableWidgetItem(get_value('codigo_barras', '')))
+            # O restante do método continua igual, mas agora usando a função corrigida
+            self.tabela.setItem(row, 0, QTableWidgetItem(get_value('codigo_barras', '')))
             
             nome_produto = get_value('nome', 'Produto Desconhecido')
             is_fracionado = bool(get_value('fracionado', False))
-            
             if is_fracionado:
                 nome_produto += f" (Frac. - {get_value('unidade_medida', 'un')})"
-            self.tabela.setItem(row, 2, QTableWidgetItem(nome_produto))
-            self.tabela.setItem(row, 3, QTableWidgetItem(get_value('categoria', "Sem categoria")))
+            self.tabela.setItem(row, 1, QTableWidgetItem(nome_produto))
+
+            self.tabela.setItem(row, 2, QTableWidgetItem(get_value('categoria', "Sem categoria")))
             
             quantidade = get_value('quantidade', 0)
             estoque_fracionado = get_value('estoque_fracionado', 0)
-            
             if is_fracionado:
                 estoque_total = get_value('estoque_total_calculado', 0)
                 quantidade_display = f"{quantidade} emb. + {estoque_fracionado} {get_value('unidade_medida', 'un')} (Total: {estoque_total})"
@@ -328,27 +476,24 @@ class EstoqueWindow(QWidget):
             else:
                 quantidade_display = str(quantidade)
                 tooltip_text = f"Quantidade: {quantidade}"
-            
             quantidade_item = QTableWidgetItem(quantidade_display)
             quantidade_item.setToolTip(tooltip_text)
-            
             estoque_minimo = get_value('estoque_minimo', 0)
-            estoque_atual = get_value('estoque_total_calculado', quantidade) # Usa estoque_total se existir, senão o normal
-            
+            estoque_atual = get_value('estoque_total_calculado', quantidade)
             if estoque_atual <= estoque_minimo:
                 quantidade_item.setForeground(QBrush(QColor('red')))
                 quantidade_item.setToolTip(quantidade_item.toolTip() + "\nESTOQUE ABAIXO DO MÍNIMO!")
+            self.tabela.setItem(row, 3, quantidade_item)
             
-            self.tabela.setItem(row, 4, quantidade_item)
-            self.tabela.setItem(row, 5, QTableWidgetItem(str(estoque_minimo)))
-            self.tabela.setItem(row, 6, QTableWidgetItem(f"R$ {get_value('preco_compra', 0):.2f}"))
-            self.tabela.setItem(row, 7, QTableWidgetItem(f"{get_value('margem_lucro', 0):.2f}%"))
+            self.tabela.setItem(row, 4, QTableWidgetItem(str(estoque_minimo)))
+            self.tabela.setItem(row, 5, QTableWidgetItem(f"R$ {get_value('preco_compra', 0):.2f}"))
+            self.tabela.setItem(row, 6, QTableWidgetItem(f"{get_value('margem_lucro', 0):.2f}%"))
             
             if is_fracionado and get_value('preco_unitario_fracao', 0):
                 preco_display = f"Emb: R$ {get_value('preco_venda', 0):.2f} | Un: R$ {get_value('preco_unitario_fracao', 0):.2f}"
             else:
                 preco_display = f"R$ {get_value('preco_venda', 0):.2f}"
-            self.tabela.setItem(row, 8, QTableWidgetItem(preco_display))
+            self.tabela.setItem(row, 7, QTableWidgetItem(preco_display))
             
             validade_str = get_value('data_validade', '')
             validade_item = QTableWidgetItem(validade_str)
@@ -365,25 +510,23 @@ class EstoqueWindow(QWidget):
                     elif dias_para_vencer <= 30:
                         validade_item.setForeground(QBrush(QColor('orange')))
                         validade_item.setToolTip(f"Vence em {dias_para_vencer} dias!")
-                except (ValueError, TypeError): 
-                    pass # Ignora se a data for inválida
+                except (ValueError, TypeError): pass
+            self.tabela.setItem(row, 8, validade_item)
+
+            self.tabela.setItem(row, 9, QTableWidgetItem(get_value('localizacao', '')))
+            self.tabela.setItem(row, 10, QTableWidgetItem(get_value('fornecedor_nome', "N/A")))
             
-            self.tabela.setItem(row, 9, validade_item)
-            self.tabela.setItem(row, 10, QTableWidgetItem(get_value('localizacao', '')))
-            self.tabela.setItem(row, 11, QTableWidgetItem(get_value('fornecedor_nome', "N/A")))
-            
-            # Botões de ação com ícones e tooltips
             acoes_widget = QWidget()
             acoes_layout = QHBoxLayout(acoes_widget)
             acoes_layout.setContentsMargins(0, 0, 0, 0)
             acoes_layout.setSpacing(5)
             
-            editar_btn = QPushButton(IconManager.get_icon('edit', 'black'), "")
+            editar_btn = QPushButton(IconManager.get_icon('edit', icon_color), "")
             editar_btn.setToolTip("Editar Produto")
             editar_btn.setFixedSize(30, 30)
             editar_btn.clicked.connect(lambda _, p_id=get_value('id'): self.abrir_formulario_produto(p_id))
             
-            excluir_btn = QPushButton(IconManager.get_icon('delete', 'white'), "")
+            excluir_btn = QPushButton(IconManager.get_icon('delete', icon_color), "")
             excluir_btn.setToolTip("Excluir Produto")
             excluir_btn.setFixedSize(30, 30)
             excluir_btn.clicked.connect(lambda _, p_id=get_value('id'): self.excluir_produto(p_id))
@@ -391,32 +534,38 @@ class EstoqueWindow(QWidget):
             acoes_layout.addWidget(editar_btn)
             acoes_layout.addWidget(excluir_btn)
             
-            ## =============================================== ##
-            ##          LINHA CRÍTICA CORRIGIDA AQUI           ##
-            ## =============================================== ##
             if is_fracionado and quantidade > 0:
-                quebrar_btn = QPushButton(IconManager.get_icon('break', 'white'), "")
+                quebrar_btn = QPushButton(IconManager.get_icon('break', icon_color), "")
                 quebrar_btn.setToolTip("Quebrar embalagem em unidades")
                 quebrar_btn.setFixedSize(30, 30)
                 quebrar_btn.clicked.connect(lambda _, p_id=get_value('id'): self.abrir_dialog_quebrar_embalagem(p_id))
                 acoes_layout.addWidget(quebrar_btn)
             
-            self.tabela.setCellWidget(row, 12, acoes_widget)
+            self.tabela.setCellWidget(row, 11, acoes_widget)
 
     def abrir_dialog_quebrar_embalagem(self, produto_id):
         produto_info = self.db.obter_info_estoque_fracionado(produto_id)
         if not produto_info or not produto_info['fracionado']:
             QMessageBox.warning(self, "Erro", "Este produto não é fracionado!")
             return
-        dialog = DialogQuebrarEmbalagem(self.db, produto_info)
+        
+        # --- ALTERAÇÃO NECESSÁRIA AQUI ---
+        # Adicione self.theme_colors como o terceiro argumento
+        dialog = DialogQuebrarEmbalagem(self.db, produto_info, self.theme_colors)
+        
         if dialog.exec_() == QDialog.Accepted:
-            self.carregar_dados()
+            self.carregar_dados() # Você pode usar self.atualizar_visualizacao_dados() aqui também
     
     def abrir_formulario_produto(self, produto_id=None):
-        dialog = FormularioProduto(self.db, produto_id)
+        dialog = FormularioProduto(self.db, produto_id, self.theme_colors)
+
+        # --- LINHA ADICIONADA ---
+        # Faz o diálogo abrir maximizado, ocupando a tela inteira.
+        dialog.showMaximized()
+
         if dialog.exec_() == QDialog.Accepted:
             self.carregar_dados()
-            self.atualizar_categorias_filtro() # Atualiza o filtro de categorias
+            self.atualizar_categorias_filtro()  
     
     def excluir_produto(self, produto_id):
         confirmacao = QMessageBox.question(
@@ -894,141 +1043,59 @@ class EstoqueWindow(QWidget):
             QMessageBox.critical(self, "Erro", f"Erro ao exportar CSV: {str(e)}")
 
     def importar_csv(self):
-        """Importa dados de um arquivo CSV para o estoque."""
-        try:
-            # Solicitar arquivo para importar
-            file_path, _ = QFileDialog.getOpenFileName(
-                self, "Importar CSV para Estoque", 
-                os.path.expanduser("~"),
-                "CSV Files (*.csv)"
-            )
-            
-            if not file_path:
-                return  # Cancelado pelo usuário
-            
-            # Confirmação antes de importar
-            confirmacao = QMessageBox.question(
-                self, 
-                "Confirmar Importação",
-                "Esta operação irá importar os dados do CSV.\n"
-                "Produtos com mesmo código de barras serão atualizados.\n"
-                "Deseja continuar?",
-                QMessageBox.Yes | QMessageBox.No
-            )
-            
-            if confirmacao != QMessageBox.Yes:
-                return
-            
-            produtos_importados = 0
-            produtos_erro = 0
-            erros_detalhes = []
-            
-            # Ler CSV
-            with open(file_path, 'r', encoding='utf-8') as csvfile:
-                reader = csv.DictReader(csvfile)
-                
-                for linha_num, row in enumerate(reader, start=2):  # Start=2 porque linha 1 é cabeçalho
-                    try:
-                        # Validar dados obrigatórios
-                        if not row.get('nome', '').strip():
-                            erros_detalhes.append(f"Linha {linha_num}: Nome do produto é obrigatório")
-                            produtos_erro += 1
-                            continue
-                        
-                        # Preparar dados para inserção/atualização
-                        produto_data = {
-                            'codigo_barras': row.get('codigo_barras', '').strip(),
-                            'nome': row.get('nome', '').strip(),
-                            'categoria': row.get('categoria', '').strip() or None,
-                            'quantidade': self._extrair_quantidade_do_estoque_detalhado(row.get('estoque_detalhado', '0')),
-                            'estoque_minimo': int(row.get('estoque_minimo', '0') or 0),
-                            'preco_compra': self._extrair_preco(row.get('preco_compra', '0')),
-                            'margem_lucro': self._extrair_margem(row.get('margem', '0')),
-                            'preco_venda': self._extrair_preco(row.get('preco_venda', '0')),
-                            'data_validade': self._formatar_data_validade(row.get('validade', '')),
-                            'localizacao': row.get('localizacao', '').strip() or None,
-                            'fornecedor_id': None  # Por simplicidade, não importamos fornecedor por agora
-                        }
-                        
-                        # Verificar se produto já existe (por código de barras ou nome)
-                        produto_existente = None
-                        if produto_data['codigo_barras']:
-                            produto_existente = self.db.buscar_produto_por_codigo_barras(produto_data['codigo_barras'])
-                        
-                        if not produto_existente:
-                            produto_existente = self.db.buscar_produto_por_nome_exato(produto_data['nome'])
-                        
-                        if produto_existente:
-                            # Atualizar produto existente
-                            if self.db.atualizar_produto(
-                                produto_existente['id'],
-                                produto_data['codigo_barras'],
-                                produto_data['nome'],
-                                produto_data.get('descricao', ''),  # Campo que estava faltando
-                                produto_data['quantidade'],
-                                produto_data['estoque_minimo'],
-                                produto_data['preco_compra'],
-                                produto_data['margem_lucro'],
-                                produto_data['preco_venda'],
-                                produto_data['data_validade'],
-                                produto_data['localizacao'],
-                                produto_data['fornecedor_id'],
-                                produto_data.get('categoria')
-                            ):
-                                produtos_importados += 1
-                            else:
-                                erros_detalhes.append(f"Linha {linha_num}: Erro ao atualizar produto '{produto_data['nome']}'")
-                                produtos_erro += 1
-                        else:
-                            # Criar novo produto
-                            produto_id = self.db.adicionar_produto(
-                                produto_data['codigo_barras'],
-                                produto_data['nome'],
-                                produto_data.get('descricao', ''),  # Campo que estava faltando
-                                produto_data['quantidade'],
-                                produto_data['estoque_minimo'],
-                                produto_data['preco_compra'],
-                                produto_data['margem_lucro'],
-                                produto_data['preco_venda'],
-                                produto_data['data_validade'],
-                                produto_data['localizacao'],
-                                produto_data['fornecedor_id'],
-                                produto_data.get('categoria')
-                            )
-                            
-                            if produto_id:
-                                produtos_importados += 1
-                            else:
-                                erros_detalhes.append(f"Linha {linha_num}: Erro ao criar produto '{produto_data['nome']}'")
-                                produtos_erro += 1
-                                
-                    except Exception as e:
-                        erros_detalhes.append(f"Linha {linha_num}: {str(e)}")
-                        produtos_erro += 1
-            
-            # Recarregar dados
-            self.carregar_dados()
-            
-            # Mostrar resultado
-            mensagem = f"Importação concluída!\n\n"
-            mensagem += f"Produtos importados/atualizados: {produtos_importados}\n"
-            mensagem += f"Erros encontrados: {produtos_erro}\n"
-            
-            if erros_detalhes:
-                mensagem += f"\nDetalhes dos erros (primeiros 10):\n"
-                for erro in erros_detalhes[:10]:
-                    mensagem += f"• {erro}\n"
-                
-                if len(erros_detalhes) > 10:
-                    mensagem += f"... e mais {len(erros_detalhes) - 10} erros."
-            
-            if produtos_erro > 0:
-                QMessageBox.warning(self, "Importação com Erros", mensagem)
-            else:
-                QMessageBox.information(self, "Importação Concluída", mensagem)
-                
-        except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Erro ao importar CSV: {str(e)}")
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Importar CSV para Estoque", os.path.expanduser("~"), "CSV Files (*.csv)"
+        )
+        if not file_path:
+            return
+
+        confirmacao = QMessageBox.question(
+            self, "Confirmar Importação",
+            "A importação será executada em segundo plano.\nDeseja continuar?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if confirmacao != QMessageBox.Yes:
+            return
+
+        # Configura o diálogo de progresso
+        self.progress_dialog = QProgressDialog("Importando dados do CSV...", "Cancelar", 0, 100, self)
+        self.progress_dialog.setWindowModality(Qt.WindowModal)
+        self.progress_dialog.setAutoClose(True)
+        self.progress_dialog.canceled.connect(self.cancelar_importacao)
+
+        # Cria e inicia a thread
+        self.import_thread = CsvImportWorker(self.db.db_path, file_path)
+    
+        self.import_thread.progress.connect(self.progress_dialog.setValue)
+        self.import_thread.finished.connect(self.importacao_concluida)
+        self.import_thread.start()
+        
+        self.progress_dialog.show()
+
+    def cancelar_importacao(self):
+        if self.import_thread and self.import_thread.isRunning():
+            self.import_thread.terminate() # Encerramento forçado
+            QMessageBox.warning(self, "Cancelado", "A importação foi cancelada pelo usuário.")
+
+    def importacao_concluida(self, importados, erros, detalhes_erros):
+        self.progress_dialog.close()
+        
+        # Recarrega os dados na tela
+        self.atualizar_visualizacao_dados()
+
+        mensagem = f"Importação concluída!\n\n"
+        mensagem += f"Produtos importados/atualizados: {importados}\n"
+        mensagem += f"Erros encontrados: {erros}\n"
+        
+        if detalhes_erros:
+            # Exibe apenas os primeiros erros para não sobrecarregar a mensagem
+            mensagem += "\nDetalhes dos erros (primeiros 10):\n" + "\n".join(detalhes_erros[:10])
+
+        if erros > 0:
+            QMessageBox.warning(self, "Importação com Erros", mensagem)
+        else:
+            QMessageBox.information(self, "Importação Concluída", mensagem)
+
 
     def _extrair_quantidade_do_estoque_detalhado(self, estoque_str):
         """Extrai a quantidade numérica do campo estoque detalhado."""
@@ -1095,10 +1162,11 @@ class EstoqueWindow(QWidget):
 
 # Nenhuma alteração necessária nas classes FormularioProduto e DialogQuebrarEmbalagem
 class FormularioProduto(QDialog):
-    def __init__(self, db, produto_id=None):
+    def __init__(self, db, produto_id=None, theme_colors=None):
         super().__init__()
         self.db = db
         self.produto_id = produto_id
+        self.theme_colors = theme_colors if theme_colors else {}
         self.produto = None
         
         if produto_id:
@@ -1106,428 +1174,448 @@ class FormularioProduto(QDialog):
             if not self.produto:
                 QMessageBox.warning(self, "Erro", "Produto não encontrado!")
                 self.reject()
-        
+                return
+
         self.initUI()
+        self.apply_styles()
         
         if self.produto:
             self.carregar_dados_produto()
-    
+
     def initUI(self):
-        # Configurar janela
-        self.setWindowTitle("Cadastro de Produto")
-        self.setFixedWidth(600)
+        self.setWindowTitle("Formulário de Produto")
         
-        # Layout principal
-        layout = QVBoxLayout(self)
+        main_layout = QVBoxLayout(self)
         
-        # Formulário
-        form_layout = QFormLayout()
+        grid_layout = QGridLayout()
+        grid_layout.setSpacing(20)
+
+        # --- COLUNA 1: INFORMAÇÕES DO PRODUTO ---
+        info_group = QGroupBox("Informações do Produto")
+        info_form_layout = QFormLayout(info_group)
+        info_form_layout.setRowWrapPolicy(QFormLayout.WrapAllRows)
         
-        # Campos do formulário
         self.codigo_barras_input = QLineEdit()
         self.nome_input = QLineEdit()
         self.descricao_input = QLineEdit()
-        
-        # Quantidade
-        self.quantidade_input = QSpinBox()
-        self.quantidade_input.setRange(0, 99999)
-        
-        # Estoque mínimo
-        self.estoque_minimo_input = QSpinBox()
-        self.estoque_minimo_input.setRange(0, 99999)
-        
-        # Preço de compra
-        self.preco_compra_input = QDoubleSpinBox()
-        self.preco_compra_input.setRange(0, 99999.99)
-        self.preco_compra_input.setPrefix("R$ ")
-        self.preco_compra_input.setDecimals(2)
-        self.preco_compra_input.valueChanged.connect(self.calcular_preco_venda)
-        
-        # Margem de lucro
-        self.margem_lucro_input = QDoubleSpinBox()
-        self.margem_lucro_input.setRange(0, 999.99)
-        self.margem_lucro_input.setSuffix("%")
-        self.margem_lucro_input.setDecimals(2)
-        self.margem_lucro_input.setValue(30.0)  # Valor padrão de 30%
-        self.margem_lucro_input.valueChanged.connect(self.calcular_preco_venda)
-        
-        # Preço de venda
-        self.preco_venda_input = QDoubleSpinBox()
-        self.preco_venda_input.setRange(0, 99999.99)
-        self.preco_venda_input.setPrefix("R$ ")
-        self.preco_venda_input.setDecimals(2)
-        self.preco_venda_input.valueChanged.connect(self.calcular_margem_lucro)
-        
-        # Data de validade
-        self.data_validade_input = QDateEdit()
-        self.data_validade_input.setDisplayFormat("dd/MM/yyyy")
-        self.data_validade_input.setCalendarPopup(True)
-        self.data_validade_input.setDate(QDate.currentDate().addDays(30))  # Default para 30 dias
-        
+        self.categoria_combo = QComboBox(); self.categoria_combo.setEditable(True); self.carregar_categorias()
+        self.fornecedor_combo = QComboBox(); self.carregar_fornecedores()
         self.localizacao_input = QLineEdit()
+        
+        # ===== INÍCIO DA CORREÇÃO PRINCIPAL =====
+        # Usando os nomes semânticos (apelidos) definidos no IconManager
+        info_form_layout.addRow("Código de Barras:", self._create_input_with_icon('barcode', self.codigo_barras_input))
+        info_form_layout.addRow("Nome do Produto:", self._create_input_with_icon('box', self.nome_input))
+        info_form_layout.addRow("Descrição:", self._create_input_with_icon('comment-alt', self.descricao_input))
+        info_form_layout.addRow("Categoria:", self._create_input_with_icon('tags', self.categoria_combo))
+        info_form_layout.addRow("Fornecedor:", self._create_input_with_icon('truck', self.fornecedor_combo))
+        info_form_layout.addRow("Localização:", self._create_input_with_icon('map-marker-alt', self.localizacao_input))
 
-        self.fracionado_checkbox = QCheckBox("Produto Fracionado")
-        self.fracionado_checkbox.toggled.connect(self.toggle_campos_fracionado)
-        
-        # Campos específicos para fracionamento
-        self.unidade_medida_input = QLineEdit()
-        self.unidade_medida_input.setPlaceholderText("Ex: kg, litros, metros, etc.")
-        
-        self.qtd_por_embalagem_input = QSpinBox()
-        self.qtd_por_embalagem_input.setRange(1, 9999)
-        self.qtd_por_embalagem_input.setValue(1)
-        # self.qtd_por_embalagem_input.valueChanged.connect(self.calcular_preco_venda) # ADICIONE ESTA LINHA
-        
-        self.preco_unitario_fracao_input = QDoubleSpinBox()
-        self.preco_unitario_fracao_input.setRange(0, 99999.99)
-        self.preco_unitario_fracao_input.setPrefix("R$ ")
-        self.preco_unitario_fracao_input.setDecimals(2)
-        
-        self.estoque_fracionado_input = QSpinBox()
-        self.estoque_fracionado_input.setRange(0, 99999)
-        
-        self.fornecedor_combo = QComboBox()
-        self.carregar_fornecedores()
+        # --- COLUNA 2: ESTOQUE E PRECIFICAÇÃO ---
+        preco_group = QGroupBox("Estoque e Precificação")
+        preco_form_layout = QFormLayout(preco_group)
+        preco_form_layout.setRowWrapPolicy(QFormLayout.WrapAllRows)
 
-        self.categoria_combo = QComboBox()
-        self.categoria_combo.setEditable(True)  # Permite criar nova categoria
-        self.carregar_categorias()
-        
-        # Adicionar campos ao formulário
-        form_layout.addRow("Código de Barras:", self.codigo_barras_input)
-        form_layout.addRow("Nome:", self.nome_input)
-        form_layout.addRow("Descrição:", self.descricao_input)
-        form_layout.addRow("Categoria:", self.categoria_combo)
-        form_layout.addRow("Quantidade:", self.quantidade_input)
-        form_layout.addRow("Estoque Mínimo:", self.estoque_minimo_input)
-        form_layout.addRow("Preço de Compra:", self.preco_compra_input)
-        form_layout.addRow("Margem de Lucro:", self.margem_lucro_input)
-        form_layout.addRow("Preço de Venda:", self.preco_venda_input)
-        form_layout.addRow("Data de Validade:", self.data_validade_input)
-        form_layout.addRow("Localização:", self.localizacao_input)
-        form_layout.addRow("Fornecedor:", self.fornecedor_combo)
-        form_layout.addRow("", self.fracionado_checkbox)
-        form_layout.addRow("Unidade de Medida:", self.unidade_medida_input)
-        form_layout.addRow("Qtd por Embalagem:", self.qtd_por_embalagem_input)
-        form_layout.addRow("Preço Unitário (Fração):", self.preco_unitario_fracao_input)
-        form_layout.addRow("Estoque Fracionado:", self.estoque_fracionado_input)
+        self.quantidade_input = QSpinBox(); self.quantidade_input.setRange(0, 99999)
+        self.estoque_minimo_input = QSpinBox(); self.estoque_minimo_input.setRange(0, 99999)
+        self.preco_compra_input = QDoubleSpinBox(); self.preco_compra_input.setRange(0, 99999.99); self.preco_compra_input.setPrefix("R$ ")
+        self.margem_lucro_input = QDoubleSpinBox(); self.margem_lucro_input.setRange(0, 999.99); self.margem_lucro_input.setSuffix(" %")
+        self.preco_venda_input = QDoubleSpinBox(); self.preco_venda_input.setRange(0, 99999.99); self.preco_venda_input.setPrefix("R$ ")
+        self.data_validade_input = QDateEdit(calendarPopup=True); self.data_validade_input.setDisplayFormat("dd/MM/yyyy")
 
-         # Inicialmente desabilitar campos de fracionamento
-        self.toggle_campos_fracionado()
+        preco_form_layout.addRow("Quantidade:", self._create_input_with_icon('estoque', self.quantidade_input))
+        preco_form_layout.addRow("Estoque Mínimo:", self._create_input_with_icon('estoque_baixo', self.estoque_minimo_input))
+        preco_form_layout.addRow("Preço de Compra:", self._create_input_with_icon('dollar-sign', self.preco_compra_input))
+        preco_form_layout.addRow("Margem de Lucro:", self._create_input_with_icon('percentage', self.margem_lucro_input))
+        preco_form_layout.addRow("Preço de Venda:", self._create_input_with_icon('caixa', self.preco_venda_input))
+        preco_form_layout.addRow("Data de Validade:", self._create_input_with_icon('vencimentos', self.data_validade_input))
 
-        layout.addLayout(form_layout)
+        grid_layout.addWidget(info_group, 0, 0)
+        grid_layout.addWidget(preco_group, 0, 1)
+
+        # --- LINHA 2: GRUPO DE FRACIONAMENTO ---
+        self.fracionado_group = QGroupBox("Produto Fracionado")
+        self.fracionado_group.setCheckable(True)
+        self.fracionado_group.setChecked(False)
+        fracionado_layout = QFormLayout(self.fracionado_group)
         
-        # Separador
-        separador = QFrame()
-        separador.setFrameShape(QFrame.HLine)
-        separador.setFrameShadow(QFrame.Sunken)
-        layout.addWidget(separador)
+        self.unidade_medida_input = QLineEdit(); self.unidade_medida_input.setPlaceholderText("Ex: kg, L, m")
+        self.qtd_por_embalagem_input = QSpinBox(); self.qtd_por_embalagem_input.setRange(1, 9999)
+        self.preco_unitario_fracao_input = QDoubleSpinBox(); self.preco_unitario_fracao_input.setRange(0, 99999.99); self.preco_unitario_fracao_input.setPrefix("R$ ")
+        self.estoque_fracionado_input = QSpinBox(); self.estoque_fracionado_input.setRange(0, 99999)
         
-        # Botões
+        fracionado_layout.addRow("Unidade de Medida:", self._create_input_with_icon('ruler', self.unidade_medida_input))
+        fracionado_layout.addRow("Unidades por Embalagem:", self._create_input_with_icon('box-open', self.qtd_por_embalagem_input))
+        fracionado_layout.addRow("Preço Unitário (Fração):", self._create_input_with_icon('tag', self.preco_unitario_fracao_input))
+        fracionado_layout.addRow("Estoque Fracionado Atual:", self._create_input_with_icon('cubes', self.estoque_fracionado_input))
+        
+        grid_layout.addWidget(self.fracionado_group, 1, 0, 1, 2)
+        # ===== FIM DA CORREÇÃO PRINCIPAL =====
+
+        main_layout.addLayout(grid_layout)
+        main_layout.addStretch()
+
         button_layout = QHBoxLayout()
-        self.salvar_btn = QPushButton(IconManager.get_icon('save', 'white'), " Salvar")
-        self.salvar_btn.setStyleSheet(EstoqueWindow._get_button_style(self, "add")) # Reutiliza estilo verde
+        self.salvar_btn = QPushButton(" Salvar Produto")
+        self.salvar_btn.setObjectName("primaryActionButton")
         self.salvar_btn.clicked.connect(self.salvar_produto)
         
-        self.cancelar_btn = QPushButton(IconManager.get_icon('cancel', 'white'), " Cancelar")
-        self.cancelar_btn.setStyleSheet(EstoqueWindow._get_button_style(self, "delete")) # Reutiliza estilo vermelho
+        self.cancelar_btn = QPushButton(" Cancelar")
         self.cancelar_btn.clicked.connect(self.reject)
         
-        button_layout.addWidget(self.salvar_btn)
+        button_layout.addStretch()
         button_layout.addWidget(self.cancelar_btn)
+        button_layout.addWidget(self.salvar_btn)
+        
+        main_layout.addLayout(button_layout)
+        
+        self.preco_compra_input.valueChanged.connect(self.calcular_preco_venda)
+        self.margem_lucro_input.valueChanged.connect(self.calcular_preco_venda)
+        self.preco_venda_input.valueChanged.connect(self.calcular_margem_lucro)
+
+    # ... todos os outros métodos de FormularioProduto (apply_styles, _create_input_with_icon, etc) permanecem os mesmos
+    def _create_input_with_icon(self, icon_name, widget):
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        
+        icon_label = QLabel()
+        icon_color = self.theme_colors.get('text_secondary', '#6d6d70')
+        # Esta função agora receberá o nome semântico correto
+        icon_label.setPixmap(IconManager.get_icon(icon_name, color=icon_color).pixmap(16, 16))
+        
+        layout.addWidget(icon_label)
+        layout.addWidget(widget, 1)
+        return container
+
+    def apply_styles(self):
+        theme = self.theme_colors
+        if not theme: return
+
+        style = f"""
+            QDialog {{
+                background-color: {theme.get('bg_color', '#fff')};
+            }}
+            QGroupBox {{
+                font-size: 11pt;
+                border: 1px solid {theme.get('border_color', '#ccc')};
+                border-radius: 8px; margin-top: 15px; padding: 15px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin; subcontrol-position: top left;
+                padding: 0 10px; margin-left: 10px;
+                background-color: {theme.get('bg_color', '#fff')};
+                color: {theme.get('text_secondary', '#333')};
+            }}
+            QGroupBox:checked {{
+                border-color: {theme.get('accent_color', '#007aff')};
+            }}
+            QLabel {{
+                color: {theme.get('text_color', '#000')};
+                font-size: 10pt;
+            }}
+            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit {{
+                background-color: {theme.get('surface_color', '#f2f2f7')};
+                color: {theme.get('text_color', '#000')};
+                border: 1px solid {theme.get('border_color', '#ccc')};
+                border-radius: 4px; padding: 8px; min-height: 20px;
+            }}
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus {{
+                border: 2px solid {theme.get('accent_color', '#007aff')};
+            }}
+            QPushButton {{
+                padding: 10px 15px; border-radius: 6px; font-weight: bold;
+            }}
+            #primaryActionButton {{
+                background-color: {theme.get('accent_color', '#007aff')};
+                color: white; border: none;
+            }}
+            #primaryActionButton:hover {{
+                background-color: #0069d9;
+            }}
+        """
+        self.setStyleSheet(style)
+        
+        self.salvar_btn.setIcon(IconManager.get_icon('save', 'white'))
+        self.cancelar_btn.setIcon(IconManager.get_icon('cancel', theme.get('text_color', '#000')))
     
     def carregar_categorias(self):
-        """Carrega as categorias existentes no combobox."""
         self.categoria_combo.clear()
-        self.categoria_combo.addItem("Selecione uma categoria", "")
-        
+        self.categoria_combo.addItem("Selecione ou crie uma categoria", "")
         categorias = self.db.listar_categorias_unicas()
         for categoria in categorias:
             self.categoria_combo.addItem(categoria, categoria)
     
-    def toggle_campos_fracionado(self):
-        """Habilita/desabilita campos de fracionamento baseado no checkbox."""
-        enabled = self.fracionado_checkbox.isChecked()
-        
-        self.unidade_medida_input.setEnabled(enabled)
-        self.qtd_por_embalagem_input.setEnabled(enabled)
-        self.preco_unitario_fracao_input.setEnabled(enabled)
-        self.estoque_fracionado_input.setEnabled(enabled)
-        
-        if not enabled:
-            # Limpar campos quando desabilitado
-            self.unidade_medida_input.clear()
-            self.qtd_por_embalagem_input.setValue(1)
-            self.preco_unitario_fracao_input.setValue(0)
-            self.estoque_fracionado_input.setValue(0)
-    
     def calcular_preco_venda(self):
-        """
-        Calcula o preço de venda da EMBALAGEM e SUGERE o preço da FRAÇÃO.
-        Não sobrescreve o preço da fração se já foi definido manualmente.
-        """
-        # Bloqueia os sinais para evitar chamadas recursivas
-        self.preco_venda_input.blockSignals(True)
-        
         preco_compra = self.preco_compra_input.value()
         margem = self.margem_lucro_input.value() / 100
-        
-        # 1. Calcula e define o preço de venda da embalagem inteira
-        preco_venda_embalagem = preco_compra * (1 + margem)
-        self.preco_venda_input.setValue(preco_venda_embalagem)
-        
-        # 2. SUGERE o preço de venda para a fração
-        # Apenas se o campo de preço da fração estiver zerado, para não sobrescrever a entrada manual.
-        if self.preco_unitario_fracao_input.value() == 0.0:
-            self.preco_unitario_fracao_input.blockSignals(True)
-            
-            qtd_por_embalagem = self.qtd_por_embalagem_input.value()
-            if qtd_por_embalagem > 0:
-                custo_fracao = preco_compra / qtd_por_embalagem
-                preco_venda_fracao_sugerido = custo_fracao * (1 + margem)
-                self.preco_unitario_fracao_input.setValue(preco_venda_fracao_sugerido)
-                
-            self.preco_unitario_fracao_input.blockSignals(False)
-            
-        # Desbloqueia os sinais
+        preco_venda = preco_compra * (1 + margem)
+        self.preco_venda_input.blockSignals(True)
+        self.preco_venda_input.setValue(preco_venda)
         self.preco_venda_input.blockSignals(False)
-    
+
     def calcular_margem_lucro(self):
-        """Calcula a margem de lucro com base no preço de compra e preço de venda da EMBALAGEM."""
         preco_compra = self.preco_compra_input.value()
-        preco_venda_embalagem = self.preco_venda_input.value()
-        
+        preco_venda = self.preco_venda_input.value()
         if preco_compra > 0:
-            margem = ((preco_venda_embalagem / preco_compra) - 1) * 100
-            
-            # Evitar sinal de mudança recursivo
+            margem = ((preco_venda / preco_compra) - 1) * 100
             self.margem_lucro_input.blockSignals(True)
             self.margem_lucro_input.setValue(margem)
             self.margem_lucro_input.blockSignals(False)
-            
-            # Note que não chamamos mais self.calcular_preco_venda() aqui,
-            # para não sobrescrever o preço da fração definido pelo usuário.
     
     def carregar_fornecedores(self):
-        """Carrega a lista de fornecedores para o combobox."""
         self.fornecedor_combo.clear()
         self.fornecedor_combo.addItem("Selecione um fornecedor", None)
-        
         fornecedores = self.db.listar_fornecedores()
         for fornecedor in fornecedores:
-            # Mudança aqui: usar 'empresa' ao invés de 'nome'
             self.fornecedor_combo.addItem(fornecedor['empresa'], fornecedor['id'])
     
     def carregar_dados_produto(self):
-        """Carrega os dados do produto nos campos do formulário."""
         self.codigo_barras_input.setText(self.produto['codigo_barras'] or "")
         self.nome_input.setText(self.produto['nome'])
         self.descricao_input.setText(self.produto['descricao'] or "")
         self.quantidade_input.setValue(self.produto['quantidade'])
         self.estoque_minimo_input.setValue(self.produto['estoque_minimo'] or 0)
         self.preco_compra_input.setValue(self.produto['preco_compra'])
-        
-        # Bloquear sinais para evitar cálculos em cascata durante o carregamento
-        self.margem_lucro_input.blockSignals(True)
-        self.preco_venda_input.blockSignals(True)
-        
         self.margem_lucro_input.setValue(self.produto['margem_lucro'] or 30.0)
         self.preco_venda_input.setValue(self.produto['preco_venda'])
-        
-        # Desbloquear sinais
-        self.margem_lucro_input.blockSignals(False)
-        self.preco_venda_input.blockSignals(False)
-        
         if self.produto['data_validade']:
-            data_validade = QDate.fromString(self.produto['data_validade'], "yyyy-MM-dd")
-            self.data_validade_input.setDate(data_validade)
-        
+            self.data_validade_input.setDate(QDate.fromString(self.produto['data_validade'], "yyyy-MM-dd"))
         self.localizacao_input.setText(self.produto['localizacao'] or "")
         
-        # Carregar dados de fracionamento
-        self.fracionado_checkbox.setChecked(bool(self.produto['fracionado']))
-        self.unidade_medida_input.setText(self.produto['unidade_medida'] or "")
-        
-        # Converter para int antes de definir o valor
-        qtd_embalagem = int(self.produto['qtd_por_embalagem'] or 1)
-        self.qtd_por_embalagem_input.setValue(qtd_embalagem)
-        
-        self.preco_unitario_fracao_input.setValue(self.produto['preco_unitario_fracao'] or 0)
-        
-        # Converter estoque fracionado para int se necessário
-        estoque_frac = int(self.produto['estoque_fracionado'] or 0)
-        self.estoque_fracionado_input.setValue(estoque_frac)
-        
-        # Selecionar o fornecedor
         if self.produto['fornecedor_id']:
             index = self.fornecedor_combo.findData(self.produto['fornecedor_id'])
-            if index != -1:
-                self.fornecedor_combo.setCurrentIndex(index)
+            if index != -1: self.fornecedor_combo.setCurrentIndex(index)
         
-        # Após carregar o fornecedor:
         if self.produto['categoria']:
             index = self.categoria_combo.findText(self.produto['categoria'])
-            if index != -1:
-                self.categoria_combo.setCurrentIndex(index)
+            if index != -1: self.categoria_combo.setCurrentIndex(index)
             else:
-                # Se a categoria não existe na lista, adiciona ela
-                self.categoria_combo.addItem(self.produto['categoria'], self.produto['categoria'])
+                self.categoria_combo.addItem(self.produto['categoria'])
                 self.categoria_combo.setCurrentText(self.produto['categoria'])
-    
+        
+        is_fracionado = bool(self.produto['fracionado'])
+        self.fracionado_group.setChecked(is_fracionado)
+        
+        if is_fracionado:
+            self.unidade_medida_input.setText(self.produto['unidade_medida'] or "")
+            
+            # --- LINHA CORRIGIDA ---
+            # Converte o valor para inteiro antes de passá-lo para o QSpinBox.
+            self.qtd_por_embalagem_input.setValue(int(self.produto['qtd_por_embalagem'] or 1))
+            
+            self.preco_unitario_fracao_input.setValue(self.produto['preco_unitario_fracao'] or 0.0)
+            self.estoque_fracionado_input.setValue(self.produto['estoque_fracionado'] or 0)
+
     def salvar_produto(self):
-        """Salva os dados do produto no banco de dados."""
-        # Validar campos obrigatórios
         if not self.nome_input.text().strip():
             QMessageBox.warning(self, "Erro", "O nome do produto é obrigatório!")
             return
-        
-        # Validações para produtos fracionados
-        if self.fracionado_checkbox.isChecked():
-            if not self.unidade_medida_input.text().strip():
-                QMessageBox.warning(self, "Erro", "Unidade de medida é obrigatória para produtos fracionados!")
-                return
-            if self.qtd_por_embalagem_input.value() <= 0:
-                QMessageBox.warning(self, "Erro", "Quantidade por embalagem deve ser maior que zero!")
-                return
-        
-        # Coletar dados do formulário
-        codigo_barras = self.codigo_barras_input.text().strip()
-        nome = self.nome_input.text().strip()
-        descricao = self.descricao_input.text().strip()
-        quantidade = self.quantidade_input.value()
-        estoque_minimo = self.estoque_minimo_input.value()
-        preco_compra = self.preco_compra_input.value()
-        margem_lucro = self.margem_lucro_input.value()
-        preco_venda = self.preco_venda_input.value()
-        data_validade = self.data_validade_input.date().toString("yyyy-MM-dd")
-        localizacao = self.localizacao_input.text().strip()
-        
-        # Dados de fracionamento
-        fracionado = self.fracionado_checkbox.isChecked()
-        unidade_medida = self.unidade_medida_input.text().strip() if fracionado else "unidade"
-        qtd_por_embalagem = self.qtd_por_embalagem_input.value() if fracionado else 1
-        preco_unitario_fracao = self.preco_unitario_fracao_input.value() if fracionado else None
-        estoque_fracionado = self.estoque_fracionado_input.value() if fracionado else 0
-        
-        categoria = self.categoria_combo.currentText().strip() if self.categoria_combo.currentText().strip() else None
-
-        fornecedor_id = self.fornecedor_combo.currentData()
-        if fornecedor_id == "":
-            fornecedor_id = None
-        
+            
+        dados = {
+            'codigo_barras': self.codigo_barras_input.text().strip(),
+            'nome': self.nome_input.text().strip(),
+            'descricao': self.descricao_input.text().strip(),
+            'categoria': self.categoria_combo.currentText().strip() if self.categoria_combo.currentText() != "Selecione ou crie uma categoria" else None,
+            'fornecedor_id': self.fornecedor_combo.currentData(),
+            'quantidade': self.quantidade_input.value(),
+            'estoque_minimo': self.estoque_minimo_input.value(),
+            'preco_compra': self.preco_compra_input.value(),
+            'margem_lucro': self.margem_lucro_input.value(),
+            'preco_venda': self.preco_venda_input.value(),
+            'data_validade': self.data_validade_input.date().toString("yyyy-MM-dd"),
+            'localizacao': self.localizacao_input.text().strip(),
+            'fracionado': self.fracionado_group.isChecked(),
+            'unidade_medida': self.unidade_medida_input.text().strip() if self.fracionado_group.isChecked() else 'unidade',
+            'qtd_por_embalagem': self.qtd_por_embalagem_input.value() if self.fracionado_group.isChecked() else 1,
+            'preco_unitario_fracao': self.preco_unitario_fracao_input.value() if self.fracionado_group.isChecked() else 0.0,
+            'estoque_fracionado': self.estoque_fracionado_input.value() if self.fracionado_group.isChecked() else 0,
+        }
         
         try:
-            # Inserir ou atualizar produto
             if self.produto_id:
-                sucesso = self.db.atualizar_produto(
-                    self.produto_id, codigo_barras, nome, descricao, quantidade, 
-                    estoque_minimo, preco_compra, margem_lucro, preco_venda, 
-                    data_validade, localizacao, fornecedor_id, categoria,  # NOVO PARÂMETRO
-                    fracionado, unidade_medida, qtd_por_embalagem, 
-                    preco_unitario_fracao, estoque_fracionado
-                )
+                sucesso = self.db.atualizar_produto(self.produto_id, **dados)
                 mensagem = "Produto atualizado com sucesso!"
             else:
-                sucesso = self.db.adicionar_produto(
-                    codigo_barras, nome, descricao, quantidade, estoque_minimo,
-                    preco_compra, margem_lucro, preco_venda, data_validade, 
-                    localizacao, fornecedor_id, categoria,  # NOVO PARÂMETRO
-                    fracionado, unidade_medida, qtd_por_embalagem, 
-                    preco_unitario_fracao, estoque_fracionado
-                )
+                sucesso = self.db.adicionar_produto(**dados)
                 mensagem = "Produto cadastrado com sucesso!"
             
             if sucesso:
                 QMessageBox.information(self, "Sucesso", mensagem)
                 self.accept()
             else:
-                QMessageBox.warning(self, "Erro", "Não foi possível salvar o produto.")
-        
+                QMessageBox.warning(self, "Erro no Banco de Dados", "Não foi possível salvar o produto.")
         except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Erro ao salvar produto: {str(e)}")
+            QMessageBox.critical(self, "Erro Inesperado", f"Ocorreu um erro: {e}")
 
+# ================================================================= #
+#       CLASSE DIALOGQUEBRAREMBALAGEM TOTALMENTE CORRIGIDA          #
+# ================================================================= #
 class DialogQuebrarEmbalagem(QDialog):
-    def __init__(self, db, produto_info):
+    # MUDANÇA 1: Adicionar theme_colors ao construtor
+    def __init__(self, db, produto_info, theme_colors=None):
         super().__init__()
         self.db = db
         self.produto_info = produto_info
+        # Armazenar as cores do tema
+        self.theme_colors = theme_colors if theme_colors else {}
+        
         self.initUI()
-    
+        # MUDANÇA 2: Aplicar os estilos, assim como no FormularioProduto
+        self.apply_styles()
+
     def initUI(self):
         self.setWindowTitle("Quebrar Embalagem")
-        self.setFixedSize(400, 300)
+        self.setMinimumWidth(450) # Aumentar um pouco a largura para os ícones
         
         layout = QVBoxLayout(self)
         
-        # Informações do produto
         info_group = QGroupBox("Informações do Produto")
         info_layout = QFormLayout(info_group)
-        
-        info_layout.addRow("Produto:", QLabel(self.produto_info['nome']))
-        info_layout.addRow("Embalagens disponíveis:", QLabel(str(self.produto_info['embalagens_inteiras'])))
-        info_layout.addRow("Unidades por embalagem:", QLabel(str(self.produto_info['qtd_por_embalagem'])))
-        info_layout.addRow("Estoque fracionado atual:", QLabel(f"{self.produto_info['estoque_fracionado']} {self.produto_info['unidade_medida']}"))
+        info_layout.setRowWrapPolicy(QFormLayout.WrapAllRows)
+        info_layout.setSpacing(15)
+
+        # MUDANÇA 3: Usar o helper para adicionar ícones aos campos de informação
+        info_layout.addRow(self._create_info_row('box', "Produto:", self.produto_info['nome']))
+        info_layout.addRow(self._create_info_row('estoque', "Embalagens disponíveis:", str(self.produto_info['embalagens_inteiras'])))
+        info_layout.addRow(self._create_info_row('box-open', "Unidades por embalagem:", str(self.produto_info['qtd_por_embalagem'])))
+        info_layout.addRow(self._create_info_row('cubes', "Estoque fracionado atual:", f"{self.produto_info['estoque_fracionado']} {self.produto_info['unidade_medida']}"))
         
         layout.addWidget(info_group)
         
-        # Entrada para quantidade a quebrar
         quebrar_group = QGroupBox("Quebrar Embalagens")
         quebrar_layout = QFormLayout(quebrar_group)
+        quebrar_layout.setSpacing(15)
         
         self.quantidade_input = QSpinBox()
         self.quantidade_input.setRange(1, self.produto_info['embalagens_inteiras'])
         self.quantidade_input.setValue(1)
         self.quantidade_input.valueChanged.connect(self.atualizar_preview)
         
-        quebrar_layout.addRow("Quantidade de embalagens:", self.quantidade_input)
+        # MUDANÇA 4: Usar o helper para adicionar ícone ao campo de entrada
+        quebrar_layout.addRow("Quantidade a quebrar:", self._create_input_with_icon('break', self.quantidade_input))
         
-        # Preview do resultado
         self.preview_label = QLabel()
+        self.preview_label.setStyleSheet("font-style: italic;")
         self.atualizar_preview()
-        quebrar_layout.addRow("Resultado:", self.preview_label)
+        quebrar_layout.addRow("Resultado:", self._create_info_row('check', "Novo estoque:", self.preview_label))
         
         layout.addWidget(quebrar_group)
-        
-        # Botões
+        layout.addStretch()
+
         button_layout = QHBoxLayout()
+        button_layout.addStretch()
         
-        confirmar_btn = QPushButton(IconManager.get_icon('confirm', 'white'), " Confirmar")
-        confirmar_btn.setStyleSheet(EstoqueWindow._get_button_style(self, "add")) # Verde
-        confirmar_btn.clicked.connect(self.quebrar_embalagem)
+        self.confirmar_btn = QPushButton(" Confirmar")
+        self.confirmar_btn.setObjectName("primaryActionButton")
+        self.confirmar_btn.clicked.connect(self.quebrar_embalagem)
         
-        cancelar_btn = QPushButton(IconManager.get_icon('cancel', 'white'), " Cancelar")
-        cancelar_btn.setStyleSheet(EstoqueWindow._get_button_style(self, "delete")) # Vermelho
-        cancelar_btn.clicked.connect(self.reject)
+        self.cancelar_btn = QPushButton(" Cancelar")
+        self.cancelar_btn.clicked.connect(self.reject)
         
-        button_layout.addWidget(confirmar_btn)
-        button_layout.addWidget(cancelar_btn)
+        button_layout.addWidget(self.cancelar_btn)
+        button_layout.addWidget(self.confirmar_btn)
     
+        # MUDANÇA 5: CORREÇÃO CRÍTICA - Adicionar o layout dos botões ao layout principal
+        # Este era o motivo pelo qual seus botões não apareciam.
+        layout.addLayout(button_layout)
+
     def atualizar_preview(self):
-        """Atualiza o preview do resultado da quebra."""
         qtd_quebrar = self.quantidade_input.value()
         unidades_geradas = qtd_quebrar * self.produto_info['qtd_por_embalagem']
         novo_estoque_fracionado = self.produto_info['estoque_fracionado'] + unidades_geradas
         novas_embalagens = self.produto_info['embalagens_inteiras'] - qtd_quebrar
         
-        preview_text = f"""
-        Embalagens restantes: {novas_embalagens}
-        Estoque fracionado: {novo_estoque_fracionado} {self.produto_info['unidade_medida']}
-        (+{unidades_geradas} {self.produto_info['unidade_medida']} geradas)
+        preview_text = (f"{novas_embalagens} emb. + {novo_estoque_fracionado} {self.produto_info['unidade_medida']}"
+                        f"\n(Serão geradas +{unidades_geradas} unidades)")
+        self.preview_label.setText(preview_text)
+
+    # MUDANÇA 6: Adicionar método para aplicar estilos (similar ao FormularioProduto)
+    def apply_styles(self):
+        theme = self.theme_colors
+        if not theme: return
+
+        # Estilo geral para o diálogo, grupos e labels
+        style = f"""
+            QDialog {{ background-color: {theme.get('bg_color', '#fff')}; }}
+            QGroupBox {{
+                font-size: 10pt; border: 1px solid {theme.get('border_color', '#ccc')};
+                border-radius: 8px; margin-top: 15px; padding: 15px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin; subcontrol-position: top left;
+                padding: 0 10px; margin-left: 10px;
+                background-color: {theme.get('bg_color', '#fff')};
+                color: {theme.get('text_secondary', '#333')};
+            }}
+            QLabel {{ color: {theme.get('text_color', '#000')}; font-size: 10pt; }}
+            QSpinBox {{
+                background-color: {theme.get('surface_color', '#f2f2f7')};
+                color: {theme.get('text_color', '#000')};
+                border: 1px solid {theme.get('border_color', '#ccc')};
+                border-radius: 4px; padding: 8px; min-height: 20px;
+            }}
+            QSpinBox:focus {{ border: 2px solid {theme.get('accent_color', '#007aff')}; }}
+            QPushButton {{ padding: 10px 15px; border-radius: 6px; font-weight: bold; }}
+            #primaryActionButton {{
+                background-color: {theme.get('accent_color', '#007aff')}; color: white; border: none;
+            }}
+            #primaryActionButton:hover {{ background-color: #0069d9; }}
         """
+        self.setStyleSheet(style)
         
-        self.preview_label.setText(preview_text.strip())
+        # Adicionar ícones aos botões
+        self.confirmar_btn.setIcon(IconManager.get_icon('confirm', 'white'))
+        self.cancelar_btn.setIcon(IconManager.get_icon('cancel', theme.get('text_color', '#000')))
+
+    # MUDANÇA 7: Adicionar helpers para criar widgets com ícones (similar ao FormularioProduto)
+    def _create_input_with_icon(self, icon_name, widget):
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        
+        icon_label = QLabel()
+        icon_color = self.theme_colors.get('text_secondary', '#6d6d70')
+        icon_label.setPixmap(IconManager.get_icon(icon_name, color=icon_color).pixmap(16, 16))
+        
+        layout.addWidget(icon_label)
+        layout.addWidget(widget, 1)
+        return container
+
+    def _create_info_row(self, icon_name, label_text, info_text_or_widget):
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        
+        icon_label = QLabel()
+        icon_color = self.theme_colors.get('text_secondary', '#6d6d70')
+        icon_label.setPixmap(IconManager.get_icon(icon_name, color=icon_color).pixmap(16, 16))
+        
+        field_label = QLabel(label_text)
+        field_label.setStyleSheet("font-weight: bold;")
+        
+        layout.addWidget(icon_label)
+        layout.addWidget(field_label)
+        
+        if isinstance(info_text_or_widget, QWidget):
+            layout.addWidget(info_text_or_widget, 1)
+        else:
+            info_label = QLabel(str(info_text_or_widget))
+            info_label.setWordWrap(True)
+            layout.addWidget(info_label, 1)
+            
+        return container
     
     def quebrar_embalagem(self):
-        """Confirma a quebra da embalagem."""
         qtd_quebrar = self.quantidade_input.value()
-        
         confirmacao = QMessageBox.question(
-            self, 
-            "Confirmar Quebra",
+            self, "Confirmar Quebra",
             f"Confirma quebrar {qtd_quebrar} embalagem(ns) em unidades fracionadas?",
             QMessageBox.Yes | QMessageBox.No
         )
-        
         if confirmacao == QMessageBox.Yes:
             if self.db.quebrar_embalagem(self.produto_info['produto_id'], qtd_quebrar):
                 QMessageBox.information(self, "Sucesso", "Embalagem quebrada com sucesso!")

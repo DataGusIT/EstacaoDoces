@@ -1,21 +1,94 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                            QPushButton, QTableWidget, QTableWidgetItem, QFormLayout,
-                           QMessageBox, QHeaderView, QDialog, QFrame, QDateEdit, QFileDialog, QGroupBox, QSizePolicy)
-from PyQt5.QtCore import Qt, QDate
+                           QMessageBox, QHeaderView, QDialog, QFrame, QDateEdit, QFileDialog, 
+                           QGroupBox, QSizePolicy, QProgressDialog)
+from PyQt5.QtCore import Qt, QDate, QThread, pyqtSignal
 from PyQt5.QtGui import QFont
 from datetime import datetime
 import csv
 import os
+import math
+
+# Importações necessárias
 from ui.icon_manager import IconManager
+from database.db_manager import DatabaseManager
+
+# ================================================================= #
+#       CLASSE WORKER PARA IMPORTAÇÃO DE CSV EM THREAD              #
+# ================================================================= #
+
+class ClienteCsvImportWorker(QThread):
+    progress = pyqtSignal(int)
+    finished = pyqtSignal(int, int, list)
+
+    def __init__(self, db_path, file_path):
+        super().__init__()
+        self.db_path = db_path
+        self.file_path = file_path
+        self.local_db = None
+
+    def run(self):
+        importados = 0
+        erros = 0
+        detalhes_erros = []
+        try:
+            self.local_db = DatabaseManager(self.db_path)
+            
+            with open(self.file_path, 'r', encoding='utf-8') as f:
+                total_linhas = max(1, sum(1 for _ in f) - 1)
+
+            with open(self.file_path, 'r', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                self.local_db.begin_transaction()
+                
+                for i, row in enumerate(reader):
+                    try:
+                        nome = row.get('nome', '').strip()
+                        if not nome:
+                            raise ValueError("Nome do cliente é obrigatório.")
+                        
+                        data_nascimento = row.get('data_nascimento')
+                        if data_nascimento:
+                             try:
+                                data_nascimento = datetime.strptime(data_nascimento, '%d/%m/%Y').strftime('%Y-%m-%d')
+                             except ValueError:
+                                # Tenta o formato ISO se o primeiro falhar
+                                datetime.strptime(data_nascimento, '%Y-%m-%d')
+
+                        self.local_db.adicionar_cliente(
+                            nome=nome,
+                            data_nascimento=data_nascimento,
+                            telefone=row.get('telefone', '').strip(),
+                            email=row.get('email', '').strip(),
+                            endereco=row.get('endereco', '').strip()
+                        )
+                        importados += 1
+                    except Exception as e:
+                        erros += 1
+                        detalhes_erros.append(f"Linha {i+2}: {e}")
+                    self.progress.emit(int(((i + 1) / total_linhas) * 100))
+                
+                self.local_db.commit_transaction()
+        except Exception as e:
+            if self.local_db: self.local_db.rollback_transaction()
+            detalhes_erros.append(f"Erro geral: {e}")
+        finally:
+            if self.local_db: self.local_db.fechar()
+        
+        self.finished.emit(importados, erros, detalhes_erros)
 
 
 class ClientesWindow(QWidget):
     def __init__(self, db, theme_colors):
         super().__init__()
         self.db = db
-        self.theme_colors = theme_colors  # Adiciona suporte a temas
+        self.theme_colors = theme_colors
+        self.pagina_atual = 1
+        self.itens_por_pagina = 50
+        self.total_paginas = 1
+        
         self.initUI()
-        self.carregar_dados()
+        self.atualizar_visualizacao_dados()
 
     # NOVO MÉTODO: Centraliza a estilização dos botões
     def _get_button_style(self, style_type):
@@ -46,38 +119,43 @@ class ClientesWindow(QWidget):
         }
         text, bg, hover, pressed = styles.get(style_type, ("black", "#f0f0f0", "#e0e0e0", "#d0d0d0"))
         return base_style.format(text_color=text, bg_color=bg, hover_color=hover, pressed_color=pressed)
+    
 
     def set_theme(self, theme_colors):
-        """Atualiza as cores do tema e os ícones quando o tema principal muda."""
+        """Atualiza as cores do tema e os ícones."""
         self.theme_colors = theme_colors
         self.update_button_icons()
-        # Recarregar os dados para que os ícones na tabela também sejam atualizados
-        self.carregar_dados()
+        self.atualizar_visualizacao_dados() # Recarrega a tabela para atualizar ícones internos
 
     def update_button_icons(self):
-        """Define ou atualiza os ícones de todos os botões com base no tema atual."""
-        icon_color = self.theme_colors.get('text_color', '#000')
-
+        """Define ou atualiza os ícones de todos os botões com base no tema."""
+        # Se você quer que os ícones dos botões secundários também mudem de cor com o tema
+        icon_color = self.theme_colors.get('text_color', '#000') 
+        
         self.search_button.setIcon(IconManager.get_icon('search', icon_color))
+        
+        # O botão primário sempre terá ícone branco para contrastar
+        self.add_button.setIcon(IconManager.get_icon('add', 'white'))
+        
+        # Botões secundários
         self.importar_csv_button.setIcon(IconManager.get_icon('import', icon_color))
         self.exportar_csv_button.setIcon(IconManager.get_icon('export', icon_color))
-
-        # Botão de ação primária sempre terá ícone branco para bom contraste
-        self.add_button.setIcon(IconManager.get_icon('add', 'white'))
+        
+        # Botões de paginação
+        self.prev_page_btn.setIcon(IconManager.get_icon('angle-left', icon_color))
+        self.next_page_btn.setIcon(IconManager.get_icon('angle-right', icon_color))
 
     def initUI(self):
-        """Inicializa a interface do usuário da janela."""
         layout = QVBoxLayout(self)
-
         titulo = QLabel("Gerenciamento de Clientes")
         titulo.setFont(QFont("Arial", 14, QFont.Bold))
         layout.addWidget(titulo)
 
-        # --- Área de Pesquisa ---
         search_group = QGroupBox("Pesquisa")
         search_layout = QHBoxLayout(search_group)
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Pesquisar cliente por nome, telefone ou email...")
+        self.search_input.returnPressed.connect(self.pesquisar_clientes)
         self.search_button = QPushButton()
         self.search_button.setToolTip("Buscar")
         self.search_button.clicked.connect(self.pesquisar_clientes)
@@ -85,7 +163,6 @@ class ClientesWindow(QWidget):
         search_layout.addWidget(self.search_button)
         layout.addWidget(search_group)
 
-        # --- Tabela de Clientes ---
         self.tabela = QTableWidget()
         self.tabela.setColumnCount(6)
         self.tabela.setHorizontalHeaderLabels(["ID", "Nome", "Nascimento (Idade)", "Telefone", "Email", "Ações"])
@@ -93,45 +170,63 @@ class ClientesWindow(QWidget):
         self.tabela.verticalHeader().setVisible(False)
         layout.addWidget(self.tabela)
 
-        # --- Botões de Ação Principais ---
-        action_layout = QHBoxLayout()
-        action_layout.setSpacing(10)
-        
-        botoes_acao = []
-        
-        self.add_button = QPushButton(" Adicionar Cliente")
-        self.add_button.setObjectName("primaryActionButton") # Para estilo especial do tema
-        self.add_button.clicked.connect(self.abrir_formulario_cliente)
-        botoes_acao.append(self.add_button)
+        paginacao_layout = QHBoxLayout()
+        self.prev_page_btn = QPushButton(IconManager.get_icon('angle-left'), " Anterior")
+        self.prev_page_btn.clicked.connect(self.ir_pagina_anterior)
+        self.page_label = QLabel(f"Página {self.pagina_atual} de {self.total_paginas}")
+        self.next_page_btn = QPushButton(IconManager.get_icon('angle-right'), "Próxima")
+        self.next_page_btn.setLayoutDirection(Qt.RightToLeft)
+        self.next_page_btn.clicked.connect(self.ir_proxima_pagina)
+        paginacao_layout.addWidget(self.prev_page_btn)
+        paginacao_layout.addStretch()
+        paginacao_layout.addWidget(self.page_label)
+        paginacao_layout.addStretch()
+        paginacao_layout.addWidget(self.next_page_btn)
+        layout.addLayout(paginacao_layout)
 
+        action_layout = QHBoxLayout()
+        self.add_button = QPushButton(" Adicionar Cliente")
+        self.add_button.setObjectName("primaryActionButton")
+        self.add_button.clicked.connect(self.abrir_formulario_cliente)
         self.importar_csv_button = QPushButton(" Importar CSV")
         self.importar_csv_button.clicked.connect(self.importar_csv)
-        botoes_acao.append(self.importar_csv_button)
-        
         self.exportar_csv_button = QPushButton(" Exportar CSV")
         self.exportar_csv_button.clicked.connect(self.exportar_csv)
-        botoes_acao.append(self.exportar_csv_button)
-
-        # Aplica política de expansão para preencher a largura
-        for btn in botoes_acao:
-            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-            action_layout.addWidget(btn)
-
+        action_layout.addWidget(self.add_button)
+        action_layout.addWidget(self.importar_csv_button)
+        action_layout.addWidget(self.exportar_csv_button)
         layout.addLayout(action_layout)
-        
-        # Define os ícones pela primeira vez
-        self.update_button_icons()
-    
-    def carregar_dados(self):
-        """Busca os clientes do banco de dados e atualiza a tabela."""
-        clientes = self.db.listar_clientes()
-        self.atualizar_tabela(clientes)
 
+    def ir_pagina_anterior(self):
+        if self.pagina_atual > 1:
+            self.pagina_atual -= 1
+            self.atualizar_visualizacao_dados()
+
+    def ir_proxima_pagina(self):
+        if self.pagina_atual < self.total_paginas:
+            self.pagina_atual += 1
+            self.atualizar_visualizacao_dados()
+
+    def carregar_dados(self):
+        self.pagina_atual = 1
+        self.search_input.clear()
+        self.atualizar_visualizacao_dados()
+    
     def pesquisar_clientes(self):
-        """Filtra os clientes com base no termo de pesquisa."""
-        termo = self.search_input.text()
-        clientes = self.db.listar_clientes(filtro=termo) if termo else self.db.listar_clientes()
+        self.pagina_atual = 1
+        self.atualizar_visualizacao_dados()
+
+    def atualizar_visualizacao_dados(self):
+        filtros = {'termo_pesquisa': self.search_input.text()}
+        total_itens = self.db.contar_clientes_filtrados(filtros)
+        clientes = self.db.listar_clientes_paginado_e_filtrado(
+            filtros, self.pagina_atual, self.itens_por_pagina
+        )
         self.atualizar_tabela(clientes)
+        self.total_paginas = math.ceil(total_itens / self.itens_por_pagina) or 1
+        self.page_label.setText(f"Página {self.pagina_atual} de {self.total_paginas}")
+        self.prev_page_btn.setEnabled(self.pagina_atual > 1)
+        self.next_page_btn.setEnabled(self.pagina_atual < self.total_paginas)
 
     def formatar_data_nascimento(self, data_nascimento):
         """Formata a data e calcula a idade."""
@@ -179,8 +274,8 @@ class ClientesWindow(QWidget):
     def abrir_formulario_cliente(self, cliente_id=None):
         dialog = FormularioCliente(self.db, cliente_id)
         if dialog.exec_() == QDialog.Accepted:
-            self.carregar_dados()
-    
+            self.atualizar_visualizacao_dados()
+
     def excluir_cliente(self, cliente_id):
         confirmacao = QMessageBox.question(
             self, "Confirmar Exclusão", "Tem certeza que deseja excluir este cliente?",
@@ -188,8 +283,8 @@ class ClientesWindow(QWidget):
         )
         if confirmacao == QMessageBox.Yes:
             if self.db.excluir_cliente(cliente_id):
-                QMessageBox.information(self, "Sucesso", "Cliente excluído com sucesso!")
-                self.carregar_dados()
+                QMessageBox.information(self, "Sucesso", "Cliente excluído.")
+                self.atualizar_visualizacao_dados()
             else:
                 QMessageBox.warning(self, "Erro", "Não foi possível excluir o cliente.")
     
@@ -226,81 +321,28 @@ class ClientesWindow(QWidget):
             QMessageBox.critical(self, "Erro", f"Erro ao exportar CSV: {str(e)}")
     
     def importar_csv(self):
-        try:
-            arquivo, _ = QFileDialog.getOpenFileName(
-                self, "Selecionar arquivo CSV", "", "Arquivos CSV (*.csv);;Todos os arquivos (*)"
-            )
-            if not arquivo: return
-            if not os.path.exists(arquivo):
-                QMessageBox.warning(self, "Erro", "Arquivo não encontrado.")
-                return
-            
-            clientes_importados, erros = [], []
-            
-            with open(arquivo, 'r', encoding='utf-8') as csvfile:
-                sample = csvfile.read(1024)
-                csvfile.seek(0)
-                delimiter = csv.Sniffer().sniff(sample).delimiter
-                reader = csv.DictReader(csvfile, delimiter=delimiter)
-                
-                for linha_num, row in enumerate(reader, start=2):
-                    try:
-                        nome = row.get('nome', '').strip()
-                        if not nome:
-                            erros.append(f"Linha {linha_num}: Nome é obrigatório")
-                            continue
-                        
-                        data_nascimento = row.get('data_nascimento', '').strip()
-                        if data_nascimento:
-                            try:
-                                data_obj = datetime.strptime(data_nascimento, '%d/%m/%Y')
-                                data_nascimento = data_obj.strftime('%Y-%m-%d')
-                            except ValueError:
-                                try:
-                                    datetime.strptime(data_nascimento, '%Y-%m-%d')
-                                except ValueError:
-                                    erros.append(f"Linha {linha_num}: Data de nascimento inválida ({data_nascimento})")
-                                    continue
-                        
-                        clientes_importados.append({
-                            'nome': nome, 'data_nascimento': data_nascimento,
-                            'telefone': row.get('telefone', '').strip(),
-                            'email': row.get('email', '').strip(),
-                            'endereco': row.get('endereco', '').strip()
-                        })
-                    except Exception as e:
-                        erros.append(f"Linha {linha_num}: Erro ao processar - {str(e)}")
-            
-            if clientes_importados:
-                mensagem = f"Encontrados {len(clientes_importados)} clientes válidos para importar."
-                if erros: mensagem += f"\n{len(erros)} linha(s) com erro(s) serão ignoradas."
-                mensagem += "\n\nDeseja continuar com a importação?"
-                
-                resposta = QMessageBox.question(self, "Confirmar Importação", mensagem, QMessageBox.Yes | QMessageBox.No)
-                
-                if resposta == QMessageBox.Yes:
-                    importados_com_sucesso = 0
-                    for cliente in clientes_importados:
-                        try:
-                            if self.db.adicionar_cliente(cliente['nome'], cliente['data_nascimento'], cliente['telefone'], cliente['email'], cliente['endereco']):
-                                importados_com_sucesso += 1
-                        except Exception as e:
-                            erros.append(f"Erro ao salvar {cliente['nome']}: {str(e)}")
-                    
-                    self.carregar_dados()
-                    
-                    resultado = f"Importação concluída!\nClientes importados: {importados_com_sucesso}\n"
-                    if erros:
-                        resultado += f"Erros: {len(erros)}\n\nPrimeiros 5 erros:\n" + "\n".join(erros[:5])
-                        if len(erros) > 5: resultado += f"\n... e mais {len(erros) - 5} erro(s)."
-                    QMessageBox.information(self, "Resultado da Importação", resultado)
-            else:
-                mensagem = "Nenhum cliente válido encontrado no arquivo."
-                if erros: mensagem += f"\n\nErros encontrados:\n" + "\n".join(erros[:10])
-                QMessageBox.warning(self, "Aviso", mensagem)
-                
-        except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Erro ao importar CSV: {str(e)}")
+        file_path, _ = QFileDialog.getOpenFileName(self, "Importar Clientes CSV", "", "CSV Files (*.csv)")
+        if not file_path: return
+
+        self.progress_dialog = QProgressDialog("Importando clientes...", "Cancelar", 0, 100, self)
+        self.progress_dialog.setWindowModality(Qt.WindowModal)
+        
+        self.import_thread = ClienteCsvImportWorker(self.db.db_path, file_path)
+        self.import_thread.progress.connect(self.progress_dialog.setValue)
+        self.import_thread.finished.connect(self.importacao_concluida)
+        self.progress_dialog.canceled.connect(self.import_thread.terminate)
+        self.import_thread.start()
+        self.progress_dialog.exec_()
+
+    def importacao_concluida(self, importados, erros, detalhes):
+        self.progress_dialog.close()
+        self.atualizar_visualizacao_dados()
+        msg = f"Importação concluída!\n\nSucesso: {importados}\nFalhas: {erros}"
+        if erros > 0:
+            msg += "\n\nPrimeiros erros:\n" + "\n".join(detalhes[:5])
+            QMessageBox.warning(self, "Importação com Erros", msg)
+        else:
+            QMessageBox.information(self, "Importação Concluída", msg)
 
 
 class FormularioCliente(QDialog):

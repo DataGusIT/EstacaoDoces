@@ -84,7 +84,6 @@ class LoginWindow(QDialog):
         main_layout.setContentsMargins(40, 30, 40, 40)
         main_layout.setSpacing(15)
         
-        # Modificação 2: Aplicar o stylesheet dinâmico
         self.setStyleSheet(self.get_stylesheet()) 
 
         header_layout = QHBoxLayout()
@@ -92,7 +91,6 @@ class LoginWindow(QDialog):
         close_button = QToolButton()
         close_button.setObjectName("closeButton")
         close_button.setFixedSize(28, 28)
-        # Modificação 3: Usar IconManager
         close_button.setIcon(IconManager.get_icon('fechar', self.theme_colors['text_secondary']))
         close_button.setIconSize(QSize(12, 12))
         close_button.setCursor(QCursor(Qt.PointingHandCursor))
@@ -104,9 +102,18 @@ class LoginWindow(QDialog):
         title_layout.setSpacing(8)
         title_layout.setContentsMargins(0, 0, 0, 30)
         logo_label = QLabel()
-        # Usar IconManager para a logo também, para consistência
-        logo_icon = IconManager.get_icon('estoque', color=self.theme_colors['accent_color'])
-        logo_label.setPixmap(logo_icon.pixmap(QSize(80, 80)))
+
+        # --- INÍCIO DA ALTERAÇÃO ---
+        # 1. Crie um QPixmap a partir do arquivo da sua logo.
+        #    Substitua 'caminho/para/sua/logo.png' pelo caminho real do seu arquivo.
+        caminho_logo = 'assets/img/GestorX (2).png'  # <--- IMPORTANTE: MUDE ESTE CAMINHO
+        logo_pixmap = QPixmap(caminho_logo)
+
+        # 2. Redimensione o pixmap para o tamanho desejado (ex: 80x80 pixels)
+        #    Usar Qt.KeepAspectRatio garante que a imagem não fique distorcida.
+        logo_label.setPixmap(logo_pixmap.scaled(QSize(150, 150), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        # --- FIM DA ALTERAÇÃO ---
+
         logo_label.setAlignment(Qt.AlignCenter)
         title_label = QLabel("Bem-vindo de volta")
         title_label.setObjectName("titleLabel")
@@ -118,9 +125,9 @@ class LoginWindow(QDialog):
         title_layout.addWidget(title_label)
         title_layout.addWidget(subtitle_label)
         
+        # ... O restante do método init_ui continua exatamente como estava ...
         form_layout = QVBoxLayout()
         form_layout.setSpacing(18)
-        # Modificação 4: Passar o nome do ícone para o método helper
         user_label_widget = self._create_field_label_with_icon("user", "USUÁRIO")
         self.login_edit = QLineEdit()
         self.login_edit.setPlaceholderText("Digite seu nome de usuário")

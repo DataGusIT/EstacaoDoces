@@ -259,6 +259,124 @@ class DatabaseManager:
 
         # Commit das mudanças
         self.conn.commit()
+    
+    # --- MÉTODOS PARA OTIMIZAÇÃO DA TELA DE ESTOQUE (NOVOS E MODIFICADOS) ---
+
+    def _construir_clausula_where_e_params(self, filtros):
+        """
+        Helper privado para construir a cláusula WHERE e a lista de parâmetros dinamicamente.
+        Isso centraliza toda a lógica de filtragem e evita SQL Injection.
+        """
+        where_clauses = []
+        params = []
+        
+        # Filtro por termo de pesquisa (nome, código de barras, descrição)
+        if filtros.get('termo_pesquisa'):
+            termo = f"%{filtros['termo_pesquisa']}%"
+            where_clauses.append("(p.nome LIKE ? OR p.descricao LIKE ? OR p.codigo_barras LIKE ?)")
+            params.extend([termo, termo, termo])
+
+        # Filtro por categoria
+        # O currentData do combo pode vir como None ou uma string vazia se "Todas" for selecionado
+        if filtros.get('categoria') and filtros['categoria'] != "todas":
+            where_clauses.append("p.categoria = ?")
+            params.append(filtros['categoria'])
+
+        # Filtro por nível de estoque
+        nivel_estoque = filtros.get('estoque')
+        if nivel_estoque and nivel_estoque != "todos":
+            # A mesma lógica de cálculo de estoque total que você tinha, mas em SQL
+            estoque_calculado_sql = "(CASE WHEN p.fracionado = 1 THEN (p.quantidade * p.qtd_por_embalagem + p.estoque_fracionado) ELSE p.quantidade END)"
+            
+            if nivel_estoque == "baixo":
+                where_clauses.append(f"{estoque_calculado_sql} <= p.estoque_minimo AND p.estoque_minimo > 0")
+            elif nivel_estoque == "medio":
+                where_clauses.append(f"{estoque_calculado_sql} > p.estoque_minimo AND {estoque_calculado_sql} <= (p.estoque_minimo * 2)")
+            elif nivel_estoque == "alto":
+                where_clauses.append(f"{estoque_calculado_sql} > (p.estoque_minimo * 2)")
+
+        # Filtro por data de vencimento
+        filtro_vencimento = filtros.get('vencimento')
+        if filtro_vencimento and filtro_vencimento != "todos":
+            hoje = datetime.now().strftime('%Y-%m-%d')
+            
+            if filtro_vencimento == "vencidos":
+                where_clauses.append("date(p.data_validade) < ?")
+                params.append(hoje)
+            elif filtro_vencimento == "15":
+                data_limite = (datetime.now() + timedelta(days=15)).strftime('%Y-%m-%d')
+                where_clauses.append("date(p.data_validade) BETWEEN ? AND ?")
+                params.extend([hoje, data_limite])
+            elif filtro_vencimento == "30":
+                data_limite = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
+                where_clauses.append("date(p.data_validade) BETWEEN ? AND ?")
+                params.extend([hoje, data_limite])
+
+        if not where_clauses:
+            return "", []
+            
+        return "WHERE " + " AND ".join(where_clauses), params
+
+    def listar_produtos_paginado_e_filtrado(self, filtros, pagina, itens_por_pagina):
+        """
+        NOVO MÉTODO OTIMIZADO: Busca produtos com filtros e paginação.
+        Este método substitui listar_produtos, filtrar_produtos e listar_produtos_com_fracionamento.
+        """
+        offset = (pagina - 1) * itens_por_pagina
+        
+        # Query base que já calcula o estoque total para produtos fracionados
+        base_query = """
+            SELECT p.*, f.empresa as fornecedor_nome,
+                CASE 
+                    WHEN p.fracionado = 1 THEN 
+                        (p.quantidade * p.qtd_por_embalagem + p.estoque_fracionado)
+                    ELSE p.quantidade
+                END as estoque_total_calculado
+            FROM produtos p 
+            LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
+        """
+        
+        where_clause, params = self._construir_clausula_where_e_params(filtros)
+        
+        query_final = f"{base_query} {where_clause} ORDER BY p.nome LIMIT ? OFFSET ?"
+        params.extend([itens_por_pagina, offset])
+        
+        self.cursor.execute(query_final, params)
+        return self.cursor.fetchall()
+
+    def contar_produtos_filtrados(self, filtros):
+        """
+        NOVO MÉTODO OTIMIZADO: Conta o número total de produtos que correspondem
+        aos filtros, necessário para calcular o total de páginas.
+        """
+        base_query = "SELECT COUNT(p.id) FROM produtos p"
+        
+        where_clause, params = self._construir_clausula_where_e_params(filtros)
+        
+        query_final = f"{base_query} {where_clause}"
+        
+        self.cursor.execute(query_final, params)
+        resultado = self.cursor.fetchone()
+        return resultado[0] if resultado else 0
+
+    # --- MÉTODOS PARA TRANSAÇÕES (PARA IMPORTAÇÃO RÁPIDA DE CSV) ---
+    
+    def begin_transaction(self):
+        """Inicia uma transação."""
+        try:
+            self.conn.execute("BEGIN TRANSACTION")
+        except sqlite3.OperationalError as e:
+            # Lida com o caso de já haver uma transação ativa
+            print(f"Aviso: {e}")
+
+
+    def commit_transaction(self):
+        """Confirma a transação atual."""
+        self.conn.commit()
+
+    def rollback_transaction(self):
+        """Reverte a transação atual."""
+        self.conn.rollback()
 
     # Métodos para Produtos (atualizados)
     def adicionar_produto(self, codigo_barras, nome, descricao, quantidade, estoque_minimo,
@@ -619,6 +737,48 @@ class DatabaseManager:
         self.cursor.execute(query)
         return self.cursor.fetchall()
     
+    def listar_fornecedores_paginado_e_filtrado(self, filtros, pagina, itens_por_pagina):
+        """
+        NOVO MÉTODO OTIMIZADO: Busca fornecedores com filtros e paginação.
+        """
+        offset = (pagina - 1) * itens_por_pagina
+        params = []
+        
+        base_query = "SELECT * FROM fornecedores"
+        where_clause = ""
+        
+        if filtros.get('termo_pesquisa'):
+            termo = f"%{filtros['termo_pesquisa']}%"
+            # Adicionado busca por mais campos para ser mais útil
+            where_clause = "WHERE empresa LIKE ? OR representante LIKE ? OR email LIKE ? OR telefone LIKE ?"
+            params.extend([termo, termo, termo, termo])
+            
+        query_final = f"{base_query} {where_clause} ORDER BY empresa LIMIT ? OFFSET ?"
+        params.extend([itens_por_pagina, offset])
+        
+        self.cursor.execute(query_final, params)
+        return self.cursor.fetchall()
+
+    def contar_fornecedores_filtrados(self, filtros):
+        """
+        NOVO MÉTODO OTIMIZADO: Conta o número total de fornecedores que correspondem
+        aos filtros, necessário para calcular o total de páginas.
+        """
+        params = []
+        base_query = "SELECT COUNT(id) FROM fornecedores"
+        where_clause = ""
+
+        if filtros.get('termo_pesquisa'):
+            termo = f"%{filtros['termo_pesquisa']}%"
+            where_clause = "WHERE empresa LIKE ? OR representante LIKE ? OR email LIKE ? OR telefone LIKE ?"
+            params.extend([termo, termo, termo, termo])
+
+        query_final = f"{base_query} {where_clause}"
+        
+        self.cursor.execute(query_final, params)
+        resultado = self.cursor.fetchone()
+        return resultado[0] if resultado else 0
+    
     # Métodos para Clientes Atualizados
     def adicionar_cliente(self, nome, data_nascimento, telefone, email, endereco):
         """Adiciona um novo cliente ao banco de dados."""
@@ -699,6 +859,47 @@ class DatabaseManager:
             print(f"Erro ao listar clientes: {e}")
             return []
     
+    def listar_clientes_paginado_e_filtrado(self, filtros, pagina, itens_por_pagina):
+        """
+        NOVO MÉTODO OTIMIZADO: Busca clientes com filtros e paginação.
+        """
+        offset = (pagina - 1) * itens_por_pagina
+        params = []
+        
+        base_query = "SELECT * FROM clientes"
+        where_clause = ""
+        
+        if filtros.get('termo_pesquisa'):
+            termo = f"%{filtros['termo_pesquisa']}%"
+            where_clause = "WHERE nome LIKE ? OR telefone LIKE ? OR email LIKE ?"
+            params.extend([termo, termo, termo])
+            
+        query_final = f"{base_query} {where_clause} ORDER BY nome LIMIT ? OFFSET ?"
+        params.extend([itens_por_pagina, offset])
+        
+        self.cursor.execute(query_final, params)
+        return self.cursor.fetchall()
+
+    def contar_clientes_filtrados(self, filtros):
+        """
+        NOVO MÉTODO OTIMIZADO: Conta o número total de clientes que correspondem
+        aos filtros para o cálculo de páginas.
+        """
+        params = []
+        base_query = "SELECT COUNT(id) FROM clientes"
+        where_clause = ""
+
+        if filtros.get('termo_pesquisa'):
+            termo = f"%{filtros['termo_pesquisa']}%"
+            where_clause = "WHERE nome LIKE ? OR telefone LIKE ? OR email LIKE ?"
+            params.extend([termo, termo, termo])
+
+        query_final = f"{base_query} {where_clause}"
+        
+        self.cursor.execute(query_final, params)
+        resultado = self.cursor.fetchone()
+        return resultado[0] if resultado else 0
+    
     # Métodos para Promoções
     def adicionar_promocao(self, produto_id, preco_antigo, preco_promocional, 
                            data_inicio, data_fim, descricao):
@@ -756,6 +957,61 @@ class DatabaseManager:
         ''', (data_hoje, data_hoje))
         
         return self.cursor.fetchall()
+    
+    def listar_promocoes_paginado_e_filtrado(self, filtros, pagina, itens_por_pagina):
+        """
+        NOVO MÉTODO OTIMIZADO: Busca promoções com filtros e paginação.
+        A busca é feita pelo nome do produto associado.
+        """
+        offset = (pagina - 1) * itens_por_pagina
+        params = []
+        
+        # A query base precisa do JOIN para pesquisar pelo nome do produto
+        base_query = """
+            SELECT p.*, pr.nome as produto_nome 
+            FROM promocoes p 
+            LEFT JOIN produtos pr ON p.produto_id = pr.id
+        """
+        where_clause = ""
+        
+        # Filtra pelo termo de pesquisa no nome do produto
+        if filtros.get('termo_pesquisa'):
+            termo = f"%{filtros['termo_pesquisa']}%"
+            where_clause = "WHERE pr.nome LIKE ?"
+            params.append(termo)
+            
+        # Ordena por data de fim mais recente, depois por nome
+        query_final = f"{base_query} {where_clause} ORDER BY p.data_fim DESC, pr.nome LIMIT ? OFFSET ?"
+        params.extend([itens_por_pagina, offset])
+        
+        self.cursor.execute(query_final, params)
+        return self.cursor.fetchall()
+
+    def contar_promocoes_filtradas(self, filtros):
+        """
+        NOVO MÉTODO OTIMIZADO: Conta o número total de promoções que correspondem
+        aos filtros para o cálculo de páginas.
+        """
+        params = []
+        
+        # A query também precisa do JOIN para filtrar corretamente
+        base_query = """
+            SELECT COUNT(p.id) 
+            FROM promocoes p 
+            LEFT JOIN produtos pr ON p.produto_id = pr.id
+        """
+        where_clause = ""
+
+        if filtros.get('termo_pesquisa'):
+            termo = f"%{filtros['termo_pesquisa']}%"
+            where_clause = "WHERE pr.nome LIKE ?"
+            params.append(termo)
+
+        query_final = f"{base_query} {where_clause}"
+        
+        self.cursor.execute(query_final, params)
+        resultado = self.cursor.fetchone()
+        return resultado[0] if resultado else 0
     
     # Métodos para Usuários
     def obter_usuario_por_id(self, usuario_id):
