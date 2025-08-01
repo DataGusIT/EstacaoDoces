@@ -1582,8 +1582,8 @@ class DatabaseManager:
     
     def obter_dados_dashboard(self, data_inicio, data_fim):
         """
-        Obtém dados consolidados para o dashboard.
-        CORRIGIDO: Lida corretamente com a cláusula IN vazia e com tuplas de um elemento.
+        NOVA VERSÃO OTIMIZADA: Obtém um conjunto completo de dados para o dashboard,
+        incluindo KPIs de vendas, alertas e contagens gerais.
         """
         try:
             if not self.ensure_connection():
@@ -1591,122 +1591,99 @@ class DatabaseManager:
             
             cursor = self.conn.cursor()
 
-            # --- Etapa 1: Obter os IDs das vendas no período ---
+            # --- DADOS DE VENDAS (como antes) ---
             cursor.execute("""
                 SELECT id FROM vendas 
                 WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
             """, (data_inicio, data_fim))
-            
             venda_ids = tuple(row['id'] for row in cursor.fetchall())
-            
-            # --- CORREÇÃO FUNDAMENTAL ---
-            # Se não houver vendas (tupla vazia), não podemos continuar, pois 'IN ()' é inválido.
-            # Retornamos um dicionário vazio para a UI lidar com isso.
-            if not venda_ids:
-                return {
-                    'faturamento': 0, 'num_vendas': 0, 'lucro': 0,
-                    'produtos': [], 'pagamentos': [], 'clientes': [], 'vendas_diarias': []
-                }
-            
-            # --- CORREÇÃO DA SINTAXE DA CLÁUSULA IN ---
-            # Para evitar problemas com a sintaxe de tupla de um elemento, como 'IN (12,)',
-            # nós formatamos a string de forma mais robusta.
-            if len(venda_ids) == 1:
-                query_in_ids = f"IN ({venda_ids[0]})"  # Resulta em 'IN (12)'
-            else:
-                query_in_ids = f"IN {venda_ids}"      # Resulta em 'IN (12, 13, 14)'
 
-            # 1. Faturamento e número de vendas
-            cursor.execute(f"""
-                SELECT 
-                    COUNT(*) as num_vendas, 
-                    SUM(valor_total) as faturamento
-                FROM vendas
-                WHERE id {query_in_ids}
-            """)
-            vendas_resumo = cursor.fetchone()
+            faturamento_periodo = 0
+            num_vendas_periodo = 0
+            lucro_periodo = 0
+            produtos_mais_vendidos = []
+            formas_pagamento = []
+            melhores_clientes = []
+            vendas_diarias = []
 
-            # 2. Lucro
-            cursor.execute(f"""
-                SELECT 
-                    SUM(
-                        i.subtotal - (i.quantidade * 
-                            CASE 
-                                WHEN i.preco_unitario = p.preco_venda THEN p.preco_compra
-                                ELSE (p.preco_compra / p.qtd_por_embalagem)
-                            END
-                        )
-                    ) as lucro
-                FROM itens_venda i
-                JOIN produtos p ON i.produto_id = p.id
-                WHERE i.venda_id {query_in_ids} AND p.preco_compra > 0 AND p.qtd_por_embalagem > 0
-            """)
-            
-            lucro_resultado = cursor.fetchone()
-            lucro = lucro_resultado['lucro'] if lucro_resultado and lucro_resultado['lucro'] is not None else 0
-            
-            # 3. Produtos mais vendidos (por valor)
-            cursor.execute(f"""
-                SELECT p.nome, SUM(i.quantidade) as quantidade, SUM(i.subtotal) as valor_total
-                FROM itens_venda i
-                JOIN produtos p ON i.produto_id = p.id
-                WHERE i.venda_id {query_in_ids}
-                GROUP BY p.id, p.nome
-                ORDER BY valor_total DESC
-                LIMIT 10
-            """)
-            produtos = [dict(row) for row in cursor.fetchall()]
-            
-            # 4. Formas de pagamento
-            cursor.execute(f"""
-                SELECT forma_pagamento as forma, SUM(valor_total) as valor_total
-                FROM vendas
-                WHERE id {query_in_ids}
-                GROUP BY forma_pagamento
-                ORDER BY valor_total DESC
-            """)
-            pagamentos = [dict(row) for row in cursor.fetchall()]
-            
-            # 5. Melhores clientes
-            cursor.execute(f"""
-                SELECT 
-                    COALESCE(c.nome, 'Cliente Não Identificado') as nome,
-                    COUNT(*) as compras,
-                    SUM(v.valor_total) as valor_total
-                FROM vendas v
-                LEFT JOIN clientes c ON v.cliente_id = c.id
-                WHERE v.id {query_in_ids}
-                GROUP BY v.cliente_id
-                ORDER BY valor_total DESC
-                LIMIT 10
-            """)
-            clientes = [dict(row) for row in cursor.fetchall()]
+            if venda_ids: # Procede apenas se houver vendas no período
+                query_in_ids = f"IN {venda_ids}" if len(venda_ids) > 1 else f"= {venda_ids[0]}"
 
-            # 6. Vendas por dia (pode continuar usando o período de data)
-            cursor.execute("""
-                SELECT 
-                    date(data_hora, 'localtime') as data,
-                    SUM(valor_total) as valor
-                FROM vendas
-                WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
-                GROUP BY date(data_hora, 'localtime')
-                ORDER BY date(data_hora, 'localtime')
-            """, (data_inicio, data_fim))
+                cursor.execute(f"SELECT COUNT(*) as num_vendas, SUM(valor_total) as faturamento FROM vendas WHERE id {query_in_ids}")
+                vendas_resumo = cursor.fetchone()
+                faturamento_periodo = vendas_resumo['faturamento'] or 0
+                num_vendas_periodo = vendas_resumo['num_vendas'] or 0
+
+                cursor.execute(f"""
+                    SELECT SUM(i.subtotal - (i.quantidade * COALESCE(p.preco_compra, 0))) as lucro
+                    FROM itens_venda i JOIN produtos p ON i.produto_id = p.id
+                    WHERE i.venda_id {query_in_ids} AND p.preco_compra > 0
+                """)
+                lucro_resultado = cursor.fetchone()
+                lucro_periodo = lucro_resultado['lucro'] if lucro_resultado and lucro_resultado['lucro'] is not None else 0
+
+                cursor.execute(f"SELECT p.nome, SUM(i.quantidade) as quantidade, SUM(i.subtotal) as valor_total FROM itens_venda i JOIN produtos p ON i.produto_id = p.id WHERE i.venda_id {query_in_ids} GROUP BY p.id, p.nome ORDER BY valor_total DESC LIMIT 10")
+                produtos_mais_vendidos = [dict(row) for row in cursor.fetchall()]
+
+                cursor.execute(f"SELECT forma_pagamento as forma, SUM(valor_total) as valor_total FROM vendas WHERE id {query_in_ids} GROUP BY forma_pagamento ORDER BY valor_total DESC")
+                formas_pagamento = [dict(row) for row in cursor.fetchall()]
+
+                cursor.execute(f"SELECT COALESCE(c.nome, 'Cliente Não Identificado') as nome, COUNT(*) as compras, SUM(v.valor_total) as valor_total FROM vendas v LEFT JOIN clientes c ON v.cliente_id = c.id WHERE v.id {query_in_ids} GROUP BY v.cliente_id ORDER BY valor_total DESC LIMIT 10")
+                melhores_clientes = [dict(row) for row in cursor.fetchall()]
+
+            cursor.execute("SELECT date(data_hora, 'localtime') as data, SUM(valor_total) as valor FROM vendas WHERE date(data_hora, 'localtime') BETWEEN ? AND ? GROUP BY data ORDER BY data", (data_inicio, data_fim))
             vendas_diarias = [dict(row) for row in cursor.fetchall()]
+
+            # --- NOVAS CONTAGENS GERAIS ---
+            cursor.execute("SELECT COUNT(*) FROM produtos")
+            total_produtos = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM clientes")
+            total_clientes = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM fornecedores")
+            total_fornecedores = cursor.fetchone()[0]
             
+            hoje = datetime.now().strftime('%Y-%m-%d')
+            cursor.execute("SELECT COUNT(*) FROM promocoes WHERE data_inicio <= ? AND data_fim >= ?", (hoje, hoje))
+            total_promocoes_ativas = cursor.fetchone()[0]
+
+            # --- NOVOS ALERTAS OPERACIONAIS ---
+            cursor.execute("SELECT COUNT(*) FROM produtos WHERE quantidade <= estoque_minimo AND estoque_minimo > 0")
+            alert_estoque_baixo = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM produtos WHERE date(data_validade) < ?", (hoje,))
+            alert_vencidos = cursor.fetchone()[0]
+
+            data_limite_30d = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
+            cursor.execute("SELECT COUNT(*) FROM produtos WHERE date(data_validade) BETWEEN ? AND ?", (hoje, data_limite_30d))
+            alert_vencendo_30d = cursor.fetchone()[0]
+            
+            # --- Monta o dicionário final com todos os dados ---
             resultado = {
-                'faturamento': vendas_resumo['faturamento'] or 0,
-                'num_vendas': vendas_resumo['num_vendas'] or 0,
-                'lucro': lucro,
-                'produtos': produtos,
-                'pagamentos': pagamentos,
-                'clientes': clientes,
-                'vendas_diarias': vendas_diarias
+                # Dados de Vendas
+                'faturamento': faturamento_periodo,
+                'num_vendas': num_vendas_periodo,
+                'lucro': lucro_periodo,
+                'produtos': produtos_mais_vendidos,
+                'pagamentos': formas_pagamento,
+                'clientes': melhores_clientes,
+                'vendas_diarias': vendas_diarias,
+                # Contagens Gerais
+                'total_produtos': total_produtos,
+                'total_clientes': total_clientes,
+                'total_fornecedores': total_fornecedores,
+                'total_promocoes_ativas': total_promocoes_ativas,
+                # Alertas
+                'alertas': {
+                    'estoque_baixo': alert_estoque_baixo,
+                    'vencidos': alert_vencidos,
+                    'vencendo_30d': alert_vencendo_30d,
+                }
             }
 
             return resultado
         except Exception as e:
             print(f"Erro detalhado ao obter dados para dashboard: {e}")
+            self.registrar_log('ERROR', 'SISTEMA', 'DB_DASHBOARD_FETCH', str(e))
             return None
     
     # --- Métodos para Configurações do Sistema ---
