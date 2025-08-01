@@ -1,9 +1,9 @@
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QPushButton, 
                             QLabel, QStackedWidget, QHBoxLayout, QFrame,
                             QAction, QMenu, QToolBar, QDialog, QFormLayout,
-                            QComboBox, QSpinBox, QMessageBox, QStatusBar, QSizePolicy)
+                            QComboBox, QSpinBox, QMessageBox, QStatusBar, QSizePolicy, QTimeEdit, QLineEdit, QCheckBox, QGroupBox, QDateEdit, QTextEdit)
 from PyQt5.QtGui import QFont, QIcon, QPixmap, QCursor, QPainter, QColor, QBrush, QPainterPath
-from PyQt5.QtCore import Qt, QDate, QSize, QByteArray, QPropertyAnimation, QEasingCurve, pyqtSignal
+from PyQt5.QtCore import Qt, QDate, QSize, QByteArray, QPropertyAnimation, QEasingCurve, pyqtSignal, QTime, QTimer
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication
 import os
@@ -17,7 +17,8 @@ from ui.caixa_window import CaixaWindow
 from ui.dashboard_window import DashboardWindow
 from ui.icon_manager import IconManager
 
-
+from scheduler import Scheduler
+from notification_manager import NotificationManager
 
 class MainWindow(QMainWindow):
     def __init__(self, db, settings, theme_colors):
@@ -211,7 +212,7 @@ class MainWindow(QMainWindow):
         
         self.stack = QStackedWidget()
         content_container_layout.addWidget(self.stack)
-        
+
         ## ========================================================== ##
         ## CORREÇÃO CRÍTICA: Instanciação das páginas com theme_colors ##
         ## ========================================================== ##
@@ -261,7 +262,19 @@ class MainWindow(QMainWindow):
 
         # Aplica o tema DEPOIS que todos os widgets foram criados.
         self.aplicar_tema()
+
+         # --- INICIA O GERENCIADOR DE NOTIFICAÇÕES E O AGENDADOR ---
+        self.notification_manager = NotificationManager(self.db, self.settings)
+        self.scheduler = Scheduler(self.settings)
+        self.scheduler.notification_triggered.connect(self.notification_manager.check_and_send_notifications)
+        self.scheduler.log_message.connect(self.log_scheduler_message)
+        self.scheduler.start() # Inicia a thread do agendador
     
+    def log_scheduler_message(self, message):
+        """Exibe mensagens do agendador na barra de status."""
+        print(message) # Para depuração no console
+        self.statusBar.showMessage(message, 5000)
+
     def carregar_logo(self):
         """Carrega a logo como QIcon para uso na barra de título"""
         logo_path = os.path.join("assets", "img", "GestorX_logo.png")
@@ -601,6 +614,45 @@ class MainWindow(QMainWindow):
                 font-weight: bold;
             }}
 
+            /* --- ESTILO DAS ABAS (QTabWidget) --- */
+            QTabWidget::pane {{
+                /* O painel onde o conteúdo da aba aparece */
+                border: 1px solid {border_color};
+                border-top: none; /* Remove a borda superior para conectar com a aba */
+                background-color: {surface_color};
+            }}
+
+            QTabWidget::tab-bar {{
+                /* A barra que contém as abas */
+                alignment: left;
+            }}
+
+            QTabBar::tab {{
+                /* Cada aba individual */
+                background-color: {bg_color};
+                color: {text_secondary};
+                padding: 8px 15px;
+                border: 1px solid {border_color};
+                border-bottom: none; /* Remove a borda de baixo da aba inativa */
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                margin-right: 2px; /* Espaço entre as abas */
+                font-weight: bold;
+            }}
+
+            QTabBar::tab:hover {{
+                background-color: {button_hover};
+                color: {text_color};
+            }}
+
+            QTabBar::tab:selected {{
+                /* A aba que está ativa/selecionada */
+                background-color: {surface_color}; /* Cor de fundo igual ao painel para dar efeito de conexão */
+                color: {accent_color};
+                border: 1px solid {border_color};
+                border-bottom: 1px solid {surface_color}; /* "Apaga" a borda de baixo da aba ativa, conectando-a ao painel */
+            }}
+
             /* --- BOTÕES --- */
             QPushButton {{
                 background-color: transparent;
@@ -671,11 +723,16 @@ class MainWindow(QMainWindow):
             self.estoque_page.set_theme(theme)
         if hasattr(self, 'fornecedor_page') and self.fornecedor_page:
             self.fornecedor_page.set_theme(theme)
-        # ADICIONE ESTAS LINHAS:
         if hasattr(self, 'promocoes_page') and self.promocoes_page:
             self.promocoes_page.set_theme(theme)
         if hasattr(self, 'clientes_page') and self.clientes_page:
             self.clientes_page.set_theme(theme)
+
+        # Adicione a propagação para a caixa_page também para garantir consistência
+        if hasattr(self, 'caixa_page') and self.caixa_page:
+            # Você precisará criar um método set_theme em CaixaWindow
+            if hasattr(self.caixa_page, 'set_theme'):
+                 self.caixa_page.set_theme(theme)
         
         self.update()
         if hasattr(self, 'repaint'):
@@ -687,12 +744,23 @@ class MainWindow(QMainWindow):
     
     def abrir_configuracoes(self):
         """Abre a janela de configurações."""
-        dialog = ConfigDialog(self.settings)
+        
+        # PEGA AS CORES DO TEMA ATUAL
+        theme_colors = self._get_theme_colors()
+
+        # PASSA AS CORES PARA O DIÁLOGO
+        dialog = ConfigDialog(self.settings, theme_colors, self) # 'self' define a MainWindow como pai
+
+        # A lógica restante permanece a mesma
         if dialog.exec_() == QDialog.Accepted:
-            # Aplicar as configurações imediatamente
-            self.aplicar_tema()
+            # Pede para a janela principal se redesenhar com o novo tema
+            self.aplicar_tema() 
+            
+            # Reinicia o agendador para aplicar novas configurações de notificação
+            self.scheduler.restart()
+
             QMessageBox.information(self, "Configurações", 
-                                  "As configurações foram salvas e aplicadas.")
+                                "As configurações foram salvas. Algumas alterações podem exigir que o aplicativo seja reiniciado para terem efeito completo.")
     
     def atualizar_dados(self):
         """Atualiza os dados da página atual."""
@@ -775,6 +843,12 @@ class MainWindow(QMainWindow):
     
     def closeEvent(self, event):
         """Evento chamado quando a janela é fechada."""
+        # --- PARA A THREAD DO AGENDADOR DE FORMA SEGURA ---
+        print("Parando o agendador de notificações...")
+        self.scheduler.stop()
+        self.scheduler.wait() # Espera a thread terminar
+        print("Agendador parado.")
+        
         self.db.fechar()
         event.accept()
 
@@ -1348,106 +1422,385 @@ def setup_for_user(self, usuario):
     self.user_manager.setup_for_user(usuario)
 
 class ConfigDialog(QDialog):
-    def __init__(self, settings):
-        super().__init__()
+    def __init__(self, settings, theme_colors, parent=None):
+        super().__init__(parent)
         self.settings = settings
+        self.theme_colors = theme_colors  # Recebe as cores do tema!
+        
         self.initUI()
-    
+        self.apply_styles() # Aplica o estilo baseado no tema
+
     def initUI(self):
-        # Configurar janela
         self.setWindowTitle("Configurações")
-        self.setFixedWidth(450)
+        self.setMinimumWidth(550)
         self.setObjectName("configDialog")
         
         # Layout principal
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
-        
-        # Título
-        titulo = QLabel("Configurações do Sistema")
-        titulo.setFont(QFont("Segoe UI", 14, QFont.Bold))
-        titulo.setAlignment(Qt.AlignCenter)
-        layout.addWidget(titulo)
-        
-        # Separador
-        separador = QFrame()
-        separador.setFrameShape(QFrame.HLine)
-        separador.setFrameShadow(QFrame.Sunken)
-        layout.addWidget(separador)
-        
-        # Formulário
-        form_layout = QFormLayout()
-        form_layout.setVerticalSpacing(12)
-        form_layout.setLabelAlignment(Qt.AlignRight)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        main_layout.setSpacing(20)
+
+        # --- Título ---
+        title_label = QLabel("Configurações do Sistema")
+        title_label.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        title_label.setObjectName("dialogTitle")
+        title_label.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(title_label)
+
+        # --- Grupo de Aparência ---
+        appearance_group = QGroupBox("Aparência")
+        appearance_group.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        appearance_layout = QFormLayout(appearance_group)
+        appearance_layout.setLabelAlignment(Qt.AlignLeft)
+        appearance_layout.setSpacing(10)
         
         # Tema
-        tema_label = QLabel("Tema:")
-        tema_label.setFont(QFont("Segoe UI", 11))
-        
         self.tema_combo = QComboBox()
-        self.tema_combo.setFont(QFont("Segoe UI", 11))
-        self.tema_combo.addItem("Tema Claro", "light")
-        self.tema_combo.addItem("Tema Escuro", "dark")
-        self.tema_combo.setMinimumHeight(30)
-        
-        # Selecionar tema atual
-        tema_atual = self.settings.get_theme()
-        index = self.tema_combo.findData(tema_atual)
+        self.tema_combo.addItem(IconManager.get_icon('estoque', color=self.theme_colors['text_color']), "Tema Claro", "light")
+        self.tema_combo.addItem(IconManager.get_icon('estoque', color=self.theme_colors['text_color']), "Tema Escuro", "dark")
+        current_theme = self.settings.get_theme()
+        index = self.tema_combo.findData(current_theme)
         if index != -1:
             self.tema_combo.setCurrentIndex(index)
         
-        # Tamanho da fonte
-        font_label = QLabel("Tamanho da Fonte:")
-        font_label.setFont(QFont("Segoe UI", 11))
+        appearance_layout.addRow(self.create_label_with_icon("Tema:", "config"), self.tema_combo)
         
-        self.font_size_spin = QSpinBox()
-        self.font_size_spin.setFont(QFont("Segoe UI", 11))
-        self.font_size_spin.setRange(8, 16)
-        self.font_size_spin.setValue(self.settings.get_font_size())
-        self.font_size_spin.setMinimumHeight(30)
+        main_layout.addWidget(appearance_group)
+
+        # --- Grupo de Notificações ---
+        notification_group = QGroupBox("Notificações por E-mail")
+        notification_group.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        notification_layout = QVBoxLayout(notification_group)
+        notification_layout.setSpacing(10)
+
+        self.enable_notifications_check = QCheckBox("Ativar resumo diário por e-mail")
+        self.enable_notifications_check.setChecked(self.settings.get_notification_enabled())
+        notification_layout.addWidget(self.enable_notifications_check)
+
+        # Container para o horário
+        time_form_layout = QFormLayout()
+        self.time_edit = QTimeEdit()
+        self.time_edit.setDisplayFormat("HH:mm")
+        current_time = QTime.fromString(self.settings.get_notification_time(), "HH:mm")
+        self.time_edit.setTime(current_time)
+        time_form_layout.addRow(self.create_label_with_icon("Horário de Envio:", "vencimentos"), self.time_edit)
+        notification_layout.addLayout(time_form_layout)
+
+        # Container para SMTP
+        smtp_form_layout = QFormLayout()
+        smtp_config = self.settings.get_smtp_config()
+        self.smtp_host_edit = QLineEdit(smtp_config['host'])
+        self.smtp_port_edit = QSpinBox()
+        self.smtp_port_edit.setRange(1, 65535)
+        self.smtp_port_edit.setValue(smtp_config['port'])
+        self.smtp_user_edit = QLineEdit(smtp_config['user'])
+        self.smtp_pass_edit = QLineEdit(smtp_config['password'])
+        self.smtp_pass_edit.setEchoMode(QLineEdit.Password)
+        self.smtp_recipient_edit = QLineEdit(smtp_config['recipient'])
         
-        # Adicionar campos ao formulário
-        form_layout.addRow(tema_label, self.tema_combo)
-        form_layout.addRow(font_label, self.font_size_spin)
+        smtp_form_layout.addRow("Servidor SMTP:", self.smtp_host_edit)
+        smtp_form_layout.addRow("Porta:", self.smtp_port_edit)
+        smtp_form_layout.addRow("Usuário (e-mail):", self.smtp_user_edit)
+        smtp_form_layout.addRow("Senha:", self.smtp_pass_edit)
+        smtp_form_layout.addRow(self.create_label_with_icon("Enviar para:", "send"), self.smtp_recipient_edit)
+        notification_layout.addLayout(smtp_form_layout)
         
-        layout.addLayout(form_layout)
-        
-        # Separador
-        separador2 = QFrame()
-        separador2.setFrameShape(QFrame.HLine)
-        separador2.setFrameShadow(QFrame.Sunken)
-        layout.addWidget(separador2)
-        
-        # Botões
+        main_layout.addWidget(notification_group)
+        main_layout.addStretch()
+
+        # --- Botões ---
         button_layout = QHBoxLayout()
-        self.salvar_btn = QPushButton("Salvar")
-        self.salvar_btn.setFont(QFont("Segoe UI", 11))
-        self.salvar_btn.setMinimumHeight(35)
-        self.salvar_btn.setObjectName("saveButton")
-        self.salvar_btn.clicked.connect(self.salvar_configuracoes)
-        
+        button_layout.addStretch()
+
         self.cancelar_btn = QPushButton("Cancelar")
-        self.cancelar_btn.setFont(QFont("Segoe UI", 11))
-        self.cancelar_btn.setMinimumHeight(35)
         self.cancelar_btn.setObjectName("cancelButton")
+        self.cancelar_btn.setIcon(IconManager.get_icon('cancel', color=self.theme_colors['text_color']))
         self.cancelar_btn.clicked.connect(self.reject)
         
-        button_layout.addWidget(self.salvar_btn)
+        self.salvar_btn = QPushButton("Salvar Alterações")
+        self.salvar_btn.setObjectName("saveButton")
+        self.salvar_btn.setIcon(IconManager.get_icon('save', color='white'))
+        self.salvar_btn.clicked.connect(self.salvar_configuracoes)
+
         button_layout.addWidget(self.cancelar_btn)
-        
-        layout.addLayout(button_layout)
+        button_layout.addWidget(self.salvar_btn)
+        main_layout.addLayout(button_layout)
     
-    def salvar_configuracoes(self):
-        """Salva as configurações."""
-        tema = self.tema_combo.currentData()
-        tamanho_fonte = self.font_size_spin.value()
+    def create_label_with_icon(self, text, icon_name):
+        """Cria um QHBoxLayout com um ícone e um texto para usar como label."""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
         
+        icon_label = QLabel()
+        icon_color = self.theme_colors.get('text_secondary', '#6d6d70')
+        icon = IconManager.get_icon(icon_name, color=icon_color).pixmap(16, 16)
+        icon_label.setPixmap(icon)
+        
+        text_label = QLabel(text)
+        
+        layout.addWidget(icon_label)
+        layout.addWidget(text_label)
+        layout.addStretch()
+        
+        return widget
+
+    def apply_styles(self):
+        """Aplica o estilo dinâmico com base nas cores do tema."""
+        theme = self.theme_colors
+        style = f"""
+            #configDialog {{
+                background-color: {theme['bg_color']};
+            }}
+            #dialogTitle {{
+                color: {theme['text_color']};
+                margin-bottom: 10px;
+            }}
+            QGroupBox {{
+                color: {theme['text_color']};
+                border: 1px solid {theme['border_color']};
+                border-radius: 8px;
+                margin-top: 10px;
+                padding: 10px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 5px 5px 10px;
+                color: {theme['accent_color']};
+            }}
+            QLabel, QCheckBox {{
+                color: {theme['text_color']};
+                font-size: 10pt;
+            }}
+            QLineEdit, QComboBox, QSpinBox, QTimeEdit {{
+                background-color: {theme['surface_color']};
+                color: {theme['text_color']};
+                border: 1px solid {theme['border_color']};
+                border-radius: 4px;
+                padding: 6px;
+                font-size: 10pt;
+            }}
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QTimeEdit:focus {{
+                border: 1px solid {theme['accent_color']};
+            }}
+            /* Botão de Salvar (Ação Primária) */
+            #saveButton {{
+                background-color: {theme['accent_color']};
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            #saveButton:hover {{
+                background-color: #0069d9; /* Um pouco mais escuro no hover */
+            }}
+            /* Botão de Cancelar (Ação Secundária) */
+            #cancelButton {{
+                background-color: transparent;
+                color: {theme['text_color']};
+                border: 1px solid {theme['border_color']};
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            #cancelButton:hover {{
+                background-color: {theme['button_hover']};
+                border-color: {theme['text_color']};
+            }}
+        """
+        self.setStyleSheet(style)
+
+    def salvar_configuracoes(self):
+        """Salva TODAS as configurações."""
+        # Salva configurações de tema
+        tema = self.tema_combo.currentData()
         self.settings.set_theme(tema)
-        self.settings.set_font_size(tamanho_fonte)
+
+        # Salva as configurações de notificação
+        self.settings.set_notification_enabled(self.enable_notifications_check.isChecked())
+        self.settings.set_notification_time(self.time_edit.time().toString("HH:mm"))
+
+        new_smtp_config = {
+            "host": self.smtp_host_edit.text(),
+            "port": self.smtp_port_edit.value(),
+            "user": self.smtp_user_edit.text(),
+            "password": self.smtp_pass_edit.text(),
+            "recipient": self.smtp_recipient_edit.text()
+        }
+        self.settings.set_smtp_config(new_smtp_config)
         
         self.accept()
 
 # Adicionar esta linha se ainda não existir:
 from PyQt5.QtWidgets import QApplication
 
+class AlertDialog(QDialog):
+    """Dialog customizado, integrado ao tema e visualmente aprimorado para alertas."""
+    
+    def __init__(self, parent, title, message, alert_type="info", theme_colors=None):
+        super().__init__(parent)
+        self.alert_type = alert_type
+        self.theme_colors = theme_colors or self._get_default_colors()
+        self.title_text = title
+        
+        self.setModal(True)
+        self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint) # Janela sem bordas padrão
+        self.setAttribute(Qt.WA_TranslucentBackground) # Para cantos arredondados
+
+        self._setup_alert_info()
+        self.setup_ui(message)
+        self.setup_animation()
+
+        # Permitir arrastar a janela
+        self.drag_position = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton:
+            self.move(event.globalPos() - self.drag_position)
+            event.accept()
+            
+    def _get_default_colors(self):
+        """Fornece cores padrão caso o tema não seja passado."""
+        return {
+            'bg_color': "#ffffff", 'surface_color': "#f2f2f7", 'text_color': "#000000",
+            'border_color': "#d1d1d6", 'accent_color': "#007AFF"
+        }
+
+    def _setup_alert_info(self):
+        """Define ícone e cor com base no tipo de alerta."""
+        alerts = {
+            "critical": {"icon": "delete", "color": "#d73a49", "pulse": "#ffcdd2", "prefix": "🚨"},
+            "warning":  {"icon": "estoque_baixo", "color": "#ffc107", "pulse": "#fff8e1", "prefix": "⏰"},
+            "stock":    {"icon": "check_stock", "color": "#007AFF", "pulse": "#bbdefb", "prefix": "📦"},
+            "info":     {"icon": "sobre", "color": "#2196f3", "pulse": "#e3f2fd", "prefix": "ℹ️"}
+        }
+        self.alert_info = alerts.get(self.alert_type, alerts["info"])
+
+    def setup_ui(self, message):
+        # Widget de container principal para ter cantos arredondados e sombra
+        container = QFrame(self)
+        container.setObjectName("alertDialogContainer")
+        
+        # Layout geral
+        main_layout = QVBoxLayout(container)
+        main_layout.setContentsMargins(1, 1, 1, 1) # Borda será o padding
+        main_layout.setSpacing(0)
+
+        self.setLayout(QVBoxLayout()) # Layout principal do QDialog
+        self.layout().addWidget(container)
+        self.layout().setContentsMargins(0,0,0,0)
+
+        # --- Cabeçalho ---
+        header = QFrame()
+        header.setObjectName("alertHeader")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(15, 10, 15, 10)
+        
+        icon_label = QLabel()
+        icon_pixmap = IconManager.get_icon(self.alert_info['icon'], color='white').pixmap(QSize(28, 28))
+        icon_label.setPixmap(icon_pixmap)
+        
+        title_label = QLabel(f"{self.alert_info['prefix']} {self.title_text}")
+        title_label.setObjectName("alertTitle")
+        
+        header_layout.addWidget(icon_label)
+        header_layout.addSpacing(10)
+        header_layout.addWidget(title_label, 1)
+
+        # --- Corpo ---
+        body = QFrame()
+        body.setObjectName("alertBody")
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(20, 15, 20, 20)
+        
+        self.text_area = QTextEdit()
+        self.text_area.setMarkdown(message.replace("\n", "  \n")) # Suporte a Markdown para negrito, etc.
+        self.text_area.setReadOnly(True)
+        self.text_area.setObjectName("alertTextArea")
+        
+        # --- Rodapé com Botão ---
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        ok_button = QPushButton("Entendido")
+        ok_button.setObjectName("okButton")
+        ok_button.clicked.connect(self.accept)
+        ok_button.setCursor(Qt.PointingHandCursor)
+        button_layout.addWidget(ok_button)
+
+        body_layout.addWidget(self.text_area)
+        body_layout.addSpacing(15)
+        body_layout.addLayout(button_layout)
+        
+        main_layout.addWidget(header)
+        main_layout.addWidget(body)
+
+        # Aplicar estilo inicial
+        self.apply_style(self.alert_info['color'])
+
+    def apply_style(self, border_color):
+        style = f"""
+        #alertDialogContainer {{
+            background-color: {self.theme_colors['surface_color']};
+            border: 2px solid {border_color};
+            border-radius: 12px;
+        }}
+        #alertHeader {{
+            background-color: {border_color};
+            border-top-left-radius: 10px;
+            border-top-right-radius: 10px;
+        }}
+        #alertTitle {{
+            color: white;
+            font-size: 14pt;
+            font-weight: bold;
+        }}
+        #alertBody {{
+            background-color: {self.theme_colors['surface_color']};
+            border-bottom-left-radius: 10px;
+            border-bottom-right-radius: 10px;
+        }}
+        #alertTextArea {{
+            background-color: {self.theme_colors['bg_color']};
+            color: {self.theme_colors['text_color']};
+            border: 1px solid {self.theme_colors['border_color']};
+            border-radius: 6px;
+            font-size: 10pt;
+            padding: 8px;
+        }}
+        #okButton {{
+            background-color: {self.alert_info['color']};
+            color: white;
+            font-weight: bold;
+            font-size: 10pt;
+            padding: 8px 25px;
+            border-radius: 6px;
+            border: none;
+        }}
+        #okButton:hover {{
+            background-color: {self.theme_colors['button_hover']};
+            color: {self.theme_colors['text_color']};
+            border: 1px solid {self.alert_info['color']};
+        }}
+        """
+        self.setStyleSheet(style)
+        self.setMinimumSize(600, 400)
+
+    def setup_animation(self):
+        if self.alert_type in ["critical", "warning"]:
+            self.timer = QTimer(self)
+            self.timer.timeout.connect(self.pulse_effect)
+            self.pulse_state = False
+            self.timer.start(700)
+
+    def pulse_effect(self):
+        border_color = self.theme_colors['surface_color'] if self.pulse_state else self.alert_info['color']
+        self.apply_style(border_color)
+        self.pulse_state = not self.pulse_state

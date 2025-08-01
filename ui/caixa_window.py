@@ -26,6 +26,52 @@ class CaixaWindow(QWidget):
         self.carregar_produtos()
         self.setup_codigo_barras()
 
+    def _update_icons(self):
+        """Define ou atualiza todos os ícones da janela usando o IconManager."""
+        # Define as cores principais com base no tema
+        text_color = self.theme_colors.get('text_color', '#000000')
+        text_secondary = self.theme_colors.get('text_secondary', '#6d6d70')
+        accent_color = self.theme_colors.get('accent_color', '#007AFF')
+        
+        # Cores específicas para ações
+        success_color = "#28a745"
+        danger_color = "#dc3545"
+        warning_color = "#ffc107"
+
+        # --- Abas Principais ---
+        self.tabs.setTabIcon(0, IconManager.get_icon('caixa', color=accent_color))
+        self.tabs.setTabIcon(1, IconManager.get_icon('relatorio', color=accent_color))
+        self.tabs.setTabIcon(2, IconManager.get_icon('report', color=accent_color))
+
+        # --- Status do Caixa ---
+        self.btn_abrir_caixa.setIcon(IconManager.get_icon('unlock', color=text_color))
+        self.btn_fechar_caixa.setIcon(IconManager.get_icon('lock', color=text_color))
+        
+        # --- Tab de Vendas (PDV) ---
+        self.btn_add_cliente.setIcon(IconManager.get_icon('add', color=text_color))
+        self.btn_atualizar_cliente.setIcon(IconManager.get_icon('atualizar', color=text_secondary))
+        self.btn_atualizar_produto.setIcon(IconManager.get_icon('atualizar', color=text_secondary))
+        self.btn_adicionar_item.setIcon(IconManager.get_icon('add', color=text_color))
+        self.btn_limpar.setIcon(IconManager.get_icon('clear', color=warning_color))
+        self.btn_finalizar.setIcon(IconManager.get_icon('check', color='white')) # Fundo verde, ícone branco
+
+        # --- Tab de Movimentações ---
+        self.btn_nova_entrada.setIcon(IconManager.get_icon('add', color=success_color))
+        self.btn_nova_saida.setIcon(IconManager.get_icon('send', color=danger_color))
+        self.btn_filtrar.setIcon(IconManager.get_icon('filter', color=text_color))
+
+        # --- Tab de Relatórios ---
+        self.btn_gerar_relatorio.setIcon(IconManager.get_icon('report', color=text_color))
+
+    def set_theme(self, theme_colors):
+        """Aplica as cores do tema e atualiza os ícones."""
+        self.theme_colors = theme_colors
+        self._update_icons()
+        # Força a reavaliação da folha de estilo herdada
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
     def initUI(self):
         # Layout principal
         main_layout = QVBoxLayout(self)
@@ -44,11 +90,11 @@ class CaixaWindow(QWidget):
         self.lbl_saldo.setStyleSheet("font-weight: bold;")
         status_layout.addWidget(self.lbl_saldo)
         
-        self.btn_abrir_caixa = QPushButton("Abrir Caixa")
+        self.btn_abrir_caixa = QPushButton(" Abrir Caixa") # Espaço para o ícone
         self.btn_abrir_caixa.clicked.connect(self.abrir_caixa)
         status_layout.addWidget(self.btn_abrir_caixa)
         
-        self.btn_fechar_caixa = QPushButton("Fechar Caixa")
+        self.btn_fechar_caixa = QPushButton(" Fechar Caixa") # Espaço para o ícone
         self.btn_fechar_caixa.setEnabled(False)
         self.btn_fechar_caixa.clicked.connect(self.fechar_caixa)
         status_layout.addWidget(self.btn_fechar_caixa)
@@ -61,19 +107,22 @@ class CaixaWindow(QWidget):
         # Tab de Vendas (PDV)
         self.tab_vendas = QWidget()
         self.setup_vendas_tab()
-        self.tabs.addTab(self.tab_vendas, "Vendas (PDV)")
+        self.tabs.addTab(self.tab_vendas, " Vendas (PDV)")
         
         # Tab de Movimentações
         self.tab_movimentos = QWidget()
         self.setup_movimentos_tab()
-        self.tabs.addTab(self.tab_movimentos, "Movimentações")
+        self.tabs.addTab(self.tab_movimentos, " Movimentações")
         
         # Tab de Relatórios
         self.tab_relatorios = QWidget()
         self.setup_relatorios_tab()
-        self.tabs.addTab(self.tab_relatorios, "Relatórios de Caixa")
+        self.tabs.addTab(self.tab_relatorios, " Relatórios de Caixa")
         
         main_layout.addWidget(self.tabs)
+
+        # CHAMA O MÉTODO PARA CONFIGURAR OS ÍCONES
+        self._update_icons()
     
     def setup_vendas_tab(self):
         layout = QVBoxLayout(self.tab_vendas)
@@ -94,14 +143,17 @@ class CaixaWindow(QWidget):
         btn_layout = QHBoxLayout(btn_container)
         btn_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Adicionar cliente
-        btn_add_cliente = QPushButton("+")
-        btn_add_cliente.setMaximumWidth(30)
-        btn_add_cliente.clicked.connect(self.adicionar_novo_cliente)
-        btn_layout.addWidget(btn_add_cliente)
+        # Adicionar cliente - Botão com ícone
+        self.btn_add_cliente = QPushButton() # Removido o texto "+"
+        self.btn_add_cliente.setFixedSize(30, 30)
+        self.btn_add_cliente.setToolTip("Adicionar Novo Cliente")
+        self.btn_add_cliente.clicked.connect(self.adicionar_novo_cliente)
+        btn_layout.addWidget(self.btn_add_cliente)
 
-        # Botão de atualizar cliente
-        self.btn_atualizar_cliente = QPushButton("Atualizar")
+        # Botão de atualizar cliente - Apenas Ícone
+        self.btn_atualizar_cliente = QPushButton() # Removido o texto "Atualizar"
+        self.btn_atualizar_cliente.setFixedSize(30, 30)
+        self.btn_atualizar_cliente.setToolTip("Atualizar lista de clientes")
         self.btn_atualizar_cliente.clicked.connect(self.carregar_clientes)
         btn_layout.addWidget(self.btn_atualizar_cliente)
 
@@ -114,13 +166,15 @@ class CaixaWindow(QWidget):
         self.cb_produto.setEditable(True)
         self.cb_produto.setInsertPolicy(QComboBox.NoInsert)
         self.cb_produto.currentIndexChanged.connect(self.produto_selecionado)
-        self.cb_produto.setCurrentText("")  # Inicia com o campo vazio
+        self.cb_produto.setCurrentText("")
         self.cb_produto.lineEdit().returnPressed.connect(self.buscar_produto)
-        self.cb_produto.setPlaceholderText("Digite o nome do produto ou escaneie o código de barras")
+        self.cb_produto.setPlaceholderText("Digite o nome ou escaneie o código")
         frame_info_layout.addWidget(self.cb_produto, 1, 1)
 
-        # Botão de atualizar produto
-        self.btn_atualizar_produto = QPushButton("Atualizar")
+        # Botão de atualizar produto - Apenas Ícone
+        self.btn_atualizar_produto = QPushButton() # Removido o texto "Atualizar"
+        self.btn_atualizar_produto.setFixedSize(30, 30)
+        self.btn_atualizar_produto.setToolTip("Atualizar lista de produtos")
         self.btn_atualizar_produto.clicked.connect(self.carregar_produtos)
         frame_info_layout.addWidget(self.btn_atualizar_produto, 1, 2)
                 
@@ -142,7 +196,7 @@ class CaixaWindow(QWidget):
         frame_info_layout.addWidget(self.spin_preco, 1, 4)
         
         # Botão adicionar item
-        self.btn_adicionar_item = QPushButton("Adicionar Item")
+        self.btn_adicionar_item = QPushButton(" Adicionar Item") # Espaço para ícone
         self.btn_adicionar_item.clicked.connect(self.adicionar_item)
         frame_info_layout.addWidget(self.btn_adicionar_item, 0, 5, 2, 1)
         
@@ -151,10 +205,11 @@ class CaixaWindow(QWidget):
         # Tabela de itens
         self.tabela_itens = QTableWidget()
         self.tabela_itens.setColumnCount(6)
-        self.tabela_itens.setHorizontalHeaderLabels(['Cód.', 'Produto', 'Qtde', 'Preço Unit.', 'Subtotal', 'Remover'])
+        self.tabela_itens.setHorizontalHeaderLabels(['Cód.', 'Produto', 'Qtde', 'Preço Unit.', 'Subtotal', '']) # Header de remover vazio
         self.tabela_itens.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.tabela_itens.setSelectionBehavior(QTableWidget.SelectRows)
         self.tabela_itens.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.tabela_itens.setColumnWidth(5, 40) # Coluna de remover mais estreita
         layout.addWidget(self.tabela_itens)
         
         # Frame inferior com total e finalização
@@ -162,28 +217,17 @@ class CaixaWindow(QWidget):
         frame_total.setFrameShape(QFrame.StyledPanel)
         frame_total_layout = QHBoxLayout(frame_total)
         
-        # Total da venda
         self.lbl_total = QLabel("Total: R$ 0,00")
         self.lbl_total.setStyleSheet("font-size: 18px; font-weight: bold;")
         frame_total_layout.addWidget(self.lbl_total)
-
-        self.lbl_total.setStyleSheet("""
-            font-size: 30px; 
-            font-weight: bold;
-            color: #2c3e50;
-            padding: 10px;
-            background-color: #ecf0f1;
-            border-radius: 5px;
-        """)
         
-        # Botões de ação
         frame_total_layout.addStretch()
         
-        self.btn_limpar = QPushButton("Limpar Venda")
+        self.btn_limpar = QPushButton(" Limpar Venda") # Espaço para ícone
         self.btn_limpar.clicked.connect(self.limpar_venda)
         frame_total_layout.addWidget(self.btn_limpar)
         
-        self.btn_finalizar = QPushButton("Finalizar Venda")
+        self.btn_finalizar = QPushButton(" Finalizar Venda") # Espaço para ícone
         self.btn_finalizar.clicked.connect(self.finalizar_venda)
         self.btn_finalizar.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
         frame_total_layout.addWidget(self.btn_finalizar)
@@ -234,16 +278,16 @@ class CaixaWindow(QWidget):
         frame_acoes = QFrame()
         frame_acoes_layout = QHBoxLayout(frame_acoes)
         
-        self.btn_nova_entrada = QPushButton("Nova Entrada")
+        self.btn_nova_entrada = QPushButton(" Nova Entrada")        
         self.btn_nova_entrada.clicked.connect(lambda: self.novo_movimento("Entrada"))
         frame_acoes_layout.addWidget(self.btn_nova_entrada)
         
-        self.btn_nova_saida = QPushButton("Nova Saída")
+        self.btn_nova_saida = QPushButton(" Nova Saída")
         self.btn_nova_saida.clicked.connect(lambda: self.novo_movimento("Saída"))
         frame_acoes_layout.addWidget(self.btn_nova_saida)
         
         frame_acoes_layout.addStretch()
-        
+
         # Filtros
         frame_acoes_layout.addWidget(QLabel("Data Início:"))
         self.dt_inicio = QDateEdit(QDate.currentDate())
@@ -255,7 +299,7 @@ class CaixaWindow(QWidget):
         self.dt_fim.setCalendarPopup(True)
         frame_acoes_layout.addWidget(self.dt_fim)
         
-        self.btn_filtrar = QPushButton("Filtrar")
+        self.btn_filtrar = QPushButton(" Filtrar")
         self.btn_filtrar.clicked.connect(self.filtrar_movimentos)
         frame_acoes_layout.addWidget(self.btn_filtrar)
         
@@ -313,7 +357,7 @@ class CaixaWindow(QWidget):
         self.dt_rel_fim.setCalendarPopup(True)
         frame_filtros_layout.addWidget(self.dt_rel_fim)
         
-        self.btn_gerar_relatorio = QPushButton("Gerar Relatório")
+        self.btn_gerar_relatorio = QPushButton(" Gerar Relatório")
         self.btn_gerar_relatorio.clicked.connect(self.gerar_relatorio)
         frame_filtros_layout.addWidget(self.btn_gerar_relatorio)
         
@@ -511,7 +555,6 @@ class CaixaWindow(QWidget):
             self.tabela_itens.setItem(i, 0, QTableWidgetItem(str(item['produto_id'])))
             self.tabela_itens.setItem(i, 1, QTableWidgetItem(item['produto_nome']))
             
-            # Mostrar quantidade com unidade de medida se for fração
             if item.get('tipo_venda') == 'fracao':
                 qtd_display = f"{item['quantidade']} {item.get('unidade_medida', 'un')}"
             else:
@@ -521,9 +564,12 @@ class CaixaWindow(QWidget):
             self.tabela_itens.setItem(i, 3, QTableWidgetItem(f"R$ {item['preco_unitario']:.2f}"))
             self.tabela_itens.setItem(i, 4, QTableWidgetItem(f"R$ {item['subtotal']:.2f}"))
             
-            # Botão remover
-            btn_remover = QPushButton("✕")
-            btn_remover.setStyleSheet("color: red;")
+            # Botão remover com ícone
+            btn_remover = QPushButton()
+            btn_remover.setIcon(IconManager.get_icon('delete', color='#dc3545'))
+            btn_remover.setToolTip("Remover item")
+            btn_remover.setFlat(True) # Remove bordas para parecer mais integrado
+            btn_remover.setCursor(Qt.PointingHandCursor)
             btn_remover.clicked.connect(lambda checked, row=i: self.remover_item(row))
             self.tabela_itens.setCellWidget(i, 5, btn_remover)
     
@@ -1385,8 +1431,8 @@ class CaixaWindow(QWidget):
             self.tabela_rel_vendas.setItem(i, 5, QTableWidgetItem(venda['forma_pagamento']))
         
         # Adicionar botão para exportar PDF
-        self.btn_exportar_pdf = QPushButton("Exportar para PDF", self)
-        self.btn_exportar_pdf.setIcon(QIcon("icons/pdf.png"))  # Se tiver um ícone de PDF
+        self.btn_exportar_pdf = QPushButton(" Exportar para PDF", self) # Adicionado espaço
+        self.btn_exportar_pdf.setIcon(IconManager.get_icon('report', color=self.theme_colors.get('text_color', '#000000'))) # Ícone adicionado aqui
         self.btn_exportar_pdf.clicked.connect(lambda: self.exportar_relatorio_pdf(data_inicio, data_fim, dados))
         
         # Adicionar o botão ao layout (ajuste conforme seu layout específico)

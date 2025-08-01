@@ -47,3 +47,39 @@ class Settings:
     def set_font_size(self, size):
         """Define o tamanho da fonte."""
         self.settings.setValue("font_size", size)
+
+    # --- MÉTODOS PARA CONFIGURAÇÃO DE NOTIFICAÇÕES ---
+
+    def get_notification_enabled(self):
+        """Verifica se as notificações por e-mail estão ativas."""
+        return self.settings.value("notifications/enabled", False, type=bool)
+
+    def set_notification_enabled(self, enabled):
+        """Define se as notificações estão ativas."""
+        self.settings.setValue("notifications/enabled", enabled)
+
+    def get_notification_time(self):
+        """Retorna o horário agendado para as notificações (ex: "08:00")."""
+        return self.settings.value("notifications/time", "08:00")
+
+    def set_notification_time(self, time_str):
+        """Define o horário das notificações."""
+        self.settings.setValue("notifications/time", time_str)
+
+    def get_smtp_config(self):
+        """Retorna um dicionário com as configurações do servidor SMTP."""
+        return {
+            "host": self.settings.value("smtp/host", "smtp.example.com"),
+            "port": self.settings.value("smtp/port", 587, type=int),
+            "user": self.settings.value("smtp/user", "seu_email@example.com"),
+            "password": self.settings.value("smtp/password", ""), # A senha
+            "recipient": self.settings.value("smtp/recipient", "destinatario@example.com") # E-mail que receberá a notificação
+        }
+
+    def set_smtp_config(self, config):
+        """Salva as configurações SMTP."""
+        self.settings.setValue("smtp/host", config["host"])
+        self.settings.setValue("smtp/port", config["port"])
+        self.settings.setValue("smtp/user", config["user"])
+        self.settings.setValue("smtp/password", config["password"])
+        self.settings.setValue("smtp/recipient", config["recipient"])
