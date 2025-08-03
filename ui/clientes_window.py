@@ -79,6 +79,8 @@ class ClienteCsvImportWorker(QThread):
 
 
 class ClientesWindow(QWidget):
+    dados_clientes_alterados = pyqtSignal()
+
     def __init__(self, db, theme_colors):
         super().__init__()
         self.db = db
@@ -273,8 +275,15 @@ class ClientesWindow(QWidget):
     # ... O restante do código (abrir formulário, excluir, importar, exportar) permanece o mesmo ...
     def abrir_formulario_cliente(self, cliente_id=None):
         dialog = FormularioCliente(self.db, cliente_id)
+        
+        # Verificamos se o diálogo foi fechado com "Salvar" (Accepted)
         if dialog.exec_() == QDialog.Accepted:
+            # Se foi salvo com sucesso, atualizamos a tabela da própria janela...
             self.atualizar_visualizacao_dados()
+            
+            # <<< E EMITIMOS O SINAL PARA O RESTO DO SISTEMA! >>>
+            print("DEBUG: Formulário fechado com sucesso. Emitindo sinal 'dados_clientes_alterados'.")
+            self.dados_clientes_alterados.emit()
 
     def excluir_cliente(self, cliente_id):
         confirmacao = QMessageBox.question(
@@ -285,6 +294,10 @@ class ClientesWindow(QWidget):
             if self.db.excluir_cliente(cliente_id):
                 QMessageBox.information(self, "Sucesso", "Cliente excluído.")
                 self.atualizar_visualizacao_dados()
+                
+                # <<< EMITA O SINAL AQUI TAMBÉM! >>>
+                print("DEBUG: Cliente excluído. Emitindo sinal 'dados_clientes_alterados'.")
+                self.dados_clientes_alterados.emit()
             else:
                 QMessageBox.warning(self, "Erro", "Não foi possível excluir o cliente.")
     
@@ -337,6 +350,12 @@ class ClientesWindow(QWidget):
     def importacao_concluida(self, importados, erros, detalhes):
         self.progress_dialog.close()
         self.atualizar_visualizacao_dados()
+
+        # <<< EMITA O SINAL SE PELO MENOS UM CLIENTE FOI IMPORTADO >>>
+        if importados > 0:
+            print("DEBUG: Importação CSV concluída. Emitindo sinal 'dados_clientes_alterados'.")
+            self.dados_clientes_alterados.emit()
+
         msg = f"Importação concluída!\n\nSucesso: {importados}\nFalhas: {erros}"
         if erros > 0:
             msg += "\n\nPrimeiros erros:\n" + "\n".join(detalhes[:5])

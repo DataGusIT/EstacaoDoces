@@ -35,7 +35,6 @@ class MainWindow(QMainWindow):
     def initUI(self):
         self.setWindowTitle("Sistema de Estoque - GestorX")
         self.setGeometry(100, 100, 1280, 720)
-        self.setWindowIcon(IconManager.get_icon('estoque'))
         
         central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
@@ -43,7 +42,6 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Obter cores UMA VEZ no início para a criação dos widgets.
         theme_colors = self._get_theme_colors()
 
         # ===== CABEÇALHO UNIFICADO =====
@@ -55,13 +53,19 @@ class MainWindow(QMainWindow):
         header_layout.setSpacing(10)
         
         self.app_logo = QLabel()
-        self.app_logo.setFixedSize(32, 32)
+        logo_pixmap = self.carregar_logo_pixmap() 
+        if logo_pixmap:
+            self.app_logo.setPixmap(logo_pixmap)
+            
+        # --- CORREÇÃO: Aumente o tamanho do QLabel aqui ---
+        self.app_logo.setFixedSize(60, 60) # De: 32, 32  Para: 40, 40
+
         app_title = QLabel("Sistema de Estoque - GestorX")
         app_title.setFont(QFont("Segoe UI", 12, QFont.Bold))
         app_title.setObjectName("appTitle")
+        
         header_layout.addWidget(self.app_logo)
         header_layout.addWidget(app_title)
-        header_layout.addSpacing(20)
         
         # Menus do cabeçalho
         self.arquivo_btn = QPushButton("Arquivo")
@@ -263,6 +267,20 @@ class MainWindow(QMainWindow):
         # Aplica o tema DEPOIS que todos os widgets foram criados.
         self.aplicar_tema()
 
+        # --- CONEXÕES PARA ATUALIZAÇÃO AUTOMÁTICA ---
+        # Conecta o sinal da janela de clientes a um "manipulador" (handler)
+        if hasattr(self.clientes_page, 'dados_clientes_alterados'):
+            self.clientes_page.dados_clientes_alterados.connect(self.on_dados_clientes_changed)
+
+        # Faça o mesmo para outras páginas
+        if hasattr(self.estoque_page, 'dados_produtos_alterados'):
+            self.estoque_page.dados_produtos_alterados.connect(self.on_dados_produtos_changed)
+
+        if hasattr(self.fornecedor_page, 'dados_fornecedores_alterados'):
+            self.fornecedor_page.dados_fornecedores_alterados.connect(self.on_dados_fornecedores_changed)
+        
+        # ... etc para outras janelas que modificam dados
+
          # --- INICIA O GERENCIADOR DE NOTIFICAÇÕES E O AGENDADOR ---
         self.notification_manager = NotificationManager(self.db, self.settings)
         self.scheduler = Scheduler(self.settings)
@@ -270,6 +288,47 @@ class MainWindow(QMainWindow):
         self.scheduler.log_message.connect(self.log_scheduler_message)
         self.scheduler.start() # Inicia a thread do agendador
     
+    def on_dados_clientes_changed(self):
+        """
+        Este método (slot) é chamado quando a ClientesWindow emite o sinal.
+        Ele atualiza as janelas que dependem da lista de clientes.
+        """
+        print("Sinal recebido: dados de clientes alterados. Atualizando Caixa...")
+        # A CaixaWindow precisa da lista de clientes atualizada.
+        if hasattr(self.caixa_page, 'carregar_clientes'):
+            self.caixa_page.carregar_clientes()
+        
+        # O Dashboard também pode precisar ser atualizado.
+        if hasattr(self.dashboard_page, 'carregar_dados'):
+            self.dashboard_page.carregar_dados()
+
+    def on_dados_produtos_changed(self):
+        """
+        Chamado quando a EstoqueWindow emite seu sinal.
+        Atualiza as janelas que dependem da lista de produtos.
+        """
+        print("Sinal recebido: dados de produtos alterados. Atualizando Caixa e Promoções...")
+        # A CaixaWindow precisa da lista de produtos.
+        if hasattr(self.caixa_page, 'carregar_produtos'):
+            self.caixa_page.carregar_produtos()
+        
+        # A PromocoesWindow também precisa.
+        if hasattr(self.promocoes_page, 'carregar_dados'):
+            self.promocoes_page.carregar_dados()
+
+        # O Dashboard também.
+        if hasattr(self.dashboard_page, 'carregar_dados'):
+            self.dashboard_page.carregar_dados()
+
+    def on_dados_fornecedores_changed(self):
+        """
+        Chamado quando a FornecedorWindow emite seu sinal.
+        """
+        print("Sinal recebido: dados de fornecedores alterados. Atualizando Estoque...")
+        # A EstoqueWindow precisa da lista de fornecedores.
+        if hasattr(self.estoque_page, 'carregar_dados'):
+             self.estoque_page.carregar_dados()
+
     def log_scheduler_message(self, message):
         """Exibe mensagens do agendador na barra de status."""
         print(message) # Para depuração no console
@@ -286,13 +345,15 @@ class MainWindow(QMainWindow):
     
     def carregar_logo_pixmap(self):
         """Carrega a logo como QPixmap para uso no cabeçalho"""
-        logo_path = os.path.join("assets", "img", "GestorX_logo.png")
+        logo_path = os.path.join("assets", "img", "GestorX (2).png")
+        
         if os.path.exists(logo_path):
             pixmap = QPixmap(logo_path)
-            # Redimensiona a logo mantendo a proporção
-            return pixmap.scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            
+            # --- CORREÇÃO: Redimensione a imagem para o novo tamanho aqui ---
+            return pixmap.scaled(60, 60, Qt.KeepAspectRatio, Qt.SmoothTransformation) # De: 32, 32  Para: 40, 40
         else:
-            print(f"Logo não encontrada em: {logo_path}")
+            print(f"ATENÇÃO: Arquivo de logo não encontrado no caminho: {logo_path}")
             return None
     
     def criar_botao_menu(self, texto, icon_name=None):
@@ -549,8 +610,10 @@ class MainWindow(QMainWindow):
         border_color = theme['border_color']
         button_hover = theme['button_hover']
 
-        # Ícones dinâmicos
-        self.app_logo.setPixmap(IconManager.get_icon('estoque', accent_color).pixmap(QSize(32, 32)))
+        # --- CORREÇÃO: A linha que definia a imagem da logo foi removida daqui ---
+        # A logo agora é definida apenas no initUI e não será mais sobrescrita.
+
+        # Ícones dinâmicos que DEVEM mudar com o tema
         self.hamburger_btn.setIcon(IconManager.get_icon('menu', text_color))
         self.refresh_button.setIcon(IconManager.get_icon('atualizar', 'white'))
         self.minimize_btn.setIcon(IconManager.get_icon('minimizar', text_secondary))
@@ -560,7 +623,7 @@ class MainWindow(QMainWindow):
         # Atualiza os ícones do menu lateral para a cor correta (inativa/ativa)
         self.switch_page(self.stack.currentIndex())
         
-        # Aplica a folha de estilo principal
+        # Aplica a folha de estilo principal (o restante da sua função está perfeito)
         self.setStyleSheet(f"""
             QMainWindow, #centralWidget, QDialog {{
                 background-color: {bg_color};
@@ -616,41 +679,33 @@ class MainWindow(QMainWindow):
 
             /* --- ESTILO DAS ABAS (QTabWidget) --- */
             QTabWidget::pane {{
-                /* O painel onde o conteúdo da aba aparece */
                 border: 1px solid {border_color};
-                border-top: none; /* Remove a borda superior para conectar com a aba */
+                border-top: none;
                 background-color: {surface_color};
             }}
-
             QTabWidget::tab-bar {{
-                /* A barra que contém as abas */
                 alignment: left;
             }}
-
             QTabBar::tab {{
-                /* Cada aba individual */
                 background-color: {bg_color};
                 color: {text_secondary};
                 padding: 8px 15px;
                 border: 1px solid {border_color};
-                border-bottom: none; /* Remove a borda de baixo da aba inativa */
+                border-bottom: none;
                 border-top-left-radius: 6px;
                 border-top-right-radius: 6px;
-                margin-right: 2px; /* Espaço entre as abas */
+                margin-right: 2px;
                 font-weight: bold;
             }}
-
             QTabBar::tab:hover {{
                 background-color: {button_hover};
                 color: {text_color};
             }}
-
             QTabBar::tab:selected {{
-                /* A aba que está ativa/selecionada */
-                background-color: {surface_color}; /* Cor de fundo igual ao painel para dar efeito de conexão */
+                background-color: {surface_color};
                 color: {accent_color};
                 border: 1px solid {border_color};
-                border-bottom: 1px solid {surface_color}; /* "Apaga" a borda de baixo da aba ativa, conectando-a ao painel */
+                border-bottom: 1px solid {surface_color};
             }}
 
             /* --- BOTÕES --- */
@@ -669,8 +724,6 @@ class MainWindow(QMainWindow):
             QPushButton:pressed {{
                 background-color: {border_color};
             }}
-            
-            /* Botão de Ação Primária (Ex: Adicionar) */
             #primaryActionButton {{
                 background-color: {accent_color};
                 color: white;
@@ -727,10 +780,7 @@ class MainWindow(QMainWindow):
             self.promocoes_page.set_theme(theme)
         if hasattr(self, 'clientes_page') and self.clientes_page:
             self.clientes_page.set_theme(theme)
-
-        # Adicione a propagação para a caixa_page também para garantir consistência
         if hasattr(self, 'caixa_page') and self.caixa_page:
-            # Você precisará criar um método set_theme em CaixaWindow
             if hasattr(self.caixa_page, 'set_theme'):
                  self.caixa_page.set_theme(theme)
         
@@ -763,24 +813,19 @@ class MainWindow(QMainWindow):
                                 "As configurações foram salvas. Algumas alterações podem exigir que o aplicativo seja reiniciado para terem efeito completo.")
     
     def atualizar_dados(self):
-        """Atualiza os dados da página atual."""
-        current_index = self.stack.currentIndex()
+        """Atualiza os dados da página atual chamando seu método padronizado 'carregar_dados'."""
+        current_widget = self.stack.currentWidget()
         
-        pages = [self.dashboard_page, self.estoque_page, self.fornecedor_page,
-                self.promocoes_page, self.clientes_page, self.caixa_page]
-        
-        if current_index < len(pages):
-            page = pages[current_index]
-            
-            # Verificar se a página tem o método carregar_dados
-            if hasattr(page, 'carregar_dados'):
-                page.carregar_dados()
+        if hasattr(current_widget, 'carregar_dados'):
+            try:
+                print(f"DEBUG: Chamando carregar_dados() na página {current_widget.__class__.__name__}")
+                current_widget.carregar_dados()
                 self.statusBar.showMessage("Dados atualizados com sucesso!", 3000)
-            elif hasattr(page, 'carregar_produtos'):  # Para CaixaWindow
-                page.carregar_produtos()
-                self.statusBar.showMessage("Dados atualizados com sucesso!", 3000)
-            else:
-                self.statusBar.showMessage("Página não possui método de atualização.", 3000)
+            except Exception as e:
+                print(f"ERRO ao chamar carregar_dados na página {current_widget.__class__.__name__}: {e}")
+                self.statusBar.showMessage("Erro ao atualizar dados.", 3000)
+        else:
+            self.statusBar.showMessage(f"A página atual não possui um método de atualização ('carregar_dados').", 3000)
     
     def check_promocoes_ativas(self):
         """Verifica e exibe promoções ativas na barra de status."""

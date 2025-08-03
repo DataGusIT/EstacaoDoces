@@ -620,10 +620,10 @@ class DashboardWindow(QWidget):
             self.card_vencendo.setProperty("hasAlert", alertas.get('vencendo_30d', 0) > 0)
             self.card_vencidos.setProperty("hasAlert", alertas.get('vencidos', 0) > 0)
 
-            # --- Atualizar Tabelas e Gráficos (sem alterações aqui) ---
-            self._atualizar_tabela(self.tabela_produtos, dados.get('produtos', []), ['Produto', 'Qtde', 'Valor Total', '% Part.'], faturamento_valor)
-            self._atualizar_tabela(self.tabela_pagamentos, dados.get('pagamentos', []), ['Forma', 'Valor Total', '% Part.'], faturamento_valor)
-            self._atualizar_tabela(self.tabela_clientes, dados.get('clientes', []), ['Cliente', 'Nº Compras', 'Valor Total', 'Ticket Médio'])
+            # Usamos as chaves reais do DB ('nome', 'quantidade') e chaves virtuais ('participacao') que a função vai entender.
+            self._atualizar_tabela(self.tabela_produtos, dados.get('produtos', []), ['nome', 'quantidade', 'valor_total', 'participacao'], faturamento_valor)
+            self._atualizar_tabela(self.tabela_pagamentos, dados.get('pagamentos', []), ['forma', 'valor_total', 'participacao'], faturamento_valor)
+            self._atualizar_tabela(self.tabela_clientes, dados.get('clientes', []), ['nome', 'compras', 'valor_total', 'ticket_medio'])
 
             self.atualizar_grafico_vendas_diarias(dados.get('vendas_diarias', []))
             self.atualizar_grafico_produtos(dados.get('produtos', [])[:5])
@@ -645,15 +645,34 @@ class DashboardWindow(QWidget):
             table.insertRow(i)
             for j, key in enumerate(keys):
                 item_text = ""
-                if key == 'valor_total' or key == 'ticket_medio':
+                # A chave 'key' agora é a chave real do dicionário (ex: 'valor_total')
+                
+                if key == 'valor_total':
                     item_text = f"R$ {row_data.get(key, 0):.2f}"
-                elif key == '% part.':
-                    participacao = (row_data['valor_total'] / total_faturamento * 100) if total_faturamento else 0
-                    item_text = f"{participacao:.2f}%"
+                
+                elif key == 'ticket_medio':
+                    # Cálculo especial para o ticket médio do cliente
+                    valor = row_data.get('valor_total', 0)
+                    compras = row_data.get('compras', 1) # Usar 'compras' da query de clientes
+                    ticket = valor / compras if compras > 0 else 0
+                    item_text = f"R$ {ticket:.2f}"
+
+                elif key == 'participacao':
+                    # Cálculo especial para a participação percentual
+                    valor_item = row_data.get('valor_total', 0)
+                    participacao = (valor_item / total_faturamento * 100) if total_faturamento and total_faturamento > 0 else 0
+                    item_text = f"{participacao:.1f}%"
+                
                 else:
+                    # Para chaves normais como 'nome', 'quantidade', 'forma', 'compras'
                     item_text = str(row_data.get(key, ''))
                 
-                table.setItem(i, j, QTableWidgetItem(item_text))
+                item = QTableWidgetItem(item_text)
+                # Alinha números e percentuais à direita para melhor visualização
+                if key in ['valor_total', 'ticket_medio', 'participacao', 'quantidade', 'compras']:
+                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+                table.setItem(i, j, item)
     
     def mostrar_sem_dados(self):
         """Limpa a UI quando não há dados."""
