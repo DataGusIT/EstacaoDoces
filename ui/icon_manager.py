@@ -1,7 +1,16 @@
+# icon_manager.py
+
 import qtawesome as qta
+import os
+import tempfile # Importe a biblioteca tempfile
 
 class IconManager:
     """Centraliza a criação de ícones para garantir consistência."""
+    
+    # Dicionário para guardar o caminho dos ícones já criados
+    _icon_path_cache = {}
+
+    # Dentro da classe IconManager
 
     ICONS = {
         # === ÍCONES GERAIS E DE NAVEGAÇÃO ===
@@ -41,7 +50,7 @@ class IconManager:
         # === IMPORTAÇÃO / EXPORTAÇÃO ===
         'report': 'fa5s.file-pdf',
         'export': 'fa5s.file-csv',
-        'import': 'fa5s.file-upload',
+        'import': 'fa5s.file-upload', # <<< LINHA CORRIGIDA
         'send': 'fa5s.paper-plane',
 
         # === USUÁRIO E ACESSO ===
@@ -82,7 +91,6 @@ class IconManager:
         'box-open': 'fa5s.box-open', # Alias para 'check_stock'
         'tag': 'fa5s.tag', # Singular para preço unitário
         'cubes': 'fa5s.cubes', # Para estoque fracionado
-        
     }
 
     @staticmethod
@@ -90,22 +98,28 @@ class IconManager:
         """Retorna um QIcon de qtawesome a partir de um nome semântico."""
         icon_name = IconManager.ICONS.get(name, 'fa5s.question-circle') # Ícone de fallback
         return qta.icon(icon_name, color=color, **options)
-    
-    @staticmethod
-    def has_icon(name):
-        """Verifica se um ícone existe no mapeamento."""
-        return name in IconManager.ICONS
 
-    @staticmethod
-    def list_available_icons():
-        """Lista todos os ícones disponíveis."""
-        return list(IconManager.ICONS.keys())
+    # ===== NOVO MÉTODO ADICIONADO =====
+    @classmethod
+    def get_icon_path(cls, name, color='#000000', size=16):
+        """
+        Gera um ícone como um arquivo PNG temporário e retorna seu caminho.
+        Usa um cache para evitar recriar arquivos.
+        """
+        cache_key = f"{name}_{color}_{size}"
+        if cache_key in cls._icon_path_cache:
+            return cls._icon_path_cache[cache_key]
 
-    @staticmethod
-    def get_icon_safe(name, color='#000000', fallback_icon='question-circle'):
-        """Versão segura que permite especificar um ícone de fallback personalizado."""
-        if name in IconManager.ICONS:
-            icon_name = IconManager.ICONS[name]
-        else:
-            icon_name = IconManager.ICONS.get(fallback_icon, 'fa5s.question-circle')
-        return qta.icon(icon_name, color=color)
+        icon = cls.get_icon(name, color=color)
+        pixmap = icon.pixmap(size, size)
+        
+        # Cria um arquivo temporário para o ícone
+        temp_dir = tempfile.gettempdir()
+        file_path = os.path.join(temp_dir, f"{cache_key}.png")
+        
+        pixmap.save(file_path)
+        
+        # Armazena no cache e retorna
+        cls._icon_path_cache[cache_key] = file_path
+        return file_path
+    # ===== FIM DO NOVO MÉTODO =====

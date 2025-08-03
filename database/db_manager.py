@@ -87,8 +87,9 @@ class DatabaseManager:
             data_validade DATE,
             localizacao TEXT,
             fornecedor_id INTEGER,
-            categoria TEXT,  -- NOVO CAMPO
+            categoria TEXT,
             data_cadastro DATE DEFAULT CURRENT_DATE,
+            imagem_path TEXT, -- <<< ADICIONE ESTA LINHA
 
             -- Campos para controle de produtos fracionados
             fracionado INTEGER DEFAULT 0,
@@ -380,23 +381,24 @@ class DatabaseManager:
 
     # Métodos para Produtos (atualizados)
     def adicionar_produto(self, codigo_barras, nome, descricao, quantidade, estoque_minimo,
-                preco_compra, margem_lucro, preco_venda, 
-                data_validade, localizacao, fornecedor_id, categoria=None,  # NOVO PARÂMETRO
-                fracionado=False, unidade_medida="unidade", qtd_por_embalagem=1, 
-                preco_unitario_fracao=None, estoque_fracionado=0):
+            preco_compra, margem_lucro, preco_venda, 
+            data_validade, localizacao, fornecedor_id, categoria=None,
+            imagem_path=None, # <<< ADICIONE ESTE PARÂMETRO
+            fracionado=False, unidade_medida="unidade", qtd_por_embalagem=1, 
+            preco_unitario_fracao=None, estoque_fracionado=0):
 
         self.cursor.execute('''
         INSERT INTO produtos (
             codigo_barras, nome, descricao, quantidade, estoque_minimo,
             preco_compra, margem_lucro, preco_venda, 
-            data_validade, localizacao, fornecedor_id, categoria,
+            data_validade, localizacao, fornecedor_id, categoria, imagem_path, -- <<< ADICIONE AQUI
             fracionado, unidade_medida, qtd_por_embalagem, preco_unitario_fracao, estoque_fracionado
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) -- <<< ADICIONE UMA '?'
         ''', (
             codigo_barras, nome, descricao, quantidade, estoque_minimo,
             preco_compra, margem_lucro, preco_venda, 
-            data_validade, localizacao, fornecedor_id, categoria,
+            data_validade, localizacao, fornecedor_id, categoria, imagem_path, # <<< ADICIONE AQUI
             1 if fracionado else 0, unidade_medida, qtd_por_embalagem, 
             preco_unitario_fracao, estoque_fracionado
         ))
@@ -404,16 +406,18 @@ class DatabaseManager:
         return self.cursor.lastrowid
 
     def atualizar_produto(self, id, codigo_barras, nome, descricao, quantidade, estoque_minimo,
-                    preco_compra, margem_lucro, preco_venda, 
-                    data_validade, localizacao, fornecedor_id, categoria=None,  # NOVO PARÂMETRO
-                    fracionado=False, unidade_medida="unidade", qtd_por_embalagem=1, 
-                    preco_unitario_fracao=None, estoque_fracionado=0):
+                preco_compra, margem_lucro, preco_venda, 
+                data_validade, localizacao, fornecedor_id, categoria=None,
+                imagem_path=None, # <<< ADICIONE ESTE PARÂMETRO
+                fracionado=False, unidade_medida="unidade", qtd_por_embalagem=1, 
+                preco_unitario_fracao=None, estoque_fracionado=0):
 
         self.cursor.execute('''
         UPDATE produtos
         SET codigo_barras = ?, nome = ?, descricao = ?, quantidade = ?, estoque_minimo = ?,
             preco_compra = ?, margem_lucro = ?, preco_venda = ?,
             data_validade = ?, localizacao = ?, fornecedor_id = ?, categoria = ?,
+            imagem_path = ?, -- <<< ADICIONE ESTA LINHA
             fracionado = ?, unidade_medida = ?, qtd_por_embalagem = ?, 
             preco_unitario_fracao = ?, estoque_fracionado = ?
         WHERE id = ?
@@ -421,6 +425,7 @@ class DatabaseManager:
             codigo_barras, nome, descricao, quantidade, estoque_minimo,
             preco_compra, margem_lucro, preco_venda,
             data_validade, localizacao, fornecedor_id, categoria,
+            imagem_path, # <<< ADICIONE AQUI
             1 if fracionado else 0, unidade_medida, qtd_por_embalagem, 
             preco_unitario_fracao, estoque_fracionado, id
         ))
@@ -1614,10 +1619,28 @@ class DatabaseManager:
                 faturamento_periodo = vendas_resumo['faturamento'] or 0
                 num_vendas_periodo = vendas_resumo['num_vendas'] or 0
 
+                # Calcula o custo do item dinamicamente com base no tipo de venda (embalagem vs. unidade)
                 cursor.execute(f"""
-                    SELECT SUM(i.subtotal - (i.quantidade * COALESCE(p.preco_compra, 0))) as lucro
-                    FROM itens_venda i JOIN produtos p ON i.produto_id = p.id
-                    WHERE i.venda_id {query_in_ids} AND p.preco_compra > 0
+                    SELECT SUM(
+                        i.subtotal - (
+                            i.quantidade * 
+                            CASE 
+                                -- Se for um produto fracionado e o preço da venda corresponder ao preço da fração,
+                                -- o custo é calculado por unidade.
+                                WHEN p.fracionado = 1 AND p.preco_unitario_fracao IS NOT NULL AND i.preco_unitario = p.preco_unitario_fracao THEN
+                                    COALESCE(p.preco_compra, 0) / p.qtd_por_embalagem
+                                
+                                -- Caso contrário, o custo é o preço de compra da embalagem inteira.
+                                ELSE
+                                    COALESCE(p.preco_compra, 0)
+                            END
+                        )
+                    ) as lucro
+                    FROM itens_venda i 
+                    JOIN produtos p ON i.produto_id = p.id
+                    WHERE i.venda_id {query_in_ids} 
+                    AND p.preco_compra > 0
+                    AND p.qtd_por_embalagem > 0 -- Prevenção de divisão por zero
                 """)
                 lucro_resultado = cursor.fetchone()
                 lucro_periodo = lucro_resultado['lucro'] if lucro_resultado and lucro_resultado['lucro'] is not None else 0
