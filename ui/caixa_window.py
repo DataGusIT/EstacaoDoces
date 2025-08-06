@@ -279,7 +279,12 @@ class CaixaWindow(QWidget):
         self.cb_produto.setEditable(True)
         # ... (código de configuração do cb_produto) ...
         self.cb_produto.setStyleSheet(combobox_style) # Aplica o mesmo estilo
+         # --- INÍCIO DA CORREÇÃO ---
+        # Conecta a tecla Enter do campo de produto à função de busca e adição
+        self.cb_produto.lineEdit().returnPressed.connect(self.buscar_produto)
+        # --- FIM DA CORREÇÃO ---
         frame_info_layout.addWidget(self.cb_produto, 1, 1)
+       
 
         # --- INÍCIO DA REMOÇÃO (PRODUTO) ---
         
@@ -395,8 +400,8 @@ class CaixaWindow(QWidget):
             
     def buscar_produto(self):
         """
-        Busca um produto pelo código de barras digitado e o adiciona ao carrinho.
-        Este método é acionado ao pressionar Enter no campo de produto.
+        Busca um produto pelo código de barras digitado, atualiza a UI
+        e o adiciona ao carrinho.
         """
         codigo_barras = self.cb_produto.currentText().strip()
         if not codigo_barras:
@@ -411,13 +416,18 @@ class CaixaWindow(QWidget):
                 break
         
         if index_encontrado != -1:
-            # Seleciona o produto encontrado no ComboBox
+            # --- INÍCIO DA CORREÇÃO ---
+            produto_encontrado = self.cb_produto.itemData(index_encontrado)
             self.cb_produto.setCurrentIndex(index_encontrado)
-            # Chama imediatamente a função de adicionar, simulando "scan and add"
+            
+            # ATUALIZA A UI (IMAGEM E PREÇO) IMEDIATAMENTE
+            self._atualizar_info_produto_selecionado(produto_encontrado)
+            
+            # CHAMA A FUNÇÃO DE ADICIONAR
             self.adicionar_item()
+            # --- FIM DA CORREÇÃO ---
         else:
             QMessageBox.warning(self, "Produto não encontrado", f"Nenhum produto com o código de barras '{codigo_barras}' foi encontrado.")
-            # Limpa o campo para a próxima leitura
             self.cb_produto.setCurrentText("")
             self.cb_produto.setFocus()
     
@@ -579,6 +589,24 @@ class CaixaWindow(QWidget):
     def setup_codigo_barras(self):
         # Focar no campo de produto ao iniciar, que agora também é usado para código de barras
         self.cb_produto.setFocus()
+
+    def obter_preco_final_produto(self, produto):
+        """
+        Busca o preço de um produto, verificando se há uma promoção ativa.
+        Retorna o preço promocional se existir, senão, o preço de venda normal.
+        """
+        if not produto:
+            return 0.0
+
+        # Verifica se há promoções ativas para este produto
+        promocoes = self.db.listar_promocoes_ativas()
+        for promocao in promocoes:
+            # Compara o ID do produto da promoção com o ID do produto fornecido
+            if promocao['produto_id'] == produto['id']:
+                return promocao['preco_promocional']
+        
+        # Se nenhuma promoção foi encontrada, retorna o preço de venda padrão
+        return produto.get('preco_venda', 0.0)
     
     def verificar_caixa_aberto(self):
         self.caixa_atual = self.db.obter_caixa_aberto()
@@ -638,22 +666,26 @@ class CaixaWindow(QWidget):
         self.verificar_caixa_aberto()
     
     def produto_selecionado(self, index):
-        # Limpa a imagem anterior e o texto
-        self.lbl_imagem_produto.clear()
-        self.lbl_imagem_produto.setText("Selecione um produto...")
-
-        if index <= 0:  # Índice 0 ou -1 (nenhum item selecionado)
-            self.spin_preco.setValue(0)
-            return
-        
+        # O itemData pode ser None se o índice for inválido (ex: item vazio)
         produto = self.cb_produto.itemData(index)
+        self._atualizar_info_produto_selecionado(produto)
+    
+    def _atualizar_info_produto_selecionado(self, produto):
+        """
+        Método auxiliar para atualizar a UI (preço e imagem) com base em um produto.
+        Se o produto for None, limpa os campos.
+        """
         if not produto:
+            self.spin_preco.setValue(0)
+            self.lbl_imagem_produto.clear()
+            self.lbl_imagem_produto.setText("Selecione um produto...")
             return
 
-        # Define o preço de venda padrão
-        self.spin_preco.setValue(produto['preco_venda'] if produto.get('preco_venda') else 0)
+        # Define o preço de venda (normal ou promocional)
+        preco_final = self.obter_preco_final_produto(produto)
+        self.spin_preco.setValue(preco_final if preco_final else 0)
         
-        # ===== INÍCIO DA CORREÇÃO DA IMAGEM =====
+        # Define a imagem
         imagem_path = produto.get('imagem_path')
         if imagem_path and os.path.exists(imagem_path):
             pixmap = QPixmap(imagem_path)
@@ -665,10 +697,6 @@ class CaixaWindow(QWidget):
             ))
         else:
             self.lbl_imagem_produto.setText("Produto sem imagem")
-        # ===== FIM DA CORREÇÃO DA IMAGEM =====
-
-        # Verifica se há promoções ativas para este produto
-        self.verificar_promocoes(produto)
     
     def obter_estoque_disponivel(self, produto):
         """Retorna o estoque disponível baseado no tipo de venda"""
@@ -682,31 +710,34 @@ class CaixaWindow(QWidget):
     def adicionar_item(self):
         index = self.cb_produto.currentIndex()
         if index <= 0:
-            QMessageBox.warning(self, "Seleção Inválida", "Selecione um produto válido.")
+            # Não mostra mais aviso, pois o Enter pode chamar isso com o campo já limpo
             return
 
         produto = self.cb_produto.itemData(index)
+        if not produto:
+            return
+
+        # Atualiza a imagem e o preço para garantir que estejam corretos antes de adicionar
+        self._atualizar_info_produto_selecionado(produto)
+
+        preco_unitario_final = self.obter_preco_final_produto(produto)
         sale_details = None
         
-        # Se o produto é fracionado, abre o diálogo de escolha
         if produto['fracionado']:
             dialog = DialogVendaFracionada(produto, self)
             if dialog.exec_() == QDialog.Accepted:
                 sale_details = dialog.get_sale_details()
             else:
-                return  # Usuário cancelou
+                return
         else:
-            # Lógica para produto não fracionado
             quantidade = self.spin_quantidade.value()
-            
-            # APENAS VERIFICA o estoque, não deduz
             if quantidade > produto['quantidade']:
                 QMessageBox.warning(self, "Estoque Insuficiente", f"Estoque disponível: {produto['quantidade']} unidades.")
                 return
 
             sale_details = {
                 "quantidade": quantidade,
-                "preco_unitario": self.spin_preco.value(),
+                "preco_unitario": preco_unitario_final, 
                 "is_embalagem": True,
                 "produto_nome": produto['nome']
             }
@@ -714,10 +745,6 @@ class CaixaWindow(QWidget):
         if not sale_details:
             return
 
-        # ===== CORREÇÃO PRINCIPAL: REMOVIDA A DEDUÇÃO DE ESTOQUE DAQUI =====
-        # A dedução de estoque foi movida para o método finalizar_venda.
-
-        # Adiciona o item à lista do carrinho na memória
         item_carrinho = {
             'produto_id': produto['id'],
             'produto_nome': sale_details['produto_nome'],
@@ -731,11 +758,14 @@ class CaixaWindow(QWidget):
         self.atualizar_tabela_itens()
         self.calcular_total()
         
-        # Limpar campos para a próxima adição
-        self.cb_produto.setCurrentText("") # <-- MUDANÇA AQUI: Limpa apenas o texto, mantendo a imagem.
+        # --- INÍCIO DA CORREÇÃO ---
+        # Limpa os campos para a próxima adição, MAS MANTÉM A IMAGEM ATUAL.
+        self.cb_produto.setCurrentText("")
         self.spin_quantidade.setValue(1)
         self.spin_preco.setValue(0)
         self.cb_produto.setFocus()
+        # A linha que limpava self.lbl_imagem_produto foi REMOVIDA.
+        # --- FIM DA CORREÇÃO ---
     
     def atualizar_tabela_itens(self):
         self.tabela_itens.setRowCount(0)
@@ -770,7 +800,13 @@ class CaixaWindow(QWidget):
             del self.itens_venda[row]
             self.atualizar_tabela_itens()
             self.calcular_total()
-    
+
+            # --- INÍCIO DA CORREÇÃO ---
+            # Ao remover um item, limpa a imagem e o preço, pois o contexto
+            # do último produto selecionado foi perdido.
+            self._atualizar_info_produto_selecionado(None)
+            # --- FIM DA CORREÇÃO ---
+            
     def calcular_total(self):
         self.total_venda = sum(item['subtotal'] for item in self.itens_venda)
         self.lbl_total.setText(f"Total: R$ {self.total_venda:.2f}")
