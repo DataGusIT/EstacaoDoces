@@ -274,14 +274,12 @@ class ClientesWindow(QWidget):
             
     # ... O restante do código (abrir formulário, excluir, importar, exportar) permanece o mesmo ...
     def abrir_formulario_cliente(self, cliente_id=None):
-        dialog = FormularioCliente(self.db, cliente_id)
+        # Passe self.theme_colors e self (parent) para o diálogo
+        dialog = FormularioCliente(self.db, self.theme_colors, cliente_id, self)
         
-        # Verificamos se o diálogo foi fechado com "Salvar" (Accepted)
+        # O resto do método continua o mesmo
         if dialog.exec_() == QDialog.Accepted:
-            # Se foi salvo com sucesso, atualizamos a tabela da própria janela...
             self.atualizar_visualizacao_dados()
-            
-            # <<< E EMITIMOS O SINAL PARA O RESTO DO SISTEMA! >>>
             print("DEBUG: Formulário fechado com sucesso. Emitindo sinal 'dados_clientes_alterados'.")
             self.dados_clientes_alterados.emit()
 
@@ -365,9 +363,11 @@ class ClientesWindow(QWidget):
 
 
 class FormularioCliente(QDialog):
-    def __init__(self, db, cliente_id=None):
-        super().__init__()
+    # 1. Construtor modificado para aceitar theme_colors
+    def __init__(self, db, theme_colors, cliente_id=None, parent=None):
+        super().__init__(parent)
         self.db = db
+        self.theme_colors = theme_colors # Armazena o tema
         self.cliente_id = cliente_id
         self.cliente = None
         
@@ -378,6 +378,7 @@ class FormularioCliente(QDialog):
                 self.reject()
         
         self.initUI()
+        self.apply_styles() # 2. Aplica os estilos do tema
         
         if self.cliente:
             self.carregar_dados_cliente()
@@ -391,8 +392,11 @@ class FormularioCliente(QDialog):
         form_layout = QFormLayout(form_group)
         
         self.nome_input = QLineEdit()
-        self.data_nascimento_input = QDateEdit(calendarPopup=True, date=QDate.currentDate().addYears(-18))
+        self.data_nascimento_input = QDateEdit(calendarPopup=True)
+        # Define uma data inicial padrão mais realista
+        self.data_nascimento_input.setDate(QDate.currentDate().addYears(-18))
         self.data_nascimento_input.setDisplayFormat("dd/MM/yyyy")
+
         self.telefone_input = QLineEdit()
         self.email_input = QLineEdit()
         self.endereco_input = QLineEdit()
@@ -405,17 +409,89 @@ class FormularioCliente(QDialog):
         layout.addWidget(form_group)
         
         button_layout = QHBoxLayout()
+        # 3. Ícones agora usam as cores do tema
         self.salvar_btn = QPushButton(IconManager.get_icon('save', 'white'), " Salvar")
-        self.salvar_btn.setObjectName("primaryActionButton")
+        self.salvar_btn.setObjectName("primaryButton")
         self.salvar_btn.clicked.connect(self.salvar_cliente)
         
-        self.cancelar_btn = QPushButton(IconManager.get_icon('cancel'), " Cancelar")
+        self.cancelar_btn = QPushButton(IconManager.get_icon('cancel', self.theme_colors['text_color']), " Cancelar")
+        self.cancelar_btn.setObjectName("secondaryButton")
         self.cancelar_btn.clicked.connect(self.reject)
         
         button_layout.addStretch()
-        button_layout.addWidget(self.salvar_btn)
         button_layout.addWidget(self.cancelar_btn)
+        button_layout.addWidget(self.salvar_btn)
         layout.addLayout(button_layout)
+
+    # 4. NOVO MÉTODO para aplicar o estilo do tema
+    def apply_styles(self):
+        colors = self.theme_colors
+        # Reutilizamos o mesmo estilo do formulário de fornecedor para manter a consistência
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {colors['bg_color']};
+            }}
+            QGroupBox {{
+                font-weight: bold;
+                color: {colors['text_color']};
+                border: 1px solid {colors['border_color']};
+                border-radius: 6px;
+                margin-top: 10px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 5px;
+                left: 10px;
+            }}
+            QLabel, QDateEdit {{
+                color: {colors['text_color']};
+            }}
+            QLineEdit, QDateEdit {{
+                background-color: {colors['surface_color']};
+                border: 1px solid {colors['border_color']};
+                padding: 6px;
+                border-radius: 4px;
+            }}
+            QLineEdit:focus, QDateEdit:focus {{
+                border: 1px solid {colors['accent_color']};
+            }}
+            QDateEdit::down-arrow {{
+                /* Você pode adicionar um ícone de seta aqui se desejar */
+                width: 16px;
+                height: 16px;
+            }}
+            QCalendarWidget QWidget {{
+                alternate-background-color: {colors['button_hover']};
+            }}
+            #qt_calendar_navigationbar {{
+                background-color: {colors['surface_color']};
+            }}
+            /* Botão Primário (Salvar) */
+            #primaryButton {{
+                background-color: {colors['accent_color']};
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            #primaryButton:hover {{
+                background-color: #005bb5;
+            }}
+            /* Botão Secundário (Cancelar) */
+            #secondaryButton {{
+                background-color: {colors['surface_color']};
+                color: {colors['text_color']};
+                border: 1px solid {colors['border_color']};
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            #secondaryButton:hover {{
+                border-color: {colors['accent_color']};
+            }}
+        """)
 
     def carregar_dados_cliente(self):
         self.nome_input.setText(self.cliente['nome'])
