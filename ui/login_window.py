@@ -12,6 +12,7 @@ from PyQt5.QtGui import QIcon, QPixmap, QColor, QFont, QCursor
 # Importe o IconManager da sua UI. 
 # Certifique-se que o caminho do import está correto para a sua estrutura de pastas.
 from ui.icon_manager import IconManager
+import os
 
 #==============================================================================
 # CLASSE DA JANELA DE LOGIN PRINCIPAL
@@ -103,14 +104,18 @@ class LoginWindow(QDialog):
         title_layout.setContentsMargins(0, 0, 0, 30)
         logo_label = QLabel()
 
-        # --- INÍCIO DA ALTERAÇÃO ---
-        # 1. Crie um QPixmap a partir do arquivo da sua logo.
-        #    Substitua 'caminho/para/sua/logo.png' pelo caminho real do seu arquivo.
-        caminho_logo = 'assets/img/GestorX (2).png'  # <--- IMPORTANTE: MUDE ESTE CAMINHO
-        logo_pixmap = QPixmap(caminho_logo)
+        # --- INÍCIO DA ALTERAÇÃO NA TELA DE LOGIN ---
+        # 1. Verifica se há uma logo personalizada salva
+        logo_path = self.settings.value("custom_logo_path", "")
 
-        # 2. Redimensione o pixmap para o tamanho desejado (ex: 80x80 pixels)
-        #    Usar Qt.KeepAspectRatio garante que a imagem não fique distorcida.
+        # 2. Se não houver ou o arquivo não existir, usa a logo padrão
+        if not logo_path or not os.path.exists(logo_path):
+            logo_path = 'assets/img/GestorX (2).png' # Logo Padrão
+
+        # 3. Carrega o QPixmap a partir do caminho decidido
+        logo_pixmap = QPixmap(logo_path)
+
+        # 4. Redimensiona e aplica o pixmap
         logo_label.setPixmap(logo_pixmap.scaled(QSize(150, 150), Qt.KeepAspectRatio, Qt.SmoothTransformation))
         # --- FIM DA ALTERAÇÃO ---
 

@@ -1,36 +1,42 @@
-# admin_window.py
-
 from PyQt5.QtWidgets import (QDialog, QTabWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QWidget, QMessageBox, 
                              QTableWidget, QTableWidgetItem, QHeaderView, QFormLayout,
                              QSpinBox, QDoubleSpinBox, QLineEdit, QComboBox, QDateEdit,
-                             QInputDialog)
-from PyQt5.QtCore import Qt, QDate
-from PyQt5.QtGui import QColor, QIcon
+                             QInputDialog,QFileDialog, QGroupBox)
+from PyQt5.QtCore import Qt, QDate, pyqtSignal, QSettings, QTimer
+from PyQt5.QtGui import QColor, QIcon, QFont, QPixmap
 import hashlib
+import os
+import shutil
 
 from .icon_manager import IconManager
 
 class AdminWindow(QDialog):
-    """Janela de administração do sistema, adaptada ao tema."""
-    
-    # 1. Modificar o construtor para aceitar theme_colors
-    def __init__(self, db_manager, usuario, theme_colors):
-        super().__init__()
+    logo_alterado = pyqtSignal()
+
+    def __init__(self, db_manager, usuario, theme_colors, parent=None): # Adicionado 'parent=None' por boa prática
+        # 1. A chamada ao __init__ da classe pai DEVE SER A PRIMEIRA LINHA.
+        super().__init__(parent) 
         
+        # 2. Agora, inicialize os outros atributos.
         self.db = db_manager
         self.usuario = usuario
-        self.theme_colors = theme_colors # Armazena o tema
+        self.theme_colors = theme_colors
+        self.local_settings = QSettings("SuaEmpresa", "SeuERP")
         
+        # 3. Verificação de permissão.
         if self.usuario.get('tipo') != 'admin':
             self.db.registrar_log('WARNING', self.usuario.get('login'),
                                  'ACESSO_ADMIN', 'Tentativa de acesso não autorizado ao painel.')
+            # A janela já existe, então podemos mostrar um QMessageBox antes de fechá-la.
             QMessageBox.warning(self, "Acesso Negado", "Você não tem permissão para acessar esta área.")
-            self.reject()
+            # Usamos QTimer para fechar a janela logo após a mensagem ser exibida.
+            QTimer.singleShot(0, self.reject)
             return
         
+        # 4. Continua com a inicialização da UI para usuários autorizados.
         self.init_ui()
-        self.apply_styles() # Aplica os estilos
+        self.apply_styles() 
         
         self.db.registrar_log('ADMIN', self.usuario.get('login'), 'ACESSO_ADMIN', 'Acessou o painel de administração.')
 
@@ -54,6 +60,9 @@ class AdminWindow(QDialog):
         
         self.logs_tab = self.criar_tab_logs()
         self.tab_widget.addTab(self.logs_tab, IconManager.get_icon('relatorio', self.theme_colors['text_secondary']), "Logs de Atividades")
+        
+        self.personalizacao_tab = self.criar_tab_personalizacao()
+        self.tab_widget.addTab(self.personalizacao_tab, IconManager.get_icon('dashboard', self.theme_colors['text_secondary']), "Personalização")
         
         buttons_layout = QHBoxLayout()
         self.close_button = QPushButton("Fechar")
@@ -385,3 +394,95 @@ class AdminWindow(QDialog):
                 self.logs_table.setItem(i, 4, QTableWidgetItem(log['details']))
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"Erro ao carregar logs: {str(e)}")
+
+     # ===================================================================
+    # NOVA ABA DE PERSONALIZAÇÃO
+    # ===================================================================
+    def criar_tab_personalizacao(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        layout.setAlignment(Qt.AlignTop)
+
+        # Grupo para a logo
+        logo_group = QGroupBox("Logo da Empresa")
+        logo_group.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        logo_layout = QVBoxLayout(logo_group)
+
+        # Label para mostrar a pré-visualização da logo
+        self.logo_preview_label = QLabel("A logo será exibida aqui.")
+        self.logo_preview_label.setAlignment(Qt.AlignCenter)
+        self.logo_preview_label.setMinimumSize(300, 150)
+        self.logo_preview_label.setObjectName("logoPreview")
+        logo_layout.addWidget(self.logo_preview_label)
+
+        # Botões de ação
+        botoes_layout = QHBoxLayout()
+        self.change_logo_button = QPushButton(IconManager.get_icon('edit', self.theme_colors['text_color']), " Alterar Logo")
+        self.remove_logo_button = QPushButton(IconManager.get_icon('delete', self.theme_colors['text_color']), " Remover Logo")
+        
+        self.change_logo_button.clicked.connect(self.alterar_logo)
+        self.remove_logo_button.clicked.connect(self.remover_logo)
+
+        botoes_layout.addStretch()
+        botoes_layout.addWidget(self.change_logo_button)
+        botoes_layout.addWidget(self.remove_logo_button)
+        botoes_layout.addStretch()
+        logo_layout.addLayout(botoes_layout)
+        
+        layout.addWidget(logo_group)
+
+        self.carregar_logo_atual() # Carrega a logo atual na pré-visualização
+        return tab
+
+    def carregar_logo_atual(self):
+        """Carrega a logo (personalizada ou padrão) no widget de pré-visualização."""
+        # CORREÇÃO: Usar self.local_settings.value()
+        logo_path = self.local_settings.value("custom_logo_path", "")
+        
+        if not logo_path or not os.path.exists(logo_path):
+            logo_path = "assets/img/GestorX (2).png" 
+        
+        pixmap = QPixmap(logo_path)
+        self.logo_preview_label.setPixmap(pixmap.scaled(300, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+    def alterar_logo(self):
+        """Abre um diálogo para o usuário selecionar e salvar uma nova logo."""
+        caminho_origem, _ = QFileDialog.getOpenFileName(self, "Selecionar nova logo", "", "Imagens (*.png *.jpg *.jpeg)")
+        
+        if caminho_origem:
+            try:
+                # ... (lógica de cópia do arquivo como estava) ...
+                pasta_destino = "assets/custom"
+                os.makedirs(pasta_destino, exist_ok=True)
+                extensao = os.path.splitext(caminho_origem)[1]
+                caminho_destino = os.path.join(pasta_destino, f"logo_personalizado{extensao}")
+                shutil.copy(caminho_origem, caminho_destino)
+                
+                # CORREÇÃO: Usar self.local_settings.setValue()
+                self.local_settings.setValue("custom_logo_path", caminho_destino)
+                
+                QMessageBox.information(self, "Sucesso", "Logo alterada com sucesso!")
+                self.carregar_logo_atual()
+                self.logo_alterado.emit()
+            except Exception as e:
+                QMessageBox.critical(self, "Erro", f"Não foi possível salvar a nova logo: {e}")
+
+    def remover_logo(self):
+        """Remove a logo personalizada e volta a usar a padrão."""
+        # CORREÇÃO: Usar self.local_settings.value()
+        if not self.local_settings.value("custom_logo_path", ""):
+            QMessageBox.information(self, "Aviso", "Nenhuma logo personalizada está em uso.")
+            return
+
+        reply = QMessageBox.question(self, "Confirmar Remoção",
+                                     "Tem certeza que deseja remover a logo personalizada e voltar para a padrão do sistema?",
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        
+        if reply == QMessageBox.Yes:
+            # CORREÇÃO: Usar self.local_settings.remove()
+            self.local_settings.remove("custom_logo_path")
+            QMessageBox.information(self, "Sucesso", "Logo personalizada removida.")
+            self.carregar_logo_atual()
+            self.logo_alterado.emit()
