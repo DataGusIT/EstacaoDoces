@@ -744,21 +744,31 @@ class DatabaseManager:
     
     def listar_fornecedores_paginado_e_filtrado(self, filtros, pagina, itens_por_pagina):
         """
-        NOVO MÉTODO OTIMIZADO: Busca fornecedores com filtros e paginação.
+        MÉTODO ATUALIZADO: Busca fornecedores com filtros (incluindo frequência) e paginação.
         """
         offset = (pagina - 1) * itens_por_pagina
         params = []
+        where_clauses = []
         
         base_query = "SELECT * FROM fornecedores"
-        where_clause = ""
         
+        # Filtro por termo de pesquisa (como antes)
         if filtros.get('termo_pesquisa'):
             termo = f"%{filtros['termo_pesquisa']}%"
-            # Adicionado busca por mais campos para ser mais útil
-            where_clause = "WHERE empresa LIKE ? OR representante LIKE ? OR email LIKE ? OR telefone LIKE ?"
+            where_clauses.append("(empresa LIKE ? OR representante LIKE ? OR email LIKE ? OR telefone LIKE ?)")
             params.extend([termo, termo, termo, termo])
+
+        # --- INÍCIO DA MODIFICAÇÃO: Adicionar filtro de frequência ---
+        if filtros.get('frequencia'):
+            where_clauses.append("frequencia_compra = ?")
+            params.append(filtros['frequencia'])
+        # --- FIM DA MODIFICAÇÃO ---
             
-        query_final = f"{base_query} {where_clause} ORDER BY empresa LIMIT ? OFFSET ?"
+        where_clause_str = ""
+        if where_clauses:
+            where_clause_str = "WHERE " + " AND ".join(where_clauses)
+            
+        query_final = f"{base_query} {where_clause_str} ORDER BY empresa LIMIT ? OFFSET ?"
         params.extend([itens_por_pagina, offset])
         
         self.cursor.execute(query_final, params)
@@ -766,19 +776,30 @@ class DatabaseManager:
 
     def contar_fornecedores_filtrados(self, filtros):
         """
-        NOVO MÉTODO OTIMIZADO: Conta o número total de fornecedores que correspondem
-        aos filtros, necessário para calcular o total de páginas.
+        MÉTODO ATUALIZADO: Conta o número total de fornecedores que correspondem
+        aos filtros (incluindo frequência).
         """
         params = []
+        where_clauses = []
         base_query = "SELECT COUNT(id) FROM fornecedores"
-        where_clause = ""
 
+        # Filtro por termo de pesquisa (como antes)
         if filtros.get('termo_pesquisa'):
             termo = f"%{filtros['termo_pesquisa']}%"
-            where_clause = "WHERE empresa LIKE ? OR representante LIKE ? OR email LIKE ? OR telefone LIKE ?"
+            where_clauses.append("(empresa LIKE ? OR representante LIKE ? OR email LIKE ? OR telefone LIKE ?)")
             params.extend([termo, termo, termo, termo])
+            
+        # --- INÍCIO DA MODIFICAÇÃO: Adicionar filtro de frequência ---
+        if filtros.get('frequencia'):
+            where_clauses.append("frequencia_compra = ?")
+            params.append(filtros['frequencia'])
+        # --- FIM DA MODIFICAÇÃO ---
 
-        query_final = f"{base_query} {where_clause}"
+        where_clause_str = ""
+        if where_clauses:
+            where_clause_str = "WHERE " + " AND ".join(where_clauses)
+
+        query_final = f"{base_query} {where_clause_str}"
         
         self.cursor.execute(query_final, params)
         resultado = self.cursor.fetchone()

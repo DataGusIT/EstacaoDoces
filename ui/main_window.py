@@ -222,7 +222,8 @@ class MainWindow(QMainWindow):
         ## ========================================================== ##
         self.dashboard_page = DashboardWindow(self.db, theme_colors)
         self.estoque_page = EstoqueWindow(self.db, theme_colors)
-        self.fornecedor_page = FornecedorWindow(self.db, theme_colors)
+        self.fornecedor_page = FornecedorWindow(self.db, theme_colors, self.settings)
+
         self.promocoes_page = PromocoesWindow(self.db, theme_colors)
         
         # Para as janelas abaixo funcionarem, elas também precisarão ser adaptadas
