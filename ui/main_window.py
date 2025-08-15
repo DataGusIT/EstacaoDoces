@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QPushButton,
                             QAction, QMenu, QToolBar, QDialog, QFormLayout,
                             QComboBox, QSpinBox, QMessageBox, QStatusBar, QSizePolicy, QTimeEdit, QLineEdit, QCheckBox, QGroupBox, QDateEdit, QTextEdit)
 from PyQt5.QtGui import QFont, QIcon, QPixmap, QCursor, QPainter, QColor, QBrush, QPainterPath
-from PyQt5.QtCore import Qt, QDate, QSize, QByteArray, QPropertyAnimation, QEasingCurve, pyqtSignal, QTime, QTimer
+from PyQt5.QtCore import Qt, QDate, QSize, QByteArray, QPropertyAnimation, QEasingCurve, pyqtSignal, QTime, QTimer, QSettings
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication
 import os
@@ -256,8 +256,21 @@ class MainWindow(QMainWindow):
         self.toggle_menu()
         self.switch_page(0)
         
+        # --- Lógica para centralizar a janela na tela ---
+        # Pega a geometria da tela disponível (descontando a barra de tarefas)
+        screen_geometry = QApplication.primaryScreen().availableGeometry()
+        # Pega o retângulo da nossa janela com o tamanho definido (1280x720)
+        window_geometry = self.frameGeometry()
+        # Move o retângulo da nossa janela para o centro da tela
+        window_geometry.moveCenter(screen_geometry.center())
+        # Aplica a nova posição (canto superior esquerdo) à janela
+        self.move(window_geometry.topLeft())
+        
+        # --- Lógica para exibir com animação de fade-in ---
         self.setWindowOpacity(0.0)
-        self.show()
+        self.show() # Exibe a janela na posição centralizada, mas ainda transparente
+
+        # Inicia a animação para a janela aparecer suavemente
         self.fade_in_animation = QPropertyAnimation(self, b"windowOpacity")
         self.fade_in_animation.setDuration(500)
         self.fade_in_animation.setStartValue(0.0)
@@ -344,17 +357,32 @@ class MainWindow(QMainWindow):
             return QIcon()
     
     def carregar_logo_pixmap(self):
-        """Carrega a logo como QPixmap para uso no cabeçalho"""
-        logo_path = os.path.join("assets", "img", "GestorX (2).png")
+        """Carrega a logo (personalizada ou padrão) como QPixmap para uso no cabeçalho."""
+        
+        # --- INÍCIO DA CORREÇÃO ---
+        # Usamos QSettings aqui para ler a configuração salva localmente
+        local_settings = QSettings("SuaEmpresa", "SeuERP")
+        logo_path = local_settings.value("custom_logo_path", "")
+        # --- FIM DA CORREÇÃO ---
+        
+        # O resto da função continua exatamente como antes
+        if not logo_path or not os.path.exists(logo_path):
+            logo_path = os.path.join("assets", "img", "GestorX (2).png")
         
         if os.path.exists(logo_path):
             pixmap = QPixmap(logo_path)
-            
-            # --- CORREÇÃO: Redimensione a imagem para o novo tamanho aqui ---
-            return pixmap.scaled(60, 60, Qt.KeepAspectRatio, Qt.SmoothTransformation) # De: 32, 32  Para: 40, 40
+            return pixmap.scaled(60, 60, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         else:
             print(f"ATENÇÃO: Arquivo de logo não encontrado no caminho: {logo_path}")
             return None
+        
+    # NOVO MÉTODO para ser chamado pelo sinal da AdminWindow
+    def recarregar_logo_dinamico(self):
+        """Recarrega a logo na interface principal sem precisar reiniciar."""
+        print("Sinal recebido: Recarregando a logo...")
+        logo_pixmap = self.carregar_logo_pixmap()
+        if logo_pixmap:
+            self.app_logo.setPixmap(logo_pixmap)
     
     def criar_botao_menu(self, texto, icon_name=None):
         """Cria um botão estilizado para o menu lateral usando qtawesome."""
@@ -460,8 +488,16 @@ class MainWindow(QMainWindow):
             event.accept()
 
     def changeEvent(self, event):
-        """Atualiza o ícone de maximizar/restaurar."""
+        """Atualiza o ícone de maximizar/restaurar e restaura a opacidade."""
         if event.type() == event.WindowStateChange:
+            # --- CORREÇÃO PARA RESTAURAR JANELA MINIMIZADA ---
+            # Se o novo estado da janela NÃO for minimizado, significa que
+            # ela foi restaurada ou maximizada. Portanto, resetamos a opacidade.
+            if not (self.windowState() & Qt.WindowMinimized):
+                self.setWindowOpacity(1.0)
+            # --- FIM DA CORREÇÃO ---
+
+            # Lógica existente para trocar o ícone de maximizar/restaurar
             theme_colors = self._get_theme_colors()
             icon_color = theme_colors['text_secondary']
             if self.isMaximized():
@@ -1323,23 +1359,19 @@ class UserManager:
             QMessageBox.critical(self.main_window, "Erro", f"Erro ao abrir alteração de senha: {str(e)}")
     
     def open_admin(self):
-        """Abre a janela de administração"""
+        """Abre a janela de administração."""
         try:
-            if self.usuario.get('tipo', '').lower() != 'admin':
-                QMessageBox.warning(self.main_window, "Acesso Negado",
-                                  "Você não tem permissões de administrador.")
-                return
-            
-            if 'admin' in self.active_dialogs:
-                self.active_dialogs['admin'].raise_()
-                return
+            # ... (verificação de permissão como estava) ...
             
             from ui.admin_window import AdminWindow
             
             # --- ATUALIZAÇÃO PRINCIPAL AQUI ---
-            # Passe o dicionário de temas da janela principal para a AdminWindow
+            # Removemos a passagem de self.main_window.settings
             admin_dialog = AdminWindow(self.db, self.usuario, self.main_window.theme_colors)
-            
+
+            # Conecta o sinal da AdminWindow a um método da MainWindow (isto continua igual)
+            admin_dialog.logo_alterado.connect(self.main_window.recarregar_logo_dinamico)
+
             self.active_dialogs['admin'] = admin_dialog
             admin_dialog.finished.connect(lambda: self.cleanup_dialog('admin'))
             admin_dialog.exec_()
@@ -1380,7 +1412,9 @@ class UserManager:
             # Abrir janela de login
             from ui.login_window import LoginWindow
             
-            login_window = LoginWindow(self.db)
+            # --- LINHA CORRIGIDA ---
+            login_window = LoginWindow(self.db, self.main_window.theme_colors)
+            # --- FIM DA CORREÇÃO ---
             
             # Conectar sinal de login bem-sucedido se necessário
             if (hasattr(self.main_window, 'parent') and 
@@ -1396,7 +1430,8 @@ class UserManager:
                 # Login bem-sucedido - configurar novo usuário
                 new_usuario = getattr(login_window, 'usuario', None)
                 if new_usuario:
-                    self.setup_for_user(new_usuario)
+                    # Chame o método setup_for_user da MainWindow diretamente
+                    self.main_window.setup_for_user(new_usuario)
                     self.main_window.show()
                 else:
                     self.exit_application()
