@@ -293,6 +293,9 @@ class MainWindow(QMainWindow):
         if hasattr(self.fornecedor_page, 'dados_fornecedores_alterados'):
             self.fornecedor_page.dados_fornecedores_alterados.connect(self.on_dados_fornecedores_changed)
         
+        if hasattr(self.caixa_page, 'movimento_manual_registrado'):
+            self.caixa_page.movimento_manual_registrado.connect(self.dashboard_page.carregar_dados)
+        
         # ... etc para outras janelas que modificam dados
 
          # --- INICIA O GERENCIADOR DE NOTIFICAÇÕES E O AGENDADOR ---

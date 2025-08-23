@@ -159,8 +159,8 @@ class DatabaseManager:
             observacao TEXT
         )
         ''')
-        
-        # Tabela de Movimentos de Caixa
+
+        # Tabela de Movimentos de Caixa (COM A NOVA COLUNA)
         self.cursor.execute('''
         CREATE TABLE IF NOT EXISTS movimentos_caixa (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -170,10 +170,11 @@ class DatabaseManager:
             descricao TEXT NOT NULL,
             valor REAL NOT NULL,
             forma_pagamento TEXT,
-            referencia_id INTEGER, -- ID da venda ou outra entidade
-            tipo_referencia TEXT, -- 'Venda', 'Despesa', etc.
+            referencia_id INTEGER, 
+            tipo_referencia TEXT,
             operador TEXT,
             observacao TEXT,
+            afeta_financeiro TEXT DEFAULT 'Faturamento', -- <<< NOVA COLUNA AQUI
             FOREIGN KEY (caixa_id) REFERENCES caixas (id)
         )
         ''')
@@ -1327,18 +1328,19 @@ class DatabaseManager:
             print(f"Erro ao obter saldo: {e}")
             return 0.0
     
-    def registrar_movimento_caixa(self, caixa_id, tipo, descricao, valor, forma_pagamento="Dinheiro", 
-                                 referencia_id=None, tipo_referencia=None, operador="Sistema", observacao=""):
+    def registrar_movimento_caixa(self, caixa_id, tipo, descricao, valor, forma_pagamento="Dinheiro",
+                              referencia_id=None, tipo_referencia=None, operador="Sistema", observacao="",
+                              afeta_financeiro='Faturamento'): # <<< NOVO PARÂMETRO AQUI
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
             cursor.execute("""
                 INSERT INTO movimentos_caixa 
-                (caixa_id, tipo, descricao, valor, forma_pagamento, referencia_id, tipo_referencia, operador, observacao)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (caixa_id, tipo, descricao, valor, forma_pagamento, referencia_id, tipo_referencia, operador, observacao, afeta_financeiro)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (caixa_id, tipo, descricao, valor, forma_pagamento, referencia_id, 
-                 tipo_referencia, operador, observacao))
+                    tipo_referencia, operador, observacao, afeta_financeiro)) # <<< ADICIONADO AQUI
             
             movimento_id = cursor.lastrowid
             conn.commit()
@@ -1608,8 +1610,8 @@ class DatabaseManager:
     
     def obter_dados_dashboard(self, data_inicio, data_fim):
         """
-        NOVA VERSÃO OTIMIZADA: Obtém um conjunto completo de dados para o dashboard,
-        incluindo KPIs de vendas, alertas e contagens gerais.
+        VERSÃO ATUALIZADA: Obtém dados do dashboard, incluindo o ajuste de faturamento
+        e lucro com base nas movimentações manuais.
         """
         try:
             if not self.ensure_connection():
@@ -1617,7 +1619,7 @@ class DatabaseManager:
             
             cursor = self.conn.cursor()
 
-            # --- DADOS DE VENDAS (como antes) ---
+            # --- DADOS DE VENDAS (LÓGICA ORIGINAL PRESERVADA) ---
             cursor.execute("""
                 SELECT id FROM vendas 
                 WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
@@ -1627,31 +1629,28 @@ class DatabaseManager:
             faturamento_periodo = 0
             num_vendas_periodo = 0
             lucro_periodo = 0
+            # ... (inicialização das outras listas como antes) ...
             produtos_mais_vendidos = []
             formas_pagamento = []
             melhores_clientes = []
             vendas_diarias = []
 
-            if venda_ids: # Procede apenas se houver vendas no período
+            if venda_ids: 
                 query_in_ids = f"IN {venda_ids}" if len(venda_ids) > 1 else f"= {venda_ids[0]}"
 
                 cursor.execute(f"SELECT COUNT(*) as num_vendas, SUM(valor_total) as faturamento FROM vendas WHERE id {query_in_ids}")
                 vendas_resumo = cursor.fetchone()
                 faturamento_periodo = vendas_resumo['faturamento'] or 0
                 num_vendas_periodo = vendas_resumo['num_vendas'] or 0
-
-                # Calcula o custo do item dinamicamente com base no tipo de venda (embalagem vs. unidade)
+                
+                # --- SEU CÁLCULO DE LUCRO IMPORTANTE (INTOCADO) ---
                 cursor.execute(f"""
                     SELECT SUM(
                         i.subtotal - (
                             i.quantidade * 
                             CASE 
-                                -- Se for um produto fracionado e o preço da venda corresponder ao preço da fração,
-                                -- o custo é calculado por unidade.
                                 WHEN p.fracionado = 1 AND p.preco_unitario_fracao IS NOT NULL AND i.preco_unitario = p.preco_unitario_fracao THEN
                                     COALESCE(p.preco_compra, 0) / p.qtd_por_embalagem
-                                
-                                -- Caso contrário, o custo é o preço de compra da embalagem inteira.
                                 ELSE
                                     COALESCE(p.preco_compra, 0)
                             END
@@ -1660,12 +1659,12 @@ class DatabaseManager:
                     FROM itens_venda i 
                     JOIN produtos p ON i.produto_id = p.id
                     WHERE i.venda_id {query_in_ids} 
-                    AND p.preco_compra > 0
-                    AND p.qtd_por_embalagem > 0 -- Prevenção de divisão por zero
+                    AND p.preco_compra > 0 AND p.qtd_por_embalagem > 0
                 """)
                 lucro_resultado = cursor.fetchone()
                 lucro_periodo = lucro_resultado['lucro'] if lucro_resultado and lucro_resultado['lucro'] is not None else 0
 
+                # ... (resto das queries de produtos, pagamentos, clientes que usam venda_ids) ...
                 cursor.execute(f"SELECT p.nome, SUM(i.quantidade) as quantidade, SUM(i.subtotal) as valor_total FROM itens_venda i JOIN produtos p ON i.produto_id = p.id WHERE i.venda_id {query_in_ids} GROUP BY p.id, p.nome ORDER BY valor_total DESC LIMIT 10")
                 produtos_mais_vendidos = [dict(row) for row in cursor.fetchall()]
 
@@ -1678,9 +1677,35 @@ class DatabaseManager:
             cursor.execute("SELECT date(data_hora, 'localtime') as data, SUM(valor_total) as valor FROM vendas WHERE date(data_hora, 'localtime') BETWEEN ? AND ? GROUP BY data ORDER BY data", (data_inicio, data_fim))
             vendas_diarias = [dict(row) for row in cursor.fetchall()]
 
-            # --- NOVAS CONTAGENS GERAIS ---
+            # --- INÍCIO DA NOVA LÓGICA: AJUSTE COM MOVIMENTAÇÕES MANUAIS ---
+            cursor.execute("""
+                SELECT tipo, afeta_financeiro, SUM(valor) as total
+                FROM movimentos_caixa
+                WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
+                AND tipo_referencia = 'Manual'
+                GROUP BY tipo, afeta_financeiro
+            """, (data_inicio, data_fim))
+            
+            ajustes_manuais = cursor.fetchall()
+
+            for ajuste in ajustes_manuais:
+                total_ajuste = ajuste['total']
+                if ajuste['tipo'] == 'Entrada':
+                    if ajuste['afeta_financeiro'] == 'Faturamento':
+                        faturamento_periodo += total_ajuste
+                    elif ajuste['afeta_financeiro'] == 'Lucro':
+                        lucro_periodo += total_ajuste
+                elif ajuste['tipo'] == 'Saída':
+                    if ajuste['afeta_financeiro'] == 'Faturamento':
+                        faturamento_periodo -= total_ajuste
+                    elif ajuste['afeta_financeiro'] == 'Lucro':
+                        lucro_periodo -= total_ajuste
+            # --- FIM DA NOVA LÓGICA ---
+
+            # --- NOVAS CONTAGENS GERAIS (como antes) ---
             cursor.execute("SELECT COUNT(*) FROM produtos")
             total_produtos = cursor.fetchone()[0]
+            # ... (resto das contagens e alertas) ...
             cursor.execute("SELECT COUNT(*) FROM clientes")
             total_clientes = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(*) FROM fornecedores")
@@ -1690,7 +1715,6 @@ class DatabaseManager:
             cursor.execute("SELECT COUNT(*) FROM promocoes WHERE data_inicio <= ? AND data_fim >= ?", (hoje, hoje))
             total_promocoes_ativas = cursor.fetchone()[0]
 
-            # --- NOVOS ALERTAS OPERACIONAIS ---
             cursor.execute("SELECT COUNT(*) FROM produtos WHERE quantidade <= estoque_minimo AND estoque_minimo > 0")
             alert_estoque_baixo = cursor.fetchone()[0]
             
@@ -1700,10 +1724,9 @@ class DatabaseManager:
             data_limite_30d = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
             cursor.execute("SELECT COUNT(*) FROM produtos WHERE date(data_validade) BETWEEN ? AND ?", (hoje, data_limite_30d))
             alert_vencendo_30d = cursor.fetchone()[0]
-            
+
             # --- Monta o dicionário final com todos os dados ---
             resultado = {
-                # Dados de Vendas
                 'faturamento': faturamento_periodo,
                 'num_vendas': num_vendas_periodo,
                 'lucro': lucro_periodo,
@@ -1711,19 +1734,16 @@ class DatabaseManager:
                 'pagamentos': formas_pagamento,
                 'clientes': melhores_clientes,
                 'vendas_diarias': vendas_diarias,
-                # Contagens Gerais
                 'total_produtos': total_produtos,
                 'total_clientes': total_clientes,
                 'total_fornecedores': total_fornecedores,
                 'total_promocoes_ativas': total_promocoes_ativas,
-                # Alertas
                 'alertas': {
                     'estoque_baixo': alert_estoque_baixo,
                     'vencidos': alert_vencidos,
                     'vencendo_30d': alert_vencendo_30d,
                 }
             }
-
             return resultado
         except Exception as e:
             print(f"Erro detalhado ao obter dados para dashboard: {e}")

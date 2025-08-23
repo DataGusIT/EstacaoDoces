@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLab
                             QMessageBox, QDialog, QFormLayout, QTextEdit, QDoubleSpinBox,
                             QSpinBox, QHeaderView, QCheckBox, QGroupBox, QGridLayout, QFrame,
                             QSplitter, QApplication,  QFileDialog, QMessageBox, QHBoxLayout, QLayout, QRadioButton, QCompleter)
-from PyQt5.QtCore import Qt, QDate, QDateTime, QMarginsF
+from PyQt5.QtCore import pyqtSignal, Qt, QDate, QDateTime, QMarginsF 
 from PyQt5.QtGui import QIcon, QColor, QFont, QTextDocument, QPageSize, QPageLayout, QIcon, QPixmap
 from PyQt5.QtPrintSupport import QPrinter
 import os
@@ -30,6 +30,8 @@ class AutoPopupComboBox(QComboBox):
         self.showPopup()
 
 class CaixaWindow(QWidget):
+    movimento_manual_registrado = pyqtSignal()
+
     def __init__(self, db, theme_colors):
         super().__init__()
         self.db = db
@@ -65,9 +67,9 @@ class CaixaWindow(QWidget):
         warning_color = "#ffc107"
 
         # --- Abas Principais ---
-        self.tabs.setTabIcon(0, IconManager.get_icon('caixa', color=accent_color))
-        self.tabs.setTabIcon(1, IconManager.get_icon('relatorio', color=accent_color))
-        self.tabs.setTabIcon(2, IconManager.get_icon('report', color=accent_color))
+        self.tabs.setTabIcon(0, IconManager.get_icon('caixa', color=text_color))
+        self.tabs.setTabIcon(1, IconManager.get_icon('relatorio', color=text_color))
+        self.tabs.setTabIcon(2, IconManager.get_icon('report', color=text_color))
 
         # --- Status do Caixa ---
         self.btn_abrir_caixa.setIcon(IconManager.get_icon('unlock', color=text_color))
@@ -89,31 +91,37 @@ class CaixaWindow(QWidget):
         # --- Tab de Relatórios ---
         self.btn_gerar_relatorio.setIcon(IconManager.get_icon('report', color=text_color))
 
-    def set_theme(self, theme_colors):
-        """Aplica as cores do tema e atualiza os ícones."""
-        self.theme_colors = theme_colors
-        self._update_icons()
+        def set_theme(self, theme_colors):
+            """Aplica as cores do tema e atualiza os ícones."""
+            self.theme_colors = theme_colors
+            self._update_icons()
 
-        if hasattr(self, 'lbl_imagem_produto'):
-            bg_color = self.theme_colors.get('surface_color', '#f0f0f0')
-            border_color = self.theme_colors.get('border_color', '#ccc')
-            text_color = self.theme_colors.get('text_secondary', '#6d6d70')
-            
-            self.lbl_imagem_produto.setStyleSheet(f"""
-                QLabel {{
-                    background-color: {bg_color};
-                    border: 2px dashed {border_color};
-                    border-radius: 8px;
-                    color: {text_color};
-                    font-style: italic;
-                    font-size: 10pt;
-                    padding: 10px;
-                }}
-            """)
-        # Força a reavaliação da folha de estilo herdada
-        self.style().unpolish(self)
-        self.style().polish(self)
-        self.update()
+            # --- INÍCIO DO CÓDIGO ADICIONADO ---
+            # Define a cor do texto das abas com base na cor principal do tema
+            text_color = self.theme_colors.get('text_color', '#000000')
+            self.tabs.setStyleSheet(f"QTabBar::tab {{ color: {text_color}; }}")
+            # --- FIM DO CÓDIGO ADICIONADO ---
+
+            if hasattr(self, 'lbl_imagem_produto'):
+                bg_color = self.theme_colors.get('surface_color', '#f0f0f0')
+                border_color = self.theme_colors.get('border_color', '#ccc')
+                text_secondary_color = self.theme_colors.get('text_secondary', '#6d6d70')
+                
+                self.lbl_imagem_produto.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {bg_color};
+                        border: 2px dashed {border_color};
+                        border-radius: 8px;
+                        color: {text_secondary_color};
+                        font-style: italic;
+                        font-size: 10pt;
+                        padding: 10px;
+                    }}
+                """)
+            # Força a reavaliação da folha de estilo herdada
+            self.style().unpolish(self)
+            self.style().polish(self)
+            self.update()
 
     def initUI(self):
         # Layout principal
@@ -483,11 +491,14 @@ class CaixaWindow(QWidget):
         self.tabela_movimentos.setEditTriggers(QTableWidget.NoEditTriggers)
         layout.addWidget(self.tabela_movimentos)
         
+        # --- INÍCIO DA MODIFICAÇÃO ---
         # Frame de totais
         frame_totais = QFrame()
         frame_totais.setFrameShape(QFrame.StyledPanel)
-        frame_totais.setStyleSheet("background-color: #f5f5f5;")
+        # A LINHA ABAIXO FOI REMOVIDA PARA QUE O FRAME HERDE A COR DO TEMA
+        # frame_totais.setStyleSheet("background-color: #f5f5f5;") 
         frame_totais_layout = QHBoxLayout(frame_totais)
+        # --- FIM DA MODIFICAÇÃO ---
         
         self.lbl_total_entradas = QLabel("Total Entradas: R$ 0,00")
         self.lbl_total_entradas.setStyleSheet("color: green; font-weight: bold;")
@@ -1567,26 +1578,36 @@ class CaixaWindow(QWidget):
         dialog.setMinimumWidth(400)
         
         layout = QVBoxLayout(dialog)
-        
         form_layout = QFormLayout()
         
-        # Descrição
         edit_descricao = QLineEdit()
         form_layout.addRow("Descrição:", edit_descricao)
         
-        # Valor
         spin_valor = QDoubleSpinBox()
         spin_valor.setPrefix("R$ ")
         spin_valor.setMaximum(999999.99)
         spin_valor.setDecimals(2)
         form_layout.addRow("Valor:", spin_valor)
         
-        # Forma de pagamento
         cb_forma_pagamento = QComboBox()
         cb_forma_pagamento.addItems(["Dinheiro", "Cartão de Crédito", "Cartão de Débito", "PIX", "Outro"])
         form_layout.addRow("Forma de Pagamento:", cb_forma_pagamento)
         
-        # Observação
+        # --- INÍCIO DA MODIFICAÇÃO: Adicionar opções de destino financeiro ---
+        group_destino = QGroupBox("Destino do Valor")
+        group_destino_layout = QHBoxLayout()
+        
+        radio_faturamento = QRadioButton("Faturamento")
+        radio_lucro = QRadioButton("Lucro")
+        radio_faturamento.setChecked(True) # Faturamento como padrão
+        
+        group_destino_layout.addWidget(radio_faturamento)
+        group_destino_layout.addWidget(radio_lucro)
+        group_destino.setLayout(group_destino_layout)
+        
+        form_layout.addRow(group_destino)
+        # --- FIM DA MODIFICAÇÃO ---
+        
         text_obs = QTextEdit()
         text_obs.setMaximumHeight(80)
         form_layout.addRow("Observação:", text_obs)
@@ -1606,36 +1627,37 @@ class CaixaWindow(QWidget):
             forma_pagamento = cb_forma_pagamento.currentText()
             observacao = text_obs.toPlainText()
             
+            # Capturar o destino financeiro escolhido
+            destino_financeiro = "Faturamento" if radio_faturamento.isChecked() else "Lucro"
+            
             if not descricao:
                 QMessageBox.warning(dialog, "Campos Obrigatórios", "O campo Descrição é obrigatório")
                 return
-            
             if valor <= 0:
                 QMessageBox.warning(dialog, "Valor Inválido", "O valor deve ser maior que zero")
                 return
             
-            # Registrar movimento
+            # Registrar movimento com o novo campo
             sucesso = self.db.registrar_movimento_caixa(
                 self.caixa_atual['id'], tipo, descricao, valor, 
-                forma_pagamento, None, "Manual", "Sistema", observacao
+                forma_pagamento, None, "Manual", "Sistema", observacao,
+                afeta_financeiro=destino_financeiro # Passando o novo valor
             )
             
             if sucesso:
                 dialog.accept()
-                
-                # Atualizar saldo
                 saldo_atual = self.db.obter_saldo_atual(self.caixa_atual['id'])
                 self.lbl_saldo.setText(f"Saldo Atual: R$ {saldo_atual:.2f}")
-                
-                # Recarregar movimentos
                 self.carregar_movimentos()
+                
+                # EMITIR O SINAL para que o dashboard saiba que precisa atualizar
+                self.movimento_manual_registrado.emit()
                 
                 QMessageBox.information(self, "Sucesso", f"{tipo} registrada com sucesso!")
             else:
                 QMessageBox.critical(dialog, "Erro", f"Erro ao registrar {tipo.lower()}")
         
         btn_confirmar.clicked.connect(confirmar_movimento)
-        
         dialog.exec_()
 
     def periodo_alterado(self, index):
