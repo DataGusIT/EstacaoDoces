@@ -1,14 +1,13 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
                              QLineEdit, QPushButton, QMessageBox, QWidget, 
-                             QSizePolicy, QSpacerItem, QScrollArea, QFrame)
-from PyQt5.QtGui import QFont, QPainter, QColor, QBrush, QRegExpValidator, QLinearGradient
+                             QFrame)
+from PyQt5.QtGui import QFont, QRegExpValidator, QPixmap
 from PyQt5.QtCore import Qt, QRegExp
 
 from .icon_manager import IconManager
 
-from .icon_manager import IconManager
-
-# As classes customizadas agora recebem 'theme_colors' para se estilizar
+# --- As classes de widgets temáticos (ThemedLineEdit, etc.) permanecem as mesmas ---
+# (O código delas está correto e foi omitido aqui para focar na ProfileWindow)
 
 class ThemedLineEdit(QLineEdit):
     """Campo de texto que se adapta ao tema."""
@@ -113,7 +112,6 @@ class ThemedButton(QPushButton):
         
         if self.icon_name:
             self.setIcon(IconManager.get_icon(self.icon_name, color=icon_color))
-            self.setIconSize(self.iconSize())
 
 class ThemedAvatar(QWidget):
     """Avatar que se adapta ao tema."""
@@ -145,68 +143,133 @@ class ThemedAvatar(QWidget):
             }}
         """)
 
+
 class ProfileWindow(QDialog):
-    """Janela de perfil que se adapta ao tema."""
-    def __init__(self, db, usuario, theme_colors):
+    """Janela de perfil profissional, frameless e adaptada ao tema."""
+    # --- CORREÇÃO: Construtor agora aceita o pixmap do logo ---
+    def __init__(self, db, usuario, theme_colors, logo_pixmap=None):
         super().__init__()
         self.db = db
         self.usuario = usuario
         self.theme_colors = theme_colors
+        self.logo_pixmap = logo_pixmap
+        self.drag_position = None
+
+        # --- CORREÇÃO: Janela sem borda e com fundo transparente para cantos arredondados ---
+        self.setWindowFlags(Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
         self.setup_ui()
-        self.apply_styles()
 
     def setup_ui(self):
-        self.setFixedSize(500, 700)
+        self.setFixedSize(480, 680)
         self.setModal(True)
         
-        main_layout = QVBoxLayout(self)
+        # --- CORREÇÃO: Container principal para aplicar o estilo (background, bordas) ---
+        container = QFrame(self)
+        container.setObjectName("mainContainer")
+
+        main_layout = QVBoxLayout(container)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
-        main_layout.addWidget(self._create_header())
+        self.header = self._create_header()
+        main_layout.addWidget(self.header)
+
+        # Separador visual
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setObjectName("separator")
+        main_layout.addWidget(separator)
+
         main_layout.addWidget(self._create_content())
+
+        # Adiciona o container ao layout do QDialog
+        base_layout = QVBoxLayout(self)
+        base_layout.setContentsMargins(0, 0, 0, 0)
+        base_layout.addWidget(container)
+
+        self.apply_styles()
 
     def apply_styles(self):
         colors = self.theme_colors
         self.setStyleSheet(f"""
-            QDialog {{
+            #mainContainer {{
                 background-color: {colors['bg_color']};
                 border-radius: 16px;
+                border: 1px solid {colors['border_color']};
+            }}
+            #header {{
+                background-color: {colors['surface_color']};
+                border-top-left-radius: 16px;
+                border-top-right-radius: 16px;
+            }}
+            #separator {{
+                border-color: {colors['border_color']};
+            }}
+            #controlButton {{
+                background-color: transparent;
+                border: none;
+                border-radius: 8px;
+            }}
+            #controlButton:hover {{
+                background-color: {colors['button_hover']};
             }}
         """)
     
     def _create_header(self):
-        header_widget = QWidget()
-        header_widget.setFixedHeight(60)
+        header_widget = QFrame()
+        header_widget.setObjectName("header")
+        header_widget.setFixedHeight(50)
         layout = QHBoxLayout(header_widget)
-        layout.setContentsMargins(20, 10, 10, 10)
+        layout.setContentsMargins(15, 0, 10, 0)
+        layout.setSpacing(10)
         
+        if self.logo_pixmap:
+            logo_label = QLabel()
+            logo_label.setPixmap(self.logo_pixmap.scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            layout.addWidget(logo_label)
+
         title_label = QLabel("Meu Perfil")
-        title_label.setStyleSheet(f"font-size: 24px; font-weight: 600; color: {self.theme_colors['text_color']};")
+        title_label.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {self.theme_colors['text_color']};")
+        
+        # Botão de ajuda (exemplo)
+        help_button = QPushButton()
+        help_button.setObjectName("controlButton")
+        help_button.setFixedSize(30, 30)
+        help_button.setIcon(IconManager.get_icon('sobre', color=self.theme_colors['text_secondary']))
+        help_button.setCursor(Qt.PointingHandCursor)
         
         close_button = QPushButton()
-        close_button.setFixedSize(32, 32)
-        close_button.setIcon(IconManager.get_icon('close', color=self.theme_colors['text_secondary']))
+        close_button.setObjectName("controlButton")
+        close_button.setFixedSize(30, 30)
+        close_button.setIcon(IconManager.get_icon('fechar', color=self.theme_colors['text_secondary']))
         close_button.setCursor(Qt.PointingHandCursor)
-        close_button.setStyleSheet("background-color: transparent; border: none;")
         close_button.clicked.connect(self.reject)
         
         layout.addWidget(title_label)
         layout.addStretch()
+        layout.addWidget(help_button)
         layout.addWidget(close_button)
         return header_widget
 
     def _create_content(self):
         content_widget = QWidget()
         layout = QVBoxLayout(content_widget)
-        layout.setContentsMargins(30, 0, 30, 30)
+        layout.setContentsMargins(40, 25, 40, 30)
         layout.setSpacing(20)
 
-        # Avatar, Nome e Tipo
+        # --- CORREÇÃO: Centralização do avatar ---
+        # Colocamos o avatar dentro de um layout horizontal com spacers para forçar a centralização
+        avatar_h_layout = QHBoxLayout()
+        avatar_h_layout.addStretch()
+        avatar_h_layout.addWidget(ThemedAvatar(self.usuario, self.theme_colors))
+        avatar_h_layout.addStretch()
+        
+        # Agrupamos tudo relacionado ao avatar em um layout vertical
         avatar_area = QVBoxLayout()
-        avatar_area.setAlignment(Qt.AlignCenter)
-        avatar_area.setSpacing(5)
-        avatar_area.addWidget(ThemedAvatar(self.usuario, self.theme_colors))
+        avatar_area.setSpacing(8)
+        avatar_area.addLayout(avatar_h_layout) # Adiciona o layout horizontal aqui
         
         name_label = QLabel(self.usuario['nome'])
         name_label.setAlignment(Qt.AlignCenter)
@@ -220,7 +283,7 @@ class ProfileWindow(QDialog):
         avatar_area.addWidget(tipo_label)
         layout.addLayout(avatar_area)
         
-        # Formulário
+        # Formulário (sem alterações)
         self.name_edit = ThemedLineEdit(self.theme_colors, self.usuario['nome'])
         layout.addWidget(ThemedFieldGroup("Nome Completo", self.name_edit, self.theme_colors))
 
@@ -236,7 +299,7 @@ class ProfileWindow(QDialog):
 
         layout.addStretch()
 
-        # Botões
+        # Botões (sem alterações)
         self.save_button = ThemedButton("Salvar Alterações", self.theme_colors, "primary", icon_name='save')
         self.save_button.clicked.connect(self.save_profile)
         
@@ -248,6 +311,18 @@ class ProfileWindow(QDialog):
         
         return content_widget
 
+    # --- CORREÇÃO: Métodos para arrastar a janela ---
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.header.underMouse():
+            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton:
+            self.move(event.globalPos() - self.drag_position)
+            event.accept()
+
+    # Métodos save_profile, open_change_password e show_message permanecem os mesmos
     def save_profile(self):
         nome = self.name_edit.text().strip()
         email = self.email_edit.text().strip()
@@ -273,8 +348,9 @@ class ProfileWindow(QDialog):
         """Abrir diálogo para alterar senha"""
         from ui.change_password_window import ChangePasswordWindow
         
-        # ATUALIZAÇÃO: Passe self.theme_colors para a janela de alterar senha
-        password_dialog = ChangePasswordWindow(self.db, self.usuario['id'], self.theme_colors)
+        # --- CORREÇÃO APLICADA AQUI ---
+        # Passa o logo que a ProfileWindow já recebeu para a ChangePasswordWindow
+        password_dialog = ChangePasswordWindow(self.db, self.usuario['id'], self.theme_colors, self.logo_pixmap)
         password_dialog.exec_()
 
     def show_message(self, title, message, level="info"):

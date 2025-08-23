@@ -25,12 +25,11 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.db = db
         self.settings = settings
-        self.theme_colors = theme_colors # Salve o dicionário
+        self.theme_colors = theme_colors 
         self.menu_collapsed = True
         self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
         self.initUI()
         self.check_promocoes_ativas()
-        # A chamada para aplicar_tema agora é feita no final do initUI
 
     def initUI(self):
         self.setWindowTitle("Sistema de Estoque - GestorX")
@@ -44,6 +43,8 @@ class MainWindow(QMainWindow):
 
         theme_colors = self._get_theme_colors()
 
+        # ... (todo o código de criação de widgets do CABEÇALHO e CONTEÚDO PRINCIPAL permanece o mesmo) ...
+        # ... (vou omitir por brevidade, apenas cole a classe inteira) ...
         # ===== CABEÇALHO UNIFICADO =====
         header_frame = QFrame()
         header_frame.setObjectName("headerFrame")
@@ -57,8 +58,7 @@ class MainWindow(QMainWindow):
         if logo_pixmap:
             self.app_logo.setPixmap(logo_pixmap)
             
-        # --- CORREÇÃO: Aumente o tamanho do QLabel aqui ---
-        self.app_logo.setFixedSize(60, 60) # De: 32, 32  Para: 40, 40
+        self.app_logo.setFixedSize(60, 60)
 
         app_title = QLabel("Sistema de Estoque - GestorX")
         app_title.setFont(QFont("Segoe UI", 12, QFont.Bold))
@@ -67,7 +67,6 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(self.app_logo)
         header_layout.addWidget(app_title)
         
-        # Menus do cabeçalho
         self.arquivo_btn = QPushButton("Arquivo")
         arquivo_menu = QMenu(self)
         self.config_action = QAction('Configurações', self)
@@ -217,17 +216,10 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         content_container_layout.addWidget(self.stack)
 
-        ## ========================================================== ##
-        ## CORREÇÃO CRÍTICA: Instanciação das páginas com theme_colors ##
-        ## ========================================================== ##
         self.dashboard_page = DashboardWindow(self.db, theme_colors)
-        self.estoque_page = EstoqueWindow(self.db, theme_colors)
+        self.estoque_page = EstoqueWindow(self.db, theme_colors, self.carregar_logo_pixmap())
         self.fornecedor_page = FornecedorWindow(self.db, theme_colors, self.settings)
-
         self.promocoes_page = PromocoesWindow(self.db, theme_colors)
-        
-        # Para as janelas abaixo funcionarem, elas também precisarão ser adaptadas
-        # para receber `theme_colors` no construtor.
         self.clientes_page = ClientesWindow(self.db, theme_colors)
         self.caixa_page = CaixaWindow(self.db, theme_colors)
 
@@ -257,54 +249,62 @@ class MainWindow(QMainWindow):
         self.toggle_menu()
         self.switch_page(0)
         
-        # --- Lógica para centralizar a janela na tela ---
-        # Pega a geometria da tela disponível (descontando a barra de tarefas)
-        screen_geometry = QApplication.primaryScreen().availableGeometry()
-        # Pega o retângulo da nossa janela com o tamanho definido (1280x720)
-        window_geometry = self.frameGeometry()
-        # Move o retângulo da nossa janela para o centro da tela
-        window_geometry.moveCenter(screen_geometry.center())
-        # Aplica a nova posição (canto superior esquerdo) à janela
-        self.move(window_geometry.topLeft())
+        # --- ALTERAÇÃO 1: REMOVA A LÓGICA DE POSICIONAMENTO E ANIMAÇÃO DAQUI ---
+        # A lógica de centralizar e a animação de fade-in foram movidas
+        # para o novo método showEvent para garantir que executem toda vez que a janela for exibida.
         
-        # --- Lógica para exibir com animação de fade-in ---
-        self.setWindowOpacity(0.0)
-        self.show() # Exibe a janela na posição centralizada, mas ainda transparente
-
-        # Inicia a animação para a janela aparecer suavemente
-        self.fade_in_animation = QPropertyAnimation(self, b"windowOpacity")
-        self.fade_in_animation.setDuration(500)
-        self.fade_in_animation.setStartValue(0.0)
-        self.fade_in_animation.setEndValue(1.0)
-        self.fade_in_animation.start()
-
-        # Aplica o tema DEPOIS que todos os widgets foram criados.
         self.aplicar_tema()
 
         # --- CONEXÕES PARA ATUALIZAÇÃO AUTOMÁTICA ---
-        # Conecta o sinal da janela de clientes a um "manipulador" (handler)
         if hasattr(self.clientes_page, 'dados_clientes_alterados'):
             self.clientes_page.dados_clientes_alterados.connect(self.on_dados_clientes_changed)
-
-        # Faça o mesmo para outras páginas
         if hasattr(self.estoque_page, 'dados_produtos_alterados'):
             self.estoque_page.dados_produtos_alterados.connect(self.on_dados_produtos_changed)
-
         if hasattr(self.fornecedor_page, 'dados_fornecedores_alterados'):
             self.fornecedor_page.dados_fornecedores_alterados.connect(self.on_dados_fornecedores_changed)
-        
         if hasattr(self.caixa_page, 'movimento_manual_registrado'):
             self.caixa_page.movimento_manual_registrado.connect(self.dashboard_page.carregar_dados)
         
-        # ... etc para outras janelas que modificam dados
-
-         # --- INICIA O GERENCIADOR DE NOTIFICAÇÕES E O AGENDADOR ---
+        # --- INICIA O GERENCIADOR DE NOTIFICAÇÕES E O AGENDADOR ---
         self.notification_manager = NotificationManager(self.db, self.settings)
         self.scheduler = Scheduler(self.settings)
         self.scheduler.notification_triggered.connect(self.notification_manager.check_and_send_notifications)
         self.scheduler.log_message.connect(self.log_scheduler_message)
-        self.scheduler.start() # Inicia a thread do agendador
-    
+        self.scheduler.start()
+
+        # --- ALTERAÇÃO 2: CHAME self.show() AQUI PARA INICIAR O PROCESSO ---
+        # Esta chamada irá acionar o novo método showEvent pela primeira vez.
+        self.show()
+
+    def showEvent(self, event):
+        """
+        Evento chamado pouco antes de a janela ser exibida.
+        Usamos para garantir que a janela sempre apareça no estado e posição corretos.
+        """
+        # --- CORREÇÃO APLICADA AQUI (NOVO MÉTODO) ---
+        # 1. Garante que a janela não está minimizada ou maximizada ao ser reexibida.
+        #    Isso resolve o aviso 'Tight layout not applied'.
+        self.setWindowState(Qt.WindowNoState)
+
+        # 2. Re-centraliza a janela na tela toda vez que ela for mostrada.
+        screen_geometry = QApplication.primaryScreen().availableGeometry()
+        window_geometry = self.frameGeometry()
+        window_geometry.moveCenter(screen_geometry.center())
+        self.move(window_geometry.topLeft())
+
+        # 3. Prepara a janela para a animação de fade-in.
+        self.setWindowOpacity(0.0)
+
+        # Chama a implementação original do evento para que a janela seja de fato preparada para ser mostrada.
+        super().showEvent(event)
+        
+        # 4. Inicia a animação de fade-in agora que a janela tem o tamanho e posição corretos.
+        self.fade_in_animation = QPropertyAnimation(self, b"windowOpacity")
+        self.fade_in_animation.setDuration(400)
+        self.fade_in_animation.setStartValue(0.0)
+        self.fade_in_animation.setEndValue(1.0)
+        self.fade_in_animation.start()
+
     def on_dados_clientes_changed(self):
         """
         Este método (slot) é chamado quando a ClientesWindow emite o sinal.
@@ -650,9 +650,6 @@ class MainWindow(QMainWindow):
         border_color = theme['border_color']
         button_hover = theme['button_hover']
 
-        # --- CORREÇÃO: A linha que definia a imagem da logo foi removida daqui ---
-        # A logo agora é definida apenas no initUI e não será mais sobrescrita.
-
         # Ícones dinâmicos que DEVEM mudar com o tema
         self.hamburger_btn.setIcon(IconManager.get_icon('menu', text_color))
         self.refresh_button.setIcon(IconManager.get_icon('atualizar', 'white'))
@@ -663,13 +660,37 @@ class MainWindow(QMainWindow):
         # Atualiza os ícones do menu lateral para a cor correta (inativa/ativa)
         self.switch_page(self.stack.currentIndex())
         
-        # Aplica a folha de estilo principal (o restante da sua função está perfeito)
+        # Aplica a folha de estilo principal
         self.setStyleSheet(f"""
             QMainWindow, #centralWidget, QDialog {{
                 background-color: {bg_color};
                 color: {text_color};
             }}
             
+            /* --- ESTILO DOS MENUS SUSPENSOS (QMenu) --- CORREÇÃO APLICADA AQUI --- */
+            QMenu {{
+                background-color: {theme['menu_color']};
+                color: {text_color};
+                border: 1px solid {border_color};
+                border-radius: 8px;
+                padding: 5px;
+            }}
+            QMenu::item {{
+                padding: 8px 20px;
+                border-radius: 6px;
+                margin: 2px;
+            }}
+            QMenu::item:selected {{
+                background-color: {accent_color};
+                color: white;
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background-color: {border_color};
+                margin: 5px;
+            }}
+            /* --- FIM DA CORREÇÃO --- */
+
             /* --- CAMPOS DE ENTRADA E SELEÇÃO --- */
             QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit {{
                 background-color: {surface_color};
@@ -686,7 +707,7 @@ class MainWindow(QMainWindow):
                 border: none;
             }}
             QComboBox::down-arrow {{
-                image: url(assets/img/chevron-down.png); /* Crie um ícone de seta para baixo */
+                image: url(assets/img/chevron-down.png);
             }}
             QComboBox QAbstractItemView {{
                 background-color: {surface_color};
@@ -919,12 +940,83 @@ class MainWindow(QMainWindow):
         
         QMessageBox.information(self, "Relatório de Promoções Ativas", msg)
     
+    # Em main.py, dentro da classe MainWindow
+
     def mostrar_sobre(self):
-        """Mostra informações sobre o sistema."""
-        QMessageBox.about(self, "Sobre o Sistema", 
-                         "Sistema de Estoque v1.0\n\n"
-                         "Desenvolvido com Python e PyQt5\n\n"
-                         "© 2025 - Todos os direitos reservados")
+        """Mostra uma janela 'Sobre' estilizada com informações do sistema."""
+        # Cria uma instância de QMessageBox para ter mais controle sobre a aparência
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Sobre o GestorX")
+
+        # Carrega o logo do aplicativo para usar como ícone da janela
+        logo_pixmap = self.carregar_logo_pixmap()
+        if logo_pixmap:
+            # Redimensiona o logo para um tamanho adequado para a caixa de diálogo
+            dialog.setIconPixmap(logo_pixmap.scaled(80, 80, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+        # Obtém as cores do tema atual para usar no texto HTML
+        theme = self._get_theme_colors()
+        text_color = theme['text_color']
+        text_secondary = theme['text_secondary']
+        accent_color = theme['accent_color']
+        border_color = theme['border_color']
+        surface_color = theme['surface_color']
+
+        # Cria o conteúdo da janela usando Rich Text (HTML) para uma formatação profissional
+        rich_text = f"""
+        <h3 style='color: {text_color}; margin-bottom: 10px;'>GestorX - Sistema de Estoque</h3>
+        <p style='color: {text_color};'><b>Versão:</b> 1.0</p>
+        <p style='color: {text_secondary};'>
+            Uma solução moderna e eficiente para o gerenciamento do seu negócio, 
+            desenvolvida com a robustez do Python e a versatilidade da biblioteca PyQt5.
+        </p>
+        <hr style='border: 1px solid {border_color};'>
+        <p style='color: {text_color};'>
+            <b>Suporte Técnico e Sugestões:</b><br>
+            Para dúvidas ou ajuda, entre em contato com nossa equipe através do e-mail:
+            <br><a style='color: {accent_color}; text-decoration: none;' href='mailto:gestorxerp@gmail.com'>gestorxerp@gmail.com</a>
+        </p>
+        <br>
+        <p style='font-size: 9pt; color: {text_secondary};'>
+            © 2025 GestorX. Todos os direitos reservados.
+        </p>
+        """
+        
+        dialog.setText(rich_text)
+        dialog.setTextFormat(Qt.RichText) # Informa ao QMessageBox que o texto é HTML
+
+        # Adiciona e customiza o botão "OK"
+        dialog.setStandardButtons(QMessageBox.Ok)
+        dialog.button(QMessageBox.Ok).setText("Fechar")
+        dialog.button(QMessageBox.Ok).setCursor(Qt.PointingHandCursor)
+
+
+        # Aplica uma folha de estilos para que a janela "Sobre" combine com o tema da aplicação
+        dialog.setStyleSheet(f"""
+            QMessageBox {{
+                background-color: {surface_color};
+                border: 1px solid {border_color};
+                border-radius: 8px;
+            }}
+            QLabel#qt_msgbox_label {{ /* Seleciona o label principal do texto */
+                color: {text_color};
+                font-size: 11pt;
+            }}
+            QPushButton {{
+                background-color: {accent_color};
+                color: white;
+                border: none;
+                padding: 8px 24px;
+                border-radius: 4px;
+                font-weight: bold;
+                min-width: 80px;
+            }}
+            QPushButton:hover {{
+                background-color: #0069d9; /* Um tom mais escuro da cor de destaque */
+            }}
+        """)
+
+        dialog.exec_()
     
     def closeEvent(self, event):
         """Evento chamado quando a janela é fechada."""
@@ -937,26 +1029,22 @@ class MainWindow(QMainWindow):
         self.db.fechar()
         event.accept()
 
+    # Em main.py, dentro da classe MainWindow
+
     def setup_for_user(self, usuario):
-        """Configura a interface para o usuário logado"""
+        """Configura a interface para o usuário logado e ajusta as permissões da UI."""
         try:
             if not hasattr(self, 'user_manager'):
-                # Passa a MainWindow (self) para o UserManager
                 self.user_manager = UserManager(self, self.db) 
             
-            self.user_manager.usuario = usuario
-            
-            # --- CORREÇÃO PRINCIPAL AQUI ---
-            # Ao criar o UserMenuWidget, passe as cores do tema
+            # --- CRIAÇÃO E CONFIGURAÇÃO DO MENU DO USUÁRIO ---
             user_menu_widget = UserMenuWidget(usuario, self.theme_colors)
-            
-            # Conecta os sinais... (código existente)
             user_menu_widget.profile_requested.connect(self.user_manager.open_profile)
             user_menu_widget.password_change_requested.connect(self.user_manager.change_password)
             user_menu_widget.admin_requested.connect(self.user_manager.open_admin)
             user_menu_widget.logout_requested.connect(self.user_manager.logout)
 
-            # Lógica para substituir o placeholder... (código existente)
+            # Limpa o placeholder antigo antes de adicionar o novo widget
             if self.user_menu_placeholder.layout() is not None:
                 while self.user_menu_placeholder.layout().count():
                     child = self.user_menu_placeholder.layout().takeAt(0)
@@ -968,10 +1056,43 @@ class MainWindow(QMainWindow):
                 self.user_menu_placeholder.setLayout(placeholder_layout)
             
             self.user_menu_placeholder.layout().addWidget(user_menu_widget)
+            
+            # Associa o widget ao UserManager para referência futura (opcional, mas bom)
+            self.user_manager.user_menu_widget = user_menu_widget
+            
+            # --- ATUALIZA O ESTADO DO USERMANAGER ---
+            # Chama o setup do UserManager, que agora só cuida da barra de status e estado interno
+            self.user_manager.setup_for_user(usuario)
 
-            # Configura a barra de status e ajusta permissões
-            self.user_manager.setup_status_bar()
-            self.user_manager.adjust_permissions()
+            # --- CORREÇÃO DE PERMISSÕES (MOVIDA PARA CÁ) ---
+            # Agora que todos os widgets existem, ajustamos a visibilidade deles aqui.
+            
+            # 1. Pega o tipo de usuário de forma segura
+            user_type = usuario.get('tipo') or ''
+            is_admin = user_type.lower() == 'admin'
+
+            # 2. Ajusta o botão 'Configurações' no menu lateral
+            if hasattr(self, 'btn_config'):
+                self.btn_config.setVisible(is_admin)
+
+            # 3. Ajusta a ação 'Administração' no menu do usuário recém-criado
+            admin_action = None
+            separator_before_admin = None
+            
+            # Procura pela ação de admin e seu separador
+            actions = user_menu_widget.menu.actions()
+            for i, action in enumerate(actions):
+                if "Administração" in action.text():
+                    admin_action = action
+                    if i > 0 and actions[i-1].isSeparator():
+                        separator_before_admin = actions[i-1]
+                    break
+            
+            # Define a visibilidade da ação e do separador
+            if admin_action:
+                admin_action.setVisible(is_admin)
+            if separator_before_admin:
+                separator_before_admin.setVisible(is_admin)
 
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"Erro ao configurar usuário: {str(e)}")
@@ -1251,6 +1372,8 @@ class UserMenuWidget(QFrame):
         except (KeyError, AttributeError):
             return False
 
+# Em main.py
+
 class UserManager:
     """Gerenciador principal do usuário na aplicação"""
 
@@ -1260,61 +1383,42 @@ class UserManager:
         self.usuario = None
         self.user_menu_widget = None
         self.user_status_label = None
-        
-        # Diálogos ativos
         self.active_dialogs = {}
     
     def setup_for_user(self, usuario):
         """Configura a interface para o usuário logado"""
+        # --- CORREÇÃO PRINCIPAL (PARTE 1) ---
+        # Verificamos e corrigimos o objeto 'usuario' assim que ele é recebido do login.
+        # Se a chave 'tipo' não existir, for None ou uma string vazia, definimos como 'Comum'.
+        if not usuario.get('tipo'):
+            usuario['tipo'] = 'Comum'
+        
         self.usuario = usuario
         self.setup_status_bar()
-        self.setup_user_menu()
-        self.adjust_permissions()
-    
+        # O restante da lógica de permissões já está na MainWindow.setup_for_user, o que é o correto.
+
     def setup_status_bar(self):
         """Configura a barra de status com informações do usuário"""
         try:
-            user_info = f"Usuário: {self.usuario['nome']} | Perfil: {self.usuario['tipo'].capitalize()}"
-            self.user_status_label = QLabel(user_info)
-            self.user_status_label.setStyleSheet("padding-right: 10px;")
-            self.main_window.statusBar.addPermanentWidget(self.user_status_label)
+            # Agora que garantimos que self.usuario['tipo'] sempre terá um valor,
+            # este código funcionará sem problemas.
+            nome_usuario = self.usuario.get('nome', 'Usuário Desconhecido')
+            tipo_usuario = self.usuario.get('tipo', 'Indefinido') # Mantemos o .get() por segurança
+
+            user_info = f"Usuário: {nome_usuario} | Perfil: {tipo_usuario.capitalize()}"
+
+            if self.user_status_label is None:
+                self.user_status_label = QLabel(user_info)
+                self.user_status_label.setStyleSheet("padding-right: 10px;")
+                self.main_window.statusBar.addPermanentWidget(self.user_status_label)
+            else:
+                self.user_status_label.setText(user_info)
+
         except Exception as e:
             print(f"Erro ao configurar barra de status: {e}")
     
-    def setup_user_menu(self):
-        """Configura o menu do usuário"""
-        try:
-            # Criar widget do menu do usuário
-            self.user_menu_widget = UserMenuWidget(self.usuario)
-            
-            # Conectar sinais
-            self.user_menu_widget.profile_requested.connect(self.open_profile)
-            self.user_menu_widget.password_change_requested.connect(self.change_password)
-            self.user_menu_widget.admin_requested.connect(self.open_admin)
-            self.user_menu_widget.logout_requested.connect(self.logout)
-            
-            # Adicionar à barra de menu
-            #self.main_window.menuBar().setCornerWidget(self.user_menu_widget, Qt.TopRightCorner)
-            
-        except Exception as e:
-            print(f"Erro ao configurar menu do usuário: {e}")
-    
-    def adjust_permissions(self):
-        """Ajusta a interface baseado nas permissões do usuário"""
-        try:
-            if self.usuario.get('tipo', '').lower() != 'admin':
-                # Ocultar funcionalidades de administração
-                if hasattr(self.main_window, 'btn_config'):
-                    self.main_window.btn_config.setVisible(False)
-                
-                # Remover menu de administração se existir
-                admin_menu = self.main_window.menuBar().findChild(QMenu, "adminMenu")
-                if admin_menu:
-                    self.main_window.menuBar().removeAction(admin_menu.menuAction())
-                    
-        except Exception as e:
-            print(f"Erro ao ajustar permissões: {e}")
-    
+    # Em main.py, dentro da classe UserManager
+
     def open_profile(self):
         """Abre a janela de perfil do usuário"""
         try:
@@ -1322,10 +1426,17 @@ class UserManager:
                 self.active_dialogs['profile'].raise_()
                 return
             
+            if self.usuario and not self.usuario.get('tipo'):
+                self.usuario['tipo'] = 'Comum'
+
             from ui.profile_window import ProfileWindow
-            
-            # ATUALIZAÇÃO: Passe self.main_window.theme_colors
-            profile_dialog = ProfileWindow(self.db, self.usuario, self.main_window.theme_colors)
+
+            # --- CORREÇÃO APLICADA AQUI ---
+            # 1. Carregamos o pixmap do logo usando um método da MainWindow
+            logo_pixmap = self.main_window.carregar_logo_pixmap()
+
+            # 2. Passamos o logo para o construtor da ProfileWindow
+            profile_dialog = ProfileWindow(self.db, self.usuario, self.main_window.theme_colors, logo_pixmap)
             
             self.active_dialogs['profile'] = profile_dialog
             profile_dialog.finished.connect(lambda: self.cleanup_dialog('profile'))
@@ -1336,7 +1447,7 @@ class UserManager:
         except Exception as e:
             QMessageBox.critical(self.main_window, "Erro", f"Erro ao abrir perfil: {str(e)}")
     
-    # Em ui/main_window.py, dentro da classe UserManager
+    # Em main.py, dentro da classe UserManager
 
     def change_password(self):
         """Abre a janela de alteração de senha"""
@@ -1347,16 +1458,12 @@ class UserManager:
             
             from ui.change_password_window import ChangePasswordWindow
             
-            # --- CORREÇÃO PRINCIPAL AQUI ---
-            # A MainWindow é referenciada como self.main_window.
-            # Passamos o dicionário de temas dela para o diálogo.
-            password_dialog = ChangePasswordWindow(self.db, self.usuario['id'], self.main_window.theme_colors)
+            # --- CORREÇÃO APLICADA AQUI ---
+            logo_pixmap = self.main_window.carregar_logo_pixmap()
+            password_dialog = ChangePasswordWindow(self.db, self.usuario['id'], self.main_window.theme_colors, logo_pixmap)
             
             self.active_dialogs['password'] = password_dialog
-            
-            # Conectar sinal de finalização
             password_dialog.finished.connect(lambda: self.cleanup_dialog('password'))
-            
             password_dialog.exec_()
             
         except Exception as e:
@@ -1365,15 +1472,13 @@ class UserManager:
     def open_admin(self):
         """Abre a janela de administração."""
         try:
-            # ... (verificação de permissão como estava) ...
-            
-            from ui.admin_window import AdminWindow
-            
-            # --- ATUALIZAÇÃO PRINCIPAL AQUI ---
-            # Removemos a passagem de self.main_window.settings
-            admin_dialog = AdminWindow(self.db, self.usuario, self.main_window.theme_colors)
+            user_type = self.usuario.get('tipo') or ''
+            if user_type.lower() != 'admin':
+                QMessageBox.warning(self.main_window, "Acesso Negado", "Você não tem permissão para acessar esta área.")
+                return
 
-            # Conecta o sinal da AdminWindow a um método da MainWindow (isto continua igual)
+            from ui.admin_window import AdminWindow
+            admin_dialog = AdminWindow(self.db, self.usuario, self.main_window.theme_colors)
             admin_dialog.logo_alterado.connect(self.main_window.recarregar_logo_dinamico)
 
             self.active_dialogs['admin'] = admin_dialog
@@ -1382,7 +1487,7 @@ class UserManager:
             
         except Exception as e:
             QMessageBox.critical(self.main_window, "Erro", f"Erro ao abrir administração: {str(e)}")
-    
+
     def logout(self):
         """Realiza o logout do usuário"""
         try:
@@ -1403,44 +1508,26 @@ class UserManager:
     def perform_logout(self):
         """Executa o processo de logout"""
         try:
-            # Fechar todos os diálogos ativos
             self.cleanup_all_dialogs()
             
-            # Garantir conexão com o banco
             if hasattr(self.db, 'ensure_connection'):
                 self.db.ensure_connection()
             
-            # Ocultar janela principal
             self.main_window.hide()
             
-            # Abrir janela de login
             from ui.login_window import LoginWindow
-            
-            # --- LINHA CORRIGIDA ---
             login_window = LoginWindow(self.db, self.main_window.theme_colors)
-            # --- FIM DA CORREÇÃO ---
-            
-            # Conectar sinal de login bem-sucedido se necessário
-            if (hasattr(self.main_window, 'parent') and 
-                self.main_window.parent() and 
-                hasattr(self.main_window.parent(), 'on_login_success')):
-                login_window.login_success_signal.connect(
-                    self.main_window.parent().on_login_success
-                )
             
             result = login_window.exec_()
             
             if result == QDialog.Accepted:
-                # Login bem-sucedido - configurar novo usuário
                 new_usuario = getattr(login_window, 'usuario', None)
                 if new_usuario:
-                    # Chame o método setup_for_user da MainWindow diretamente
                     self.main_window.setup_for_user(new_usuario)
                     self.main_window.show()
                 else:
                     self.exit_application()
             else:
-                # Login cancelado
                 self.exit_application()
                 
         except Exception as e:
@@ -1450,15 +1537,19 @@ class UserManager:
     def update_user_info(self):
         """Atualiza as informações do usuário na interface"""
         try:
-            # Atualizar dados do usuário
             self.usuario = self.db.obter_usuario_por_id(self.usuario['id'])
+
+            # --- CORREÇÃO PRINCIPAL (PARTE 3) ---
+            # Após recarregar os dados do banco, aplicamos a mesma verificação.
+            if self.usuario and not self.usuario.get('tipo'):
+                self.usuario['tipo'] = 'Comum'
             
-            # Atualizar barra de status
             if self.user_status_label:
-                user_info = f"Usuário: {self.usuario['nome']} | Perfil: {self.usuario['tipo'].capitalize()}"
+                nome_usuario = self.usuario.get('nome', 'Usuário Desconhecido')
+                tipo_usuario = self.usuario.get('tipo', 'Indefinido')
+                user_info = f"Usuário: {nome_usuario} | Perfil: {tipo_usuario.capitalize()}"
                 self.user_status_label.setText(user_info)
             
-            # Atualizar menu do usuário
             if self.user_menu_widget:
                 self.user_menu_widget.usuario = self.usuario
                 self.user_menu_widget.name_label.setText(self.user_menu_widget.get_first_name())
@@ -1467,14 +1558,12 @@ class UserManager:
             print(f"Erro ao atualizar informações do usuário: {e}")
     
     def cleanup_dialog(self, dialog_name):
-        """Limpa referência de diálogo específico"""
         if dialog_name in self.active_dialogs:
             dialog = self.active_dialogs.pop(dialog_name)
             if dialog:
                 dialog.deleteLater()
     
     def cleanup_all_dialogs(self):
-        """Limpa todos os diálogos ativos"""
         for dialog_name, dialog in list(self.active_dialogs.items()):
             if dialog:
                 try:
@@ -1485,7 +1574,6 @@ class UserManager:
         self.active_dialogs.clear()
     
     def exit_application(self):
-        """Encerra a aplicação"""
         try:
             self.cleanup_all_dialogs()
             self.main_window.close()
@@ -1494,16 +1582,6 @@ class UserManager:
         except:
             import os
             os._exit(0)
-
-
-# Integração com a janela principal - substitua os métodos antigos por estes:
-
-def setup_for_user(self, usuario):
-    """Método para integrar na janela principal"""
-    if not hasattr(self, 'user_manager'):
-        self.user_manager = UserManager(self, self.db)
-    
-    self.user_manager.setup_for_user(usuario)
 
 class ConfigDialog(QDialog):
     def __init__(self, settings, theme_colors, parent=None):
