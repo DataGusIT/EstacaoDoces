@@ -20,6 +20,120 @@ import math
 from ui.icon_manager import IconManager
 from database.db_manager import DatabaseManager 
 
+# Coloque esta nova classe no início do arquivo estoque_window.py
+
+class CustomMessageBox(QDialog):
+    """Um QMessageBox customizado e temático."""
+    def __init__(self, parent, title, message, theme_colors, msg_type='info', buttons=QMessageBox.Ok):
+        super().__init__(parent)
+        self.theme_colors = theme_colors
+        self.drag_position = None
+
+        # Configurações da janela
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(True)
+
+        # Determina o ícone e a cor de destaque com base no tipo de mensagem
+        type_info = {
+            'info':     {'icon': 'check_stock', 'color': theme_colors['accent_color']},
+            'success':  {'icon': 'check', 'color': '#28a745'},
+            'warning':  {'icon': 'estoque_baixo', 'color': '#ffc107'},
+            'error':    {'icon': 'delete', 'color': '#dc3545'},
+            'question': {'icon': 'sobre', 'color': '#17a2b8'},
+        }.get(msg_type, 'info')
+
+        self.accent_color = type_info['color']
+        self.icon_name = type_info['icon']
+        
+        # UI
+        self._setup_ui(title, message, buttons)
+
+    def _setup_ui(self, title, message, buttons):
+        self.setMinimumWidth(400)
+        
+        container = QFrame(self)
+        container.setObjectName("mainContainer")
+        
+        main_layout = QVBoxLayout(container)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Cabeçalho
+        self.header = QFrame(); self.header.setObjectName("header")
+        header_layout = QHBoxLayout(self.header)
+        icon_label = QLabel()
+        icon_label.setPixmap(IconManager.get_icon(self.icon_name, color='white').pixmap(18, 18))
+        title_label = QLabel(title)
+        title_label.setObjectName("titleLabel")
+        close_button = QPushButton(); close_button.setObjectName("controlButton")
+        close_button.setIcon(IconManager.get_icon('fechar', color=self.theme_colors['text_secondary']))
+        close_button.clicked.connect(self.reject)
+        header_layout.addWidget(icon_label); header_layout.addWidget(title_label); header_layout.addStretch(); header_layout.addWidget(close_button)
+        main_layout.addWidget(self.header)
+
+        # Corpo
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(20, 20, 20, 25)
+        message_label = QLabel(message); message_label.setWordWrap(True); message_label.setObjectName("messageLabel")
+        body_layout.addWidget(message_label)
+        main_layout.addWidget(body)
+
+        # Rodapé (Botões)
+        footer = QFrame(); footer.setObjectName("footer")
+        footer_layout = QHBoxLayout(footer)
+        footer_layout.addStretch()
+        
+        # Adiciona botões dinamicamente
+        if buttons & QMessageBox.Ok:
+            ok_btn = self._create_button("OK", self.accept, is_primary=True)
+            footer_layout.addWidget(ok_btn)
+        if buttons & QMessageBox.Yes:
+            yes_btn = self._create_button("Sim", lambda: self.done(QMessageBox.Yes), is_primary=True)
+            footer_layout.addWidget(yes_btn)
+        if buttons & QMessageBox.No:
+            no_btn = self._create_button("Não", lambda: self.done(QMessageBox.No))
+            footer_layout.addWidget(no_btn)
+        if buttons & QMessageBox.Cancel:
+            cancel_btn = self._create_button("Cancelar", self.reject)
+            footer_layout.addWidget(cancel_btn)
+
+        main_layout.addWidget(footer)
+        
+        base_layout = QVBoxLayout(self)
+        base_layout.addWidget(container)
+        self.apply_styles()
+
+    def _create_button(self, text, on_click, is_primary=False):
+        btn = QPushButton(text)
+        btn.clicked.connect(on_click)
+        btn.setObjectName("primaryButton" if is_primary else "secondaryButton")
+        return btn
+        
+    def apply_styles(self):
+        colors = self.theme_colors
+        style = f"""
+            #mainContainer {{ background-color: {colors['surface_color']}; border-radius: 12px; border: 1px solid {colors['border_color']}; }}
+            #header {{ background-color: {self.accent_color}; border-top-left-radius: 11px; border-top-right-radius: 11px; padding: 8px 12px; }}
+            #titleLabel {{ color: white; font-weight: bold; font-size: 11pt; }}
+            #messageLabel {{ color: {colors['text_color']}; font-size: 11pt; }}
+            #controlButton {{ background: transparent; border: none; padding: 4px; border-radius: 4px; }}
+            #controlButton:hover {{ background-color: rgba(255, 255, 255, 0.2); }}
+            #footer {{ background-color: {colors['bg_color']}; border-bottom-left-radius: 11px; border-bottom-right-radius: 11px; padding: 10px; border-top: 1px solid {colors['border_color']}; }}
+            QPushButton {{ font-weight: bold; padding: 8px 20px; border-radius: 6px; }}
+            #primaryButton {{ background-color: {self.accent_color}; color: white; border: none; }}
+            #secondaryButton {{ background-color: {colors['surface_color']}; color: {colors['text_color']}; border: 1px solid {colors['border_color']}; }}
+            #secondaryButton:hover {{ border-color: {colors['text_secondary']}; }}
+        """
+        self.setStyleSheet(style)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.header.underMouse():
+            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton:
+            self.move(event.globalPos() - self.drag_position)
 
 # ================================================================= #
 #       CLASSE CSV IMPORT WORKER TOTALMENTE IMPLEMENTADA            #
@@ -153,10 +267,11 @@ class CsvImportWorker(QThread):
     
 class EstoqueWindow(QWidget):
     dados_produtos_alterados = pyqtSignal()
-    def __init__(self, db, theme_colors):
+    def __init__(self, db, theme_colors, logo_pixmap=None): # <--- ADICIONE logo_pixmap=None AQUI
         super().__init__()
         self.db = db
         self.theme_colors = theme_colors
+        self.logo_pixmap = logo_pixmap # <--- ADICIONE ESTA LINHA para guardar o logo
         self.pagina_atual = 1
         self.itens_por_pagina = 100 
         self.total_paginas = 1
@@ -564,50 +679,53 @@ class EstoqueWindow(QWidget):
             
             self.tabela.setCellWidget(row, 11, acoes_widget)
 
+    # Dentro da classe EstoqueWindow, em estoque_window.py
+
     def abrir_dialog_quebrar_embalagem(self, produto_id):
         produto_info = self.db.obter_info_estoque_fracionado(produto_id)
         if not produto_info or not produto_info['fracionado']:
             QMessageBox.warning(self, "Erro", "Este produto não é fracionado!")
             return
         
-        dialog = DialogQuebrarEmbalagem(self.db, produto_info, self.theme_colors)
+        # --- CORREÇÃO APLICADA AQUI ---
+        # Passamos o logo_pixmap para o construtor do diálogo.
+        dialog = DialogQuebrarEmbalagem(self.db, produto_info, self.theme_colors, self.logo_pixmap)
         
         if dialog.exec_() == QDialog.Accepted:
             self.carregar_dados()
-
-            # <<< EMITA O SINAL AQUI, POIS O ESTOQUE MUDOU! >>>
             print("DEBUG: Embalagem quebrada. Emitindo sinal 'dados_produtos_alterados'.")
             self.dados_produtos_alterados.emit()
-    def abrir_formulario_produto(self, produto_id=None):
-        # O seu código para criar e configurar o diálogo está correto.
-        dialog = FormularioProduto(self.db, produto_id, self.theme_colors)
-        dialog.showMaximized()
 
-        # A mudança está aqui:
+    # Dentro da classe EstoqueWindow, em estoque_window.py
+
+    def abrir_formulario_produto(self, produto_id=None):
+        # --- CORREÇÃO APLICADA AQUI ---
+        # Em vez de chamar um método que não existe,
+        # usamos o logo que foi passado no construtor.
+        dialog = FormularioProduto(self.db, produto_id, self.theme_colors, self.logo_pixmap)
+        
+        dialog.showMaximized() 
+
         if dialog.exec_() == QDialog.Accepted:
-            self.carregar_dados() # Atualiza a própria tela de estoque
+            self.carregar_dados()
             self.atualizar_categorias_filtro()
             
-            # <<< EMITA O SINAL PARA O RESTO DO SISTEMA! >>>
             print("DEBUG: Formulário de produto salvo. Emitindo sinal 'dados_produtos_alterados'.")
-            self.dados_produtos_alterados.emit()  
+            self.dados_produtos_alterados.emit()
     
     def excluir_produto(self, produto_id):
-        confirmacao = QMessageBox.question(
-            self, "Confirmar Exclusão", "Tem certeza que deseja excluir este produto?",
-            QMessageBox.Yes | QMessageBox.No
-        )
+        dialog = CustomMessageBox(self, "Confirmar Exclusão", 
+                                "Tem certeza que deseja excluir este produto?\nEsta ação não pode ser desfeita.",
+                                self.theme_colors, 'question', QMessageBox.Yes | QMessageBox.No)
+        confirmacao = dialog.exec_()
+        
         if confirmacao == QMessageBox.Yes:
-            # Sua lógica de exclusão está correta
             if self.db.excluir_produto(produto_id):
-                QMessageBox.information(self, "Sucesso", "Produto excluído com sucesso!")
+                CustomMessageBox(self, "Sucesso", "Produto excluído com sucesso!", self.theme_colors, 'success').exec_()
                 self.carregar_dados()
-
-                # <<< EMITA O SINAL AQUI TAMBÉM! >>>
-                print("DEBUG: Produto excluído. Emitindo sinal 'dados_produtos_alterados'.")
                 self.dados_produtos_alterados.emit()
             else:
-                QMessageBox.warning(self, "Erro", "Não foi possível excluir o produto.")
+                CustomMessageBox(self, "Erro", "Não foi possível excluir o produto.", self.theme_colors, 'error').exec_()
     
     # ===================================================================== #
     #       NOVAS FUNÇÕES DE RELATÓRIO (AVANÇADAS E PROFISSIONAIS)        #
@@ -697,17 +815,17 @@ class EstoqueWindow(QWidget):
             
             doc.build(elementos, onFirstPage=header_footer, onLaterPages=header_footer)
             
-            QMessageBox.information(self, "Sucesso", f"Relatório salvo com sucesso em:\n{file_path}")
+            CustomMessageBox(self, "Sucesso", f"Relatório salvo com sucesso em:\n{file_path}", self.theme_colors, 'success').exec_()
 
         except FileNotFoundError:
-            QMessageBox.critical(self, "Erro de Logo", f"Arquivo de logo não encontrado em:\n{self.logo_path}")
+            CustomMessageBox(self, "Erro de Logo", f"Arquivo de logo não encontrado em:\n{self.logo_path}", self.theme_colors, 'error').exec_()
         except Exception as e:
-            QMessageBox.critical(self, "Erro ao Gerar PDF", f"Ocorreu um erro inesperado: {str(e)}")
+            CustomMessageBox(self, "Erro ao Gerar PDF", f"Ocorreu um erro inesperado: {str(e)}", self.theme_colors, 'error').exec_()
 
     def relatorio_vencimentos(self):
         produtos = self.db.verificar_produtos_vencendo(dias=30)
         if not produtos:
-            QMessageBox.information(self, "Relatório", "Não há produtos vencendo nos próximos 30 dias.")
+            CustomMessageBox(self, "Relatório", "Não há produtos vencendo nos próximos 30 dias.", self.theme_colors, 'info').exec_()
             return
 
         file_path, _ = QFileDialog.getSaveFileName(self, "Salvar Relatório de Vencimentos", os.path.expanduser("~/relatorio_vencimentos.pdf"), "PDF Files (*.pdf)")
@@ -791,7 +909,7 @@ class EstoqueWindow(QWidget):
     def relatorio_estoque_baixo(self):
         produtos = self.db.verificar_produtos_estoque_baixo()
         if not produtos:
-            QMessageBox.information(self, "Relatório", "Não há produtos com estoque abaixo do mínimo.")
+            CustomMessageBox(self, "Relatório", "Não há produtos com estoque abaixo do mínimo.", self.theme_colors, 'info').exec_()
             return
 
         file_path, _ = QFileDialog.getSaveFileName(self, "Salvar Relatório de Estoque Baixo", os.path.expanduser("~/relatorio_estoque_baixo.pdf"), "PDF Files (*.pdf)")
@@ -963,9 +1081,9 @@ class EstoqueWindow(QWidget):
         mensagem = f"Importação concluída!\n\n"
         # ...
         if erros > 0:
-            QMessageBox.warning(self, "Importação com Erros", mensagem)
+            CustomMessageBox(self, "Importação com Erros", mensagem, self.theme_colors, 'warning').exec_()
         else:
-            QMessageBox.information(self, "Importação Concluída", mensagem)
+            CustomMessageBox(self, "Importação Concluída", mensagem, self.theme_colors, 'success').exec_()
 
 
     def _extrair_quantidade_do_estoque_detalhado(self, estoque_str):
@@ -1032,14 +1150,22 @@ class EstoqueWindow(QWidget):
 
 
 # Nenhuma alteração necessária nas classes FormularioProduto e DialogQuebrarEmbalagem
+# Substitua a classe FormularioProduto inteira em estoque_window.py
+
 class FormularioProduto(QDialog):
-    def __init__(self, db, produto_id=None, theme_colors=None):
+    def __init__(self, db, produto_id=None, theme_colors=None, logo_pixmap=None):
         super().__init__()
         self.db = db
         self.produto_id = produto_id
         self.theme_colors = theme_colors if theme_colors else {}
+        self.logo_pixmap = logo_pixmap
         self.produto = None
-        self.imagem_path = None # <<< ADICIONE ESTA LINHA
+        self.imagem_path = None
+        self.drag_position = None
+
+        # Tornar a janela sem borda
+        self.setWindowFlags(Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
 
         if produto_id:
             self.produto = self.db.obter_produto(produto_id)
@@ -1057,8 +1183,72 @@ class FormularioProduto(QDialog):
     def initUI(self):
         self.setWindowTitle("Formulário de Produto")
         
-        main_layout = QVBoxLayout(self)
+        # Container principal para o estilo
+        container = QFrame(self)
+        container.setObjectName("mainContainer")
+
+        main_layout = QVBoxLayout(container)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Adiciona o cabeçalho customizado
+        self.header = self._create_header()
+        main_layout.addWidget(self.header)
+
+        # Conteúdo do formulário (agora dentro de um widget separado)
+        content_widget = self._create_content()
+        main_layout.addWidget(content_widget)
+
+        # Adiciona o container ao layout do QDialog
+        base_layout = QVBoxLayout(self)
+        base_layout.setContentsMargins(0, 0, 0, 0)
+        base_layout.addWidget(container)
+
+        # Conexões de sinais
+        self.preco_compra_input.valueChanged.connect(self.calcular_preco_venda)
+        self.margem_lucro_input.valueChanged.connect(self.calcular_preco_venda)
+        self.preco_venda_input.valueChanged.connect(self.calcular_margem_lucro)
+
+    def _create_header(self):
+        header_widget = QFrame()
+        header_widget.setObjectName("header")
+        header_widget.setFixedHeight(50)
+        layout = QHBoxLayout(header_widget)
+        layout.setContentsMargins(15, 0, 10, 0)
+        layout.setSpacing(10)
         
+        if self.logo_pixmap:
+            logo_label = QLabel()
+            logo_label.setPixmap(self.logo_pixmap.scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            layout.addWidget(logo_label)
+
+        title_label = QLabel("Formulário de Produto")
+        title_label.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {self.theme_colors['text_color']};")
+        
+        help_button = QPushButton()
+        help_button.setObjectName("controlButton")
+        help_button.setFixedSize(30, 30)
+        help_button.setIcon(IconManager.get_icon('sobre', color=self.theme_colors['text_secondary']))
+        help_button.setCursor(Qt.PointingHandCursor)
+        
+        close_button = QPushButton()
+        close_button.setObjectName("controlButton")
+        close_button.setFixedSize(30, 30)
+        close_button.setIcon(IconManager.get_icon('fechar', color=self.theme_colors['text_secondary']))
+        close_button.setCursor(Qt.PointingHandCursor)
+        close_button.clicked.connect(self.reject)
+        
+        layout.addWidget(title_label)
+        layout.addStretch()
+        layout.addWidget(help_button)
+        layout.addWidget(close_button)
+        return header_widget
+
+    def _create_content(self):
+        content_container = QWidget()
+        main_layout = QVBoxLayout(content_container)
+        main_layout.setContentsMargins(20, 15, 20, 20)
+
         grid_layout = QGridLayout()
         grid_layout.setSpacing(20)
 
@@ -1107,14 +1297,13 @@ class FormularioProduto(QDialog):
         self.imagem_preview_label = QLabel("Nenhuma imagem selecionada")
         self.imagem_preview_label.setAlignment(Qt.AlignCenter)
         self.imagem_preview_label.setMinimumSize(200, 200)
-        self.imagem_preview_label.setStyleSheet("border: 1px solid #ccc; border-radius: 4px;")
+        self.imagem_preview_label.setObjectName("imagePreview")
         imagem_layout.addWidget(self.imagem_preview_label)
         
         self.selecionar_imagem_btn = QPushButton("Selecionar Imagem")
         self.selecionar_imagem_btn.clicked.connect(self.selecionar_imagem)
         imagem_layout.addWidget(self.selecionar_imagem_btn)
 
-        # --- ADICIONANDO OS GRUPOS AO GRID LAYOUT ---
         grid_layout.addWidget(info_group, 0, 0)
         grid_layout.addWidget(preco_group, 0, 1)
         grid_layout.addWidget(imagem_group, 0, 2)
@@ -1135,7 +1324,7 @@ class FormularioProduto(QDialog):
         fracionado_layout.addRow("Preço Unitário (Fração):", self._create_input_with_icon('tag', self.preco_unitario_fracao_input))
         fracionado_layout.addRow("Estoque Fracionado Atual:", self._create_input_with_icon('cubes', self.estoque_fracionado_input))
         
-        grid_layout.addWidget(self.fracionado_group, 1, 0, 1, 3) # Ocupa as 3 colunas
+        grid_layout.addWidget(self.fracionado_group, 1, 0, 1, 3)
 
         main_layout.addLayout(grid_layout)
         main_layout.addStretch()
@@ -1153,39 +1342,46 @@ class FormularioProduto(QDialog):
         button_layout.addWidget(self.salvar_btn)
         
         main_layout.addLayout(button_layout)
-        
-        self.preco_compra_input.valueChanged.connect(self.calcular_preco_venda)
-        self.margem_lucro_input.valueChanged.connect(self.calcular_preco_venda)
-        self.preco_venda_input.valueChanged.connect(self.calcular_margem_lucro)
+        return content_container
 
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.header.underMouse():
+            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+            event.accept()
 
-    # ... todos os outros métodos de FormularioProduto (apply_styles, _create_input_with_icon, etc) permanecem os mesmos
-    def _create_input_with_icon(self, icon_name, widget):
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
-        
-        icon_label = QLabel()
-        icon_color = self.theme_colors.get('text_secondary', '#6d6d70')
-        # Esta função agora receberá o nome semântico correto
-        icon_label.setPixmap(IconManager.get_icon(icon_name, color=icon_color).pixmap(16, 16))
-        
-        layout.addWidget(icon_label)
-        layout.addWidget(widget, 1)
-        return container
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton:
+            self.move(event.globalPos() - self.drag_position)
+            event.accept()
+            
+    # O restante dos métodos (apply_styles, _create_input_with_icon, salvar_produto, etc.)
+    # podem ser copiados da sua versão original, mas a apply_styles precisa de um ajuste.
+    # Abaixo está a versão completa e corrigida dos métodos restantes.
 
     def apply_styles(self):
         theme = self.theme_colors
         if not theme: return
 
         style = f"""
-            QDialog {{
+            #mainContainer {{
                 background-color: {theme.get('bg_color', '#fff')};
+                border-radius: 16px;
+                border: 1px solid {theme.get('border_color', '#ccc')};
+            }}
+            #header {{
+                background-color: {theme.get('surface_color', '#f0f0f0')};
+                border-top-left-radius: 16px;
+                border-top-right-radius: 16px;
+                border-bottom: 1px solid {theme.get('border_color', '#ccc')};
+            }}
+            #controlButton {{
+                background-color: transparent; border: none; border-radius: 8px;
+            }}
+            #controlButton:hover {{
+                background-color: {theme.get('button_hover', '#e0e0e0')};
             }}
             QGroupBox {{
-                font-size: 11pt;
-                border: 1px solid {theme.get('border_color', '#ccc')};
+                font-size: 11pt; border: 1px solid {theme.get('border_color', '#ccc')};
                 border-radius: 8px; margin-top: 15px; padding: 15px;
             }}
             QGroupBox::title {{
@@ -1198,8 +1394,12 @@ class FormularioProduto(QDialog):
                 border-color: {theme.get('accent_color', '#007aff')};
             }}
             QLabel {{
-                color: {theme.get('text_color', '#000')};
-                font-size: 10pt;
+                color: {theme.get('text_color', '#000')}; font-size: 10pt;
+            }}
+            #imagePreview {{
+                border: 1px dashed {theme.get('border_color', '#ccc')};
+                border-radius: 8px;
+                color: {theme.get('text_secondary', '#666')};
             }}
             QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit {{
                 background-color: {theme.get('surface_color', '#f2f2f7')};
@@ -1225,7 +1425,21 @@ class FormularioProduto(QDialog):
         
         self.salvar_btn.setIcon(IconManager.get_icon('save', 'white'))
         self.cancelar_btn.setIcon(IconManager.get_icon('cancel', theme.get('text_color', '#000')))
-    
+
+    def _create_input_with_icon(self, icon_name, widget):
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        
+        icon_label = QLabel()
+        icon_color = self.theme_colors.get('text_secondary', '#6d6d70')
+        icon_label.setPixmap(IconManager.get_icon(icon_name, color=icon_color).pixmap(16, 16))
+        
+        layout.addWidget(icon_label)
+        layout.addWidget(widget, 1)
+        return container
+
     def carregar_categorias(self):
         self.categoria_combo.clear()
         self.categoria_combo.addItem("Selecione ou crie uma categoria", "")
@@ -1233,6 +1447,13 @@ class FormularioProduto(QDialog):
         for categoria in categorias:
             self.categoria_combo.addItem(categoria, categoria)
     
+    def carregar_fornecedores(self):
+        self.fornecedor_combo.clear()
+        self.fornecedor_combo.addItem("Selecione um fornecedor", None)
+        fornecedores = self.db.listar_fornecedores()
+        for fornecedor in fornecedores:
+            self.fornecedor_combo.addItem(fornecedor['empresa'], fornecedor['id'])
+
     def calcular_preco_venda(self):
         preco_compra = self.preco_compra_input.value()
         margem = self.margem_lucro_input.value() / 100
@@ -1249,13 +1470,6 @@ class FormularioProduto(QDialog):
             self.margem_lucro_input.blockSignals(True)
             self.margem_lucro_input.setValue(margem)
             self.margem_lucro_input.blockSignals(False)
-    
-    def carregar_fornecedores(self):
-        self.fornecedor_combo.clear()
-        self.fornecedor_combo.addItem("Selecione um fornecedor", None)
-        fornecedores = self.db.listar_fornecedores()
-        for fornecedor in fornecedores:
-            self.fornecedor_combo.addItem(fornecedor['empresa'], fornecedor['id'])
     
     def carregar_dados_produto(self):
         self.codigo_barras_input.setText(self.produto['codigo_barras'] or "")
@@ -1286,21 +1500,19 @@ class FormularioProduto(QDialog):
         
         if is_fracionado:
             self.unidade_medida_input.setText(self.produto['unidade_medida'] or "")
-            
-            # --- LINHA CORRIGIDA ---
-            # Converte o valor para inteiro antes de passá-lo para o QSpinBox.
             self.qtd_por_embalagem_input.setValue(int(self.produto['qtd_por_embalagem'] or 1))
-            
             self.preco_unitario_fracao_input.setValue(self.produto['preco_unitario_fracao'] or 0.0)
             self.estoque_fracionado_input.setValue(int(self.produto['estoque_fracionado'] or 0))
         
-        if self.produto['imagem_path']:
+        # --- CORREÇÃO APLICADA AQUI ---
+        # Substituímos o uso de .get() pela verificação das chaves do objeto sqlite3.Row
+        if 'imagem_path' in self.produto.keys() and self.produto['imagem_path']:
             self.imagem_path = self.produto['imagem_path']
             self.carregar_preview_imagem(self.imagem_path)
 
     def salvar_produto(self):
         if not self.nome_input.text().strip():
-            QMessageBox.warning(self, "Erro", "O nome do produto é obrigatório!")
+            CustomMessageBox(self, "Campo Obrigatório", "O nome do produto é obrigatório!", self.theme_colors, 'warning').exec_()
             return
             
         dados = {
@@ -1316,7 +1528,7 @@ class FormularioProduto(QDialog):
             'preco_venda': self.preco_venda_input.value(),
             'data_validade': self.data_validade_input.date().toString("yyyy-MM-dd"),
             'localizacao': self.localizacao_input.text().strip(),
-            'imagem_path': self.imagem_path, # <<< ADICIONE ESTA LINHA
+            'imagem_path': self.imagem_path,
             'fracionado': self.fracionado_group.isChecked(),
             'unidade_medida': self.unidade_medida_input.text().strip() if self.fracionado_group.isChecked() else 'unidade',
             'qtd_por_embalagem': self.qtd_por_embalagem_input.value() if self.fracionado_group.isChecked() else 1,
@@ -1333,17 +1545,16 @@ class FormularioProduto(QDialog):
                 mensagem = "Produto cadastrado com sucesso!"
             
             if sucesso:
-                QMessageBox.information(self, "Sucesso", mensagem)
+                CustomMessageBox(self, "Sucesso", mensagem, self.theme_colors, 'success').exec_()
                 self.accept()
             else:
-                QMessageBox.warning(self, "Erro no Banco de Dados", "Não foi possível salvar o produto.")
+                CustomMessageBox(self, "Erro no Banco de Dados", "Não foi possível salvar o produto.", self.theme_colors, 'error').exec_()
         except Exception as e:
-            QMessageBox.critical(self, "Erro Inesperado", f"Ocorreu um erro: {e}")
-    
+            CustomMessageBox(self, "Erro Inesperado", f"Ocorreu um erro: {e}", self.theme_colors, 'error').exec_()
+
     def selecionar_imagem(self):
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Selecionar Imagem do Produto",
-            os.path.expanduser("~"),
+            self, "Selecionar Imagem do Produto", os.path.expanduser("~"),
             "Arquivos de Imagem (*.png *.jpg *.jpeg *.bmp)"
         )
         if file_path:
@@ -1358,36 +1569,91 @@ class FormularioProduto(QDialog):
             ))
         else:
             self.imagem_preview_label.setText("Nenhuma imagem")
-            self.imagem_preview_label.setPixmap(QPixmap()) # Limpa a imagem
+            self.imagem_preview_label.setPixmap(QPixmap())
 
 # ================================================================= #
 #       CLASSE DIALOGQUEBRAREMBALAGEM TOTALMENTE CORRIGIDA          #
 # ================================================================= #
+# Substitua a classe DialogQuebrarEmbalagem inteira em estoque_window.py
+
 class DialogQuebrarEmbalagem(QDialog):
-    # MUDANÇA 1: Adicionar theme_colors ao construtor
-    def __init__(self, db, produto_info, theme_colors=None):
+    def __init__(self, db, produto_info, theme_colors=None, logo_pixmap=None):
         super().__init__()
         self.db = db
         self.produto_info = produto_info
-        # Armazenar as cores do tema
         self.theme_colors = theme_colors if theme_colors else {}
+        self.logo_pixmap = logo_pixmap
+        self.drag_position = None
+
+        # Tornar a janela sem borda
+        self.setWindowFlags(Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
         
         self.initUI()
-        # MUDANÇA 2: Aplicar os estilos, assim como no FormularioProduto
         self.apply_styles()
 
     def initUI(self):
         self.setWindowTitle("Quebrar Embalagem")
-        self.setMinimumWidth(450) # Aumentar um pouco a largura para os ícones
+        self.setMinimumWidth(500)
         
-        layout = QVBoxLayout(self)
+        # Container principal para o estilo
+        container = QFrame(self)
+        container.setObjectName("mainContainer")
+
+        main_layout = QVBoxLayout(container)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Adiciona o cabeçalho customizado
+        self.header = self._create_header()
+        main_layout.addWidget(self.header)
         
+        # Conteúdo do formulário
+        main_layout.addWidget(self._create_content())
+
+        # Adiciona o container ao layout do QDialog
+        base_layout = QVBoxLayout(self)
+        base_layout.setContentsMargins(0, 0, 0, 0)
+        base_layout.addWidget(container)
+    
+    def _create_header(self):
+        header_widget = QFrame()
+        header_widget.setObjectName("header")
+        header_widget.setFixedHeight(50)
+        layout = QHBoxLayout(header_widget)
+        layout.setContentsMargins(15, 0, 10, 0)
+        layout.setSpacing(10)
+        
+        if self.logo_pixmap:
+            logo_label = QLabel()
+            logo_label.setPixmap(self.logo_pixmap.scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            layout.addWidget(logo_label)
+
+        title_label = QLabel("Quebrar Embalagem")
+        title_label.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {self.theme_colors['text_color']};")
+        
+        close_button = QPushButton()
+        close_button.setObjectName("controlButton")
+        close_button.setFixedSize(30, 30)
+        close_button.setIcon(IconManager.get_icon('fechar', color=self.theme_colors['text_secondary']))
+        close_button.setCursor(Qt.PointingHandCursor)
+        close_button.clicked.connect(self.reject)
+        
+        layout.addWidget(title_label)
+        layout.addStretch()
+        layout.addWidget(close_button)
+        return header_widget
+
+    def _create_content(self):
+        content_container = QWidget()
+        layout = QVBoxLayout(content_container)
+        layout.setContentsMargins(20, 15, 20, 20)
+
         info_group = QGroupBox("Informações do Produto")
         info_layout = QFormLayout(info_group)
         info_layout.setRowWrapPolicy(QFormLayout.WrapAllRows)
         info_layout.setSpacing(15)
 
-        # MUDANÇA 3: Usar o helper para adicionar ícones aos campos de informação
         info_layout.addRow(self._create_info_row('box', "Produto:", self.produto_info['nome']))
         info_layout.addRow(self._create_info_row('estoque', "Embalagens disponíveis:", str(self.produto_info['embalagens_inteiras'])))
         info_layout.addRow(self._create_info_row('box-open', "Unidades por embalagem:", str(self.produto_info['qtd_por_embalagem'])))
@@ -1404,7 +1670,6 @@ class DialogQuebrarEmbalagem(QDialog):
         self.quantidade_input.setValue(1)
         self.quantidade_input.valueChanged.connect(self.atualizar_preview)
         
-        # MUDANÇA 4: Usar o helper para adicionar ícone ao campo de entrada
         quebrar_layout.addRow("Quantidade a quebrar:", self._create_input_with_icon('break', self.quantidade_input))
         
         self.preview_label = QLabel()
@@ -1428,28 +1693,41 @@ class DialogQuebrarEmbalagem(QDialog):
         button_layout.addWidget(self.cancelar_btn)
         button_layout.addWidget(self.confirmar_btn)
     
-        # MUDANÇA 5: CORREÇÃO CRÍTICA - Adicionar o layout dos botões ao layout principal
-        # Este era o motivo pelo qual seus botões não apareciam.
         layout.addLayout(button_layout)
+        return content_container
 
-    def atualizar_preview(self):
-        qtd_quebrar = self.quantidade_input.value()
-        unidades_geradas = qtd_quebrar * self.produto_info['qtd_por_embalagem']
-        novo_estoque_fracionado = self.produto_info['estoque_fracionado'] + unidades_geradas
-        novas_embalagens = self.produto_info['embalagens_inteiras'] - qtd_quebrar
-        
-        preview_text = (f"{novas_embalagens} emb. + {novo_estoque_fracionado} {self.produto_info['unidade_medida']}"
-                        f"\n(Serão geradas +{unidades_geradas} unidades)")
-        self.preview_label.setText(preview_text)
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.header.underMouse():
+            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+            event.accept()
 
-    # MUDANÇA 6: Adicionar método para aplicar estilos (similar ao FormularioProduto)
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton:
+            self.move(event.globalPos() - self.drag_position)
+            event.accept()
+            
     def apply_styles(self):
         theme = self.theme_colors
         if not theme: return
 
-        # Estilo geral para o diálogo, grupos e labels
         style = f"""
-            QDialog {{ background-color: {theme.get('bg_color', '#fff')}; }}
+            #mainContainer {{
+                background-color: {theme.get('bg_color', '#fff')};
+                border-radius: 16px;
+                border: 1px solid {theme.get('border_color', '#ccc')};
+            }}
+            #header {{
+                background-color: {theme.get('surface_color', '#f0f0f0')};
+                border-top-left-radius: 16px;
+                border-top-right-radius: 16px;
+                border-bottom: 1px solid {theme.get('border_color', '#ccc')};
+            }}
+            #controlButton {{
+                background-color: transparent; border: none; border-radius: 8px;
+            }}
+            #controlButton:hover {{
+                background-color: {theme.get('button_hover', '#e0e0e0')};
+            }}
             QGroupBox {{
                 font-size: 10pt; border: 1px solid {theme.get('border_color', '#ccc')};
                 border-radius: 8px; margin-top: 15px; padding: 15px;
@@ -1476,11 +1754,19 @@ class DialogQuebrarEmbalagem(QDialog):
         """
         self.setStyleSheet(style)
         
-        # Adicionar ícones aos botões
         self.confirmar_btn.setIcon(IconManager.get_icon('confirm', 'white'))
         self.cancelar_btn.setIcon(IconManager.get_icon('cancel', theme.get('text_color', '#000')))
 
-    # MUDANÇA 7: Adicionar helpers para criar widgets com ícones (similar ao FormularioProduto)
+    def atualizar_preview(self):
+        qtd_quebrar = self.quantidade_input.value()
+        unidades_geradas = qtd_quebrar * self.produto_info['qtd_por_embalagem']
+        novo_estoque_fracionado = self.produto_info['estoque_fracionado'] + unidades_geradas
+        novas_embalagens = self.produto_info['embalagens_inteiras'] - qtd_quebrar
+        
+        preview_text = (f"{novas_embalagens} emb. + {novo_estoque_fracionado} {self.produto_info['unidade_medida']}"
+                        f"\n(Serão geradas +{unidades_geradas} unidades)")
+        self.preview_label.setText(preview_text)
+        
     def _create_input_with_icon(self, icon_name, widget):
         container = QWidget()
         layout = QHBoxLayout(container)
@@ -1522,14 +1808,14 @@ class DialogQuebrarEmbalagem(QDialog):
     
     def quebrar_embalagem(self):
         qtd_quebrar = self.quantidade_input.value()
-        confirmacao = QMessageBox.question(
-            self, "Confirmar Quebra",
-            f"Confirma quebrar {qtd_quebrar} embalagem(ns) em unidades fracionadas?",
-            QMessageBox.Yes | QMessageBox.No
-        )
+        dialog = CustomMessageBox(self, "Confirmar Quebra",
+                                f"Confirma quebrar {qtd_quebrar} embalagem(ns) em unidades?",
+                                self.theme_colors, 'question', QMessageBox.Yes | QMessageBox.No)
+        confirmacao = dialog.exec_()
+        
         if confirmacao == QMessageBox.Yes:
             if self.db.quebrar_embalagem(self.produto_info['produto_id'], qtd_quebrar):
-                QMessageBox.information(self, "Sucesso", "Embalagem quebrada com sucesso!")
+                CustomMessageBox(self, "Sucesso", "Embalagem quebrada com sucesso!", self.theme_colors, 'success').exec_()
                 self.accept()
             else:
-                QMessageBox.warning(self, "Erro", "Não foi possível quebrar a embalagem.")
+                CustomMessageBox(self, "Erro", "Não foi possível quebrar a embalagem.", self.theme_colors, 'error').exec_()
