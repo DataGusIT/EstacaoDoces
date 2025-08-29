@@ -572,11 +572,22 @@ class DashboardWindow(QWidget):
 
     def data_alterada(self):
         if not self._initialized: return
+        
+        # Bloqueia o combobox para evitar que ele chame 'periodo_alterado'
         self.cb_periodo.blockSignals(True)
         self.cb_periodo.setCurrentText("Personalizado")
         self.cb_periodo.blockSignals(False)
+        
+        # Se a data de início ultrapassar a de fim, sincronize-as
         if self.dt_inicio.date() > self.dt_fim.date():
+            # --- CORREÇÃO APLICADA AQUI ---
+            # Bloqueia o QDateEdit de destino para evitar uma chamada recursiva a 'data_alterada'
+            self.dt_fim.blockSignals(True)
             self.dt_fim.setDate(self.dt_inicio.date())
+            self.dt_fim.blockSignals(False)
+            # --- FIM DA CORREÇÃO ---
+
+        # Agenda a atualização dos dados uma única vez após todas as lógicas
         self.schedule_update()
 
     def carregar_dados(self):

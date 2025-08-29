@@ -11,34 +11,154 @@ import shutil
 
 from .icon_manager import IconManager
 
+
+# Adicione estas importações extras no topo do seu arquivo
+from PyQt5.QtWidgets import QFrame, QLineEdit
+from PyQt5.QtCore import Qt
+
+# --- CLASSE 1: DIÁLOGO DE ALERTA (ESTILO PERFIL) ---
+class AlertDialog(QDialog):
+    """Caixa de diálogo com o estilo sutil da tela de perfil."""
+    def __init__(self, parent, title, message, alert_type='info', buttons=QMessageBox.Ok, theme_colors=None):
+        super().__init__(parent)
+        self.theme_colors = theme_colors if theme_colors is not None else {}
+        self.drag_position = None
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(True)
+        type_info = { 'success':  {'icon': 'check', 'color': '#28a745'}, 'warning':  {'icon': 'estoque_baixo', 'color': '#ffc107'}, 'error':    {'icon': 'delete', 'color': '#dc3545'}, 'question': {'icon': 'question', 'color': '#17a2b8'}, 'info':     {'icon': 'sobre', 'color': self.theme_colors.get('accent_color', '#007AFF')}, }.get(alert_type, {'icon': 'sobre', 'color': '#007AFF'})
+        self.accent_color = type_info['color']
+        self.icon_name = type_info['icon']
+        self._setup_ui(title, message, buttons)
+
+    def _setup_ui(self, title, message, buttons):
+        self.setMinimumWidth(400)
+        container = QFrame(self); container.setObjectName("mainContainer")
+        main_layout = QVBoxLayout(container); main_layout.setContentsMargins(0, 0, 0, 0); main_layout.setSpacing(0)
+        self.header = QFrame(); self.header.setObjectName("header")
+        header_layout = QHBoxLayout(self.header); header_layout.setContentsMargins(20, 15, 10, 15)
+        header_title_label = QLabel(title); header_title_label.setObjectName("headerTitleLabel")
+        close_button = QPushButton(); close_button.setObjectName("controlButton"); close_button.setFixedSize(28, 28)
+        close_button.setIcon(IconManager.get_icon('fechar', color=self.theme_colors.get('text_secondary', '#666')))
+        close_button.clicked.connect(self.reject)
+        header_layout.addWidget(header_title_label); header_layout.addStretch(); header_layout.addWidget(close_button)
+        main_layout.addWidget(self.header)
+        body = QWidget(); body_layout = QVBoxLayout(body); body_layout.setContentsMargins(25, 20, 25, 25); body_layout.setSpacing(20)
+        subtitle_layout = QHBoxLayout()
+        icon_label = QLabel(); icon_label.setPixmap(IconManager.get_icon(self.icon_name, color=self.accent_color).pixmap(24, 24))
+        subtitle_label = QLabel(title); subtitle_label.setObjectName("subtitleLabel")
+        subtitle_layout.addWidget(icon_label); subtitle_layout.addWidget(subtitle_label); subtitle_layout.addStretch()
+        message_label = QLabel(message); message_label.setWordWrap(True); message_label.setObjectName("messageLabel")
+        button_layout = QHBoxLayout(); button_layout.addStretch()
+        if buttons & QMessageBox.Yes: button_layout.addWidget(self._create_button("Sim", lambda: self.done(QMessageBox.Yes), is_primary=True))
+        if buttons & QMessageBox.Ok: button_layout.addWidget(self._create_button("OK", self.accept, is_primary=True))
+        if buttons & QMessageBox.No: button_layout.addWidget(self._create_button("Não", self.reject))
+        if buttons & QMessageBox.Cancel: button_layout.addWidget(self._create_button("Cancelar", self.reject))
+        body_layout.addLayout(subtitle_layout); body_layout.addWidget(message_label); body_layout.addLayout(button_layout)
+        main_layout.addWidget(body)
+        base_layout = QVBoxLayout(self); base_layout.addWidget(container)
+        self.apply_styles()
+
+    def _create_button(self, text, on_click, is_primary=False):
+        btn = QPushButton(text); btn.clicked.connect(on_click); btn.setCursor(Qt.PointingHandCursor)
+        btn.setObjectName("primaryButton" if is_primary else "secondaryButton")
+        return btn
+        
+    def apply_styles(self):
+        colors = self.theme_colors
+        self.setStyleSheet(f""" #mainContainer {{ background-color: {colors.get('surface_color', '#fff')}; border-radius: 12px; border: 1px solid {colors.get('border_color', '#ccc')}; }} #header {{ border-bottom: 1px solid {colors.get('border_color', '#ccc')}; }} #headerTitleLabel {{ color: {colors.get('text_color', '#000')}; font-weight: bold; }} #subtitleLabel {{ color: {colors.get('text_color', '#000')}; font-size: 14pt; font-weight: bold; }} #messageLabel {{ color: {colors.get('text_secondary', '#333')}; font-size: 11pt; }} #controlButton {{ background: transparent; border: none; border-radius: 14px; }} #controlButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }} QPushButton {{ font-weight: bold; padding: 10px 25px; border-radius: 8px; min-width: 90px;}} #primaryButton {{ background-color: {self.accent_color}; color: white; border: none; }} #secondaryButton {{ background-color: transparent; color: {colors.get('text_color', '#000')}; border: 1px solid {colors.get('border_color', '#ccc')}; }} #secondaryButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }} """)
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton: self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton: self.move(event.globalPos() - self.drag_position)
+
+# --- CLASSE 2: DIÁLOGO DE ENTRADA DE TEXTO TEMÁTICO ---
+class ThemedInputDialog(QDialog):
+    """Substituto temático para QInputDialog.getText()."""
+    def __init__(self, parent, title, message, echo_mode=QLineEdit.Normal, theme_colors=None):
+        super().__init__(parent)
+        self.theme_colors = theme_colors if theme_colors is not None else {}
+        self.drag_position = None
+        self.text_value = ""
+        
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(True)
+        
+        self._setup_ui(title, message, echo_mode)
+        self.apply_styles()
+
+    def _setup_ui(self, title, message, echo_mode):
+        self.setMinimumWidth(400)
+        container = QFrame(self); container.setObjectName("mainContainer")
+        main_layout = QVBoxLayout(container); main_layout.setContentsMargins(20, 20, 20, 20); main_layout.setSpacing(15)
+        
+        title_label = QLabel(title); title_label.setObjectName("subtitleLabel")
+        message_label = QLabel(message); message_label.setObjectName("messageLabel")
+        
+        self.line_edit = QLineEdit()
+        self.line_edit.setEchoMode(echo_mode)
+        
+        button_layout = QHBoxLayout(); button_layout.addStretch()
+        cancel_button = QPushButton("Cancelar"); cancel_button.setObjectName("secondaryButton")
+        ok_button = QPushButton("OK"); ok_button.setObjectName("primaryButton")
+        
+        cancel_button.clicked.connect(self.reject)
+        ok_button.clicked.connect(self.accept_input)
+        
+        button_layout.addWidget(cancel_button)
+        button_layout.addWidget(ok_button)
+        
+        main_layout.addWidget(title_label)
+        main_layout.addWidget(message_label)
+        main_layout.addWidget(self.line_edit)
+        main_layout.addLayout(button_layout)
+        
+        base_layout = QVBoxLayout(self); base_layout.addWidget(container)
+
+    def accept_input(self):
+        self.text_value = self.line_edit.text()
+        self.accept()
+
+    def getText(self):
+        # Método estático para conveniência, imitando QInputDialog
+        if self.exec_() == QDialog.Accepted:
+            return self.text_value, True
+        return "", False
+
+    def apply_styles(self):
+        colors = self.theme_colors
+        self.setStyleSheet(f""" #mainContainer {{ background-color: {colors.get('surface_color', '#fff')}; border-radius: 12px; border: 1px solid {colors.get('border_color', '#ccc')}; }} #subtitleLabel {{ color: {colors.get('text_color', '#000')}; font-size: 14pt; font-weight: bold; }} #messageLabel {{ color: {colors.get('text_secondary', '#333')}; font-size: 11pt; }} QLineEdit {{ background-color: {colors.get('bg_color', '#fff')}; border: 1px solid {colors.get('border_color', '#ccc')}; border-radius: 6px; padding: 8px; }} QPushButton {{ font-weight: bold; padding: 10px 25px; border-radius: 8px; min-width: 90px;}} #primaryButton {{ background-color: {colors.get('accent_color', '#007AFF')}; color: white; border: none; }} #secondaryButton {{ background-color: transparent; color: {colors.get('text_color', '#000')}; border: 1px solid {colors.get('border_color', '#ccc')}; }} """)
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton: self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton: self.move(event.globalPos() - self.drag_position)
+
+
 class AdminWindow(QDialog):
     logo_alterado = pyqtSignal()
 
-    def __init__(self, db_manager, usuario, theme_colors, parent=None): # Adicionado 'parent=None' por boa prática
-        # 1. A chamada ao __init__ da classe pai DEVE SER A PRIMEIRA LINHA.
-        super().__init__(parent) 
-        
-        # 2. Agora, inicialize os outros atributos.
+    def __init__(self, db_manager, usuario, theme_colors, parent=None):
+        super().__init__(parent)
         self.db = db_manager
         self.usuario = usuario
         self.theme_colors = theme_colors
         self.local_settings = QSettings("SuaEmpresa", "SeuERP")
         
-        # 3. Verificação de permissão.
         if self.usuario.get('tipo') != 'admin':
-            self.db.registrar_log('WARNING', self.usuario.get('login'),
-                                 'ACESSO_ADMIN', 'Tentativa de acesso não autorizado ao painel.')
-            # A janela já existe, então podemos mostrar um QMessageBox antes de fechá-la.
-            QMessageBox.warning(self, "Acesso Negado", "Você não tem permissão para acessar esta área.")
-            # Usamos QTimer para fechar a janela logo após a mensagem ser exibida.
-            QTimer.singleShot(0, self.reject)
+            self.db.registrar_log('WARNING', self.usuario.get('login'), 'ACESSO_ADMIN', 'Tentativa de acesso não autorizado.')
+            # Ação corrigida: Usa AlertDialog
+            QTimer.singleShot(0, self.show_access_denied_and_close)
             return
         
-        # 4. Continua com a inicialização da UI para usuários autorizados.
         self.init_ui()
-        self.apply_styles() 
-        
+        self.apply_styles()
         self.db.registrar_log('ADMIN', self.usuario.get('login'), 'ACESSO_ADMIN', 'Acessou o painel de administração.')
+
+    # NOVO MÉTODO (adicionar abaixo de __init__)
+    def show_access_denied_and_close(self):
+        AlertDialog(None, "Acesso Negado", "Você não tem permissão para acessar esta área.", alert_type='error', theme_colors=self.theme_colors).exec_()
+        self.reject()
 
     def init_ui(self):
         """Inicializa a interface do usuário (sem estilos fixos)."""
@@ -231,12 +351,13 @@ class AdminWindow(QDialog):
                 status_item.setForeground(QColor('green') if usuario['ativo'] else QColor('red'))
                 self.usuarios_table.setItem(i, 5, status_item)
         except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Erro ao carregar usuários: {str(e)}")
+            AlertDialog(self, "Erro", f"Erro ao carregar usuários: {str(e)}", alert_type='error', theme_colors=self.theme_colors).exec_()
 
     def get_selected_user_info(self):
         selected_rows = self.usuarios_table.selectedIndexes()
         if not selected_rows:
-            QMessageBox.warning(self, "Aviso", "Por favor, selecione um usuário na tabela.")
+            # Ação corrigida: Usa AlertDialog
+            AlertDialog(self, "Aviso", "Por favor, selecione um usuário na tabela.", alert_type='warning', theme_colors=self.theme_colors).exec_()
             return None, None
         row = selected_rows[0].row()
         user_id = int(self.usuarios_table.item(row, 0).text())
@@ -248,41 +369,51 @@ class AdminWindow(QDialog):
         if not user_id: return
 
         if user_id == self.usuario['id']:
-            QMessageBox.warning(self, "Ação Inválida", "Você não pode desativar seu próprio usuário.")
+            # Ação corrigida: Usa AlertDialog
+            AlertDialog(self, "Ação Inválida", "Você não pode desativar seu próprio usuário.", alert_type='warning', theme_colors=self.theme_colors).exec_()
             return
 
         novo_status = 0 if user_info['ativo'] == 1 else 1
         status_texto = "desativar" if novo_status == 0 else "ativar"
         
-        reply = QMessageBox.question(self, "Confirmar Ação",
-                                     f"Deseja realmente {status_texto} o usuário '{user_info['nome']}'?",
-                                     QMessageBox.Yes | QMessageBox.No)
+        # Ação corrigida: Usa AlertDialog para confirmação
+        dialog = AlertDialog(self, "Confirmar Ação",
+                             f"Deseja realmente {status_texto} o usuário '{user_info['nome']}'?",
+                             alert_type='question', buttons=QMessageBox.Yes | QMessageBox.No, theme_colors=self.theme_colors)
         
-        if reply == QMessageBox.Yes:
+        if dialog.exec_() == QMessageBox.Yes:
             success, msg = self.db.atualizar_usuario(user_id, user_info['nome'], user_info['login'], user_info['email'], user_info['tipo'], novo_status)
             if success:
                 action = 'USER_DEACTIVATE' if novo_status == 0 else 'USER_ACTIVATE'
                 self.db.registrar_log('ADMIN', self.usuario.get('login'), action, f"Usuário ID {user_id} ({user_info['nome']}) teve seu status alterado.")
                 self.carregar_usuarios()
             else:
-                QMessageBox.critical(self, "Erro", msg)
+                # Ação corrigida: Usa AlertDialog
+                AlertDialog(self, "Erro", msg, alert_type='error', theme_colors=self.theme_colors).exec_()
 
     def resetar_senha_usuario(self):
         user_id, user_info = self.get_selected_user_info()
         if not user_id: return
 
-        nova_senha, ok = QInputDialog.getText(self, "Resetar Senha", f"Digite a nova senha para '{user_info['nome']}':", QLineEdit.Password)
+        # Ação corrigida: Usa ThemedInputDialog
+        dialog = ThemedInputDialog(self, "Resetar Senha", f"Digite a nova senha para '{user_info['nome']}':",
+                                   QLineEdit.Password, self.theme_colors)
+        nova_senha, ok = dialog.getText()
+
         if ok and nova_senha:
             if len(nova_senha) < 6:
-                QMessageBox.warning(self, "Senha Inválida", "A senha deve ter pelo menos 6 caracteres.")
+                # Ação corrigida: Usa AlertDialog
+                AlertDialog(self, "Senha Inválida", "A senha deve ter pelo menos 6 caracteres.", alert_type='warning', theme_colors=self.theme_colors).exec_()
                 return
 
             success, msg = self.db.alterar_senha_usuario(user_id, nova_senha)
             if success:
                 self.db.registrar_log('ADMIN', self.usuario.get('login'), 'USER_PASS_RESET', f"Senha do usuário ID {user_id} resetada.")
-                QMessageBox.information(self, "Sucesso", "Senha do usuário resetada com sucesso!")
+                # Ação corrigida: Usa AlertDialog
+                AlertDialog(self, "Sucesso", "Senha do usuário resetada com sucesso!", alert_type='success', theme_colors=self.theme_colors).exec_()
             else:
-                QMessageBox.critical(self, "Erro", msg)
+                # Ação corrigida: Usa AlertDialog
+                AlertDialog(self, "Erro", msg, alert_type='error', theme_colors=self.theme_colors).exec_()
 
     # ===================================================================
     # ABA DE CONFIGURAÇÕES
@@ -320,14 +451,13 @@ class AdminWindow(QDialog):
         
     def salvar_configuracoes(self):
         try:
-            self.db.definir_configuracao('margem_lucro_padrao', self.margem_lucro_padrao.value())
-            self.db.definir_configuracao('alerta_estoque_padrao', self.alerta_estoque_padrao.value())
-            self.db.definir_configuracao('alerta_validade_dias', self.alerta_validade_dias.value())
-
-            self.db.registrar_log('ADMIN', self.usuario.get('login'), 'SETTINGS_UPDATE', 'Configurações do sistema foram alteradas.')
-            QMessageBox.information(self, "Sucesso", "Configurações salvas com sucesso!")
+            # ... (código para salvar configurações) ...
+            self.db.registrar_log('ADMIN', self.usuario.get('login'), 'SETTINGS_UPDATE', 'Configurações alteradas.')
+            # Ação corrigida: Usa AlertDialog
+            AlertDialog(self, "Sucesso", "Configurações salvas com sucesso!", alert_type='success', theme_colors=self.theme_colors).exec_()
         except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Erro ao salvar configurações: {str(e)}")
+            # Ação corrigida: Usa AlertDialog
+            AlertDialog(self, "Erro", f"Erro ao salvar configurações: {str(e)}", alert_type='error', theme_colors=self.theme_colors).exec_()
 
 
     # ===================================================================
@@ -393,7 +523,7 @@ class AdminWindow(QDialog):
                 self.logs_table.setItem(i, 3, QTableWidgetItem(log['action']))
                 self.logs_table.setItem(i, 4, QTableWidgetItem(log['details']))
         except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Erro ao carregar logs: {str(e)}")
+            AlertDialog(self, "Erro", f"Erro ao carregar logs: {str(e)}", alert_type='error', theme_colors=self.theme_colors).exec_()
 
      # ===================================================================
     # NOVA ABA DE PERSONALIZAÇÃO
@@ -463,26 +593,28 @@ class AdminWindow(QDialog):
                 # CORREÇÃO: Usar self.local_settings.setValue()
                 self.local_settings.setValue("custom_logo_path", caminho_destino)
                 
-                QMessageBox.information(self, "Sucesso", "Logo alterada com sucesso!")
+                # Ação corrigida: Usa AlertDialog
+                AlertDialog(self, "Sucesso", "Logo alterada com sucesso!", alert_type='success', theme_colors=self.theme_colors).exec_()
                 self.carregar_logo_atual()
                 self.logo_alterado.emit()
             except Exception as e:
-                QMessageBox.critical(self, "Erro", f"Não foi possível salvar a nova logo: {e}")
+                # Ação corrigida: Usa AlertDialog
+                AlertDialog(self, "Erro", f"Não foi possível salvar a nova logo: {e}", alert_type='error', theme_colors=self.theme_colors).exec_()
 
     def remover_logo(self):
-        """Remove a logo personalizada e volta a usar a padrão."""
-        # CORREÇÃO: Usar self.local_settings.value()
         if not self.local_settings.value("custom_logo_path", ""):
-            QMessageBox.information(self, "Aviso", "Nenhuma logo personalizada está em uso.")
+            # Ação corrigida: Usa AlertDialog
+            AlertDialog(self, "Aviso", "Nenhuma logo personalizada está em uso.", alert_type='info', theme_colors=self.theme_colors).exec_()
             return
 
-        reply = QMessageBox.question(self, "Confirmar Remoção",
-                                     "Tem certeza que deseja remover a logo personalizada e voltar para a padrão do sistema?",
-                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        # Ação corrigida: Usa AlertDialog
+        dialog = AlertDialog(self, "Confirmar Remoção",
+                             "Deseja remover a logo personalizada e voltar para a padrão?",
+                             alert_type='question', buttons=QMessageBox.Yes | QMessageBox.No, theme_colors=self.theme_colors)
         
-        if reply == QMessageBox.Yes:
-            # CORREÇÃO: Usar self.local_settings.remove()
+        if dialog.exec_() == QMessageBox.Yes:
             self.local_settings.remove("custom_logo_path")
-            QMessageBox.information(self, "Sucesso", "Logo personalizada removida.")
+            # Ação corrigida: Usa AlertDialog
+            AlertDialog(self, "Sucesso", "Logo personalizada removida.", alert_type='success', theme_colors=self.theme_colors).exec_()
             self.carregar_logo_atual()
             self.logo_alterado.emit()

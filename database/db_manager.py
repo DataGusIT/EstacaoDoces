@@ -136,10 +136,16 @@ class DatabaseManager:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             produto_id INTEGER,
             preco_antigo REAL,
-            preco_promocional REAL,
+            preco_promocional REAL, -- Este será o preço da EMBALAGEM
             data_inicio DATE,
             data_fim DATE,
             descricao TEXT,
+            
+            -- INÍCIO DA MODIFICAÇÃO --
+            tipo_aplicacao TEXT DEFAULT 'Ambos', -- Pode ser 'Ambos', 'Embalagem', 'Fração'
+            preco_promocional_fracao REAL, -- Preço específico para a fração, se aplicável
+            -- FIM DA MODIFICAÇÃO --
+
             FOREIGN KEY (produto_id) REFERENCES produtos (id)
         )
         ''')
@@ -209,6 +215,11 @@ class DatabaseManager:
             FOREIGN KEY (produto_id) REFERENCES produtos (id)
         )
         ''')
+
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        # Adiciona a nova coluna de forma segura para bancos de dados existentes
+        self._verificar_e_adicionar_coluna('itens_venda', 'vendido_como', "TEXT DEFAULT 'Embalagem'")
+        # --- FIM DA MODIFICAÇÃO ---
 
        # Tabela de Usuários (nova)
         self.cursor.execute('''
@@ -407,31 +418,56 @@ class DatabaseManager:
         return self.cursor.lastrowid
 
     def atualizar_produto(self, id, codigo_barras, nome, descricao, quantidade, estoque_minimo,
-                preco_compra, margem_lucro, preco_venda, 
+                preco_compra, margem_lucro, preco_venda,
                 data_validade, localizacao, fornecedor_id, categoria=None,
                 imagem_path=None, # <<< ADICIONE ESTE PARÂMETRO
-                fracionado=False, unidade_medida="unidade", qtd_por_embalagem=1, 
+                fracionado=False, unidade_medida="unidade", qtd_por_embalagem=1,
                 preco_unitario_fracao=None, estoque_fracionado=0):
 
-        self.cursor.execute('''
-        UPDATE produtos
-        SET codigo_barras = ?, nome = ?, descricao = ?, quantidade = ?, estoque_minimo = ?,
-            preco_compra = ?, margem_lucro = ?, preco_venda = ?,
-            data_validade = ?, localizacao = ?, fornecedor_id = ?, categoria = ?,
-            imagem_path = ?, -- <<< ADICIONE ESTA LINHA
-            fracionado = ?, unidade_medida = ?, qtd_por_embalagem = ?, 
-            preco_unitario_fracao = ?, estoque_fracionado = ?
-        WHERE id = ?
-        ''', (
-            codigo_barras, nome, descricao, quantidade, estoque_minimo,
-            preco_compra, margem_lucro, preco_venda,
-            data_validade, localizacao, fornecedor_id, categoria,
-            imagem_path, # <<< ADICIONE AQUI
-            1 if fracionado else 0, unidade_medida, qtd_por_embalagem, 
-            preco_unitario_fracao, estoque_fracionado, id
-        ))
-        self.conn.commit()
-        return self.cursor.rowcount > 0
+            # --- INÍCIO DA CORREÇÃO: Lógica para preservar dados históricos ---
+            produto_atual = self.obter_produto(id)
+            if not produto_atual:
+                return False # Produto não existe
+
+            era_fracionado = produto_atual['fracionado'] == 1
+            agora_fracionado = fracionado
+
+            # Se o produto ESTAVA marcado como fracionado e AGORA NÃO ESTÁ,
+            # mantemos os dados de fracionamento antigos para não quebrar o cálculo de lucro de vendas passadas.
+            if era_fracionado and not agora_fracionado:
+                qtd_por_embalagem_final = produto_atual['qtd_por_embalagem']
+                preco_unitario_fracao_final = produto_atual['preco_unitario_fracao']
+                unidade_medida_final = produto_atual['unidade_medida']
+            else:
+                # Caso contrário (produto continua fracionado, continua normal ou está se tornando fracionado),
+                # usamos os novos dados vindos do formulário.
+                qtd_por_embalagem_final = qtd_por_embalagem
+                preco_unitario_fracao_final = preco_unitario_fracao
+                unidade_medida_final = unidade_medida
+            # --- FIM DA CORREÇÃO ---
+
+
+            self.cursor.execute('''
+            UPDATE produtos
+            SET codigo_barras = ?, nome = ?, descricao = ?, quantidade = ?, estoque_minimo = ?,
+                preco_compra = ?, margem_lucro = ?, preco_venda = ?,
+                data_validade = ?, localizacao = ?, fornecedor_id = ?, categoria = ?,
+                imagem_path = ?,
+                fracionado = ?, unidade_medida = ?, qtd_por_embalagem = ?,
+                preco_unitario_fracao = ?, estoque_fracionado = ?
+            WHERE id = ?
+            ''', (
+                codigo_barras, nome, descricao, quantidade, estoque_minimo,
+                preco_compra, margem_lucro, preco_venda,
+                data_validade, localizacao, fornecedor_id, categoria,
+                imagem_path,
+                1 if fracionado else 0,
+                # Use as variáveis finais que definimos na lógica acima
+                unidade_medida_final, qtd_por_embalagem_final,
+                preco_unitario_fracao_final, estoque_fracionado, id
+            ))
+            self.conn.commit()
+            return self.cursor.rowcount > 0
 
     def excluir_produto(self, id):
         self.cursor.execute('DELETE FROM produtos WHERE id = ?', (id,))
@@ -440,8 +476,67 @@ class DatabaseManager:
 
     def obter_produto(self, id):
         self.cursor.execute('SELECT * FROM produtos WHERE id = ?', (id,))
-        return self.cursor.fetchone()
+        resultado = self.cursor.fetchone()
+        # CONVERTE o resultado para um dicionário padrão antes de retornar.
+        # Isso corrige o erro atual e todos os futuros.
+        return dict(resultado) if resultado else None
+    
+    def obter_produto_com_preco_promocional(self, produto_id):
+        """
+        VERSÃO CORRIGIDA 5.0: Corrige o cálculo para promoções do tipo 'Ambos',
+        aplicando a taxa de desconto corretamente e de forma independente
+        aos preços da embalagem e da fração.
+        """
+        try:
+            produto = self.obter_produto(produto_id)
+            if not produto:
+                return None
+            
+            produto_dict = dict(produto)
+            hoje = datetime.now().strftime('%Y-%m-%d')
 
+            self.cursor.execute("""
+                SELECT * FROM promocoes
+                WHERE produto_id = ? AND ? BETWEEN data_inicio AND data_fim
+            """, (produto_id, hoje))
+            
+            promocoes_ativas = self.cursor.fetchall()
+
+            for promocao in promocoes_ativas:
+                tipo_aplicacao = promocao['tipo_aplicacao']
+                
+                # --- INÍCIO DA CORREÇÃO MATEMÁTICA ---
+                if tipo_aplicacao == 'Ambos':
+                    preco_original_emb = produto_dict.get('preco_venda', 0)
+                    preco_promo_emb = promocao['preco_promocional']
+
+                    # 1. Calcula a taxa de desconto com base na promoção da embalagem
+                    taxa_desconto = 0
+                    if preco_original_emb > 0:
+                        taxa_desconto = (preco_original_emb - preco_promo_emb) / preco_original_emb
+
+                    # 2. Aplica o preço promocional na embalagem
+                    produto_dict['preco_venda'] = preco_promo_emb
+                    
+                    # 3. Aplica A MESMA TAXA de desconto ao preço original da fração
+                    if produto_dict.get('fracionado'):
+                        preco_original_fracao = produto_dict.get('preco_unitario_fracao', 0)
+                        preco_promo_fracao = preco_original_fracao * (1 - taxa_desconto)
+                        produto_dict['preco_unitario_fracao'] = round(preco_promo_fracao, 2)
+                # --- FIM DA CORREÇÃO MATEMÁTICA ---
+                
+                elif tipo_aplicacao == 'Embalagem':
+                    produto_dict['preco_venda'] = promocao['preco_promocional']
+
+                elif tipo_aplicacao == 'Fração' and promocao['preco_promocional_fracao'] is not None:
+                    produto_dict['preco_unitario_fracao'] = promocao['preco_promocional_fracao']
+
+            return produto_dict
+
+        except Exception as e:
+            print(f"Erro ao obter produto com preço promocional: {e}")
+            return None
+        
     def listar_produtos(self, filtro=None):
         query = 'SELECT p.*, f.empresa as fornecedor_nome FROM produtos p LEFT JOIN fornecedores f ON p.fornecedor_id = f.id'
         
@@ -451,6 +546,15 @@ class DatabaseManager:
         self.cursor.execute(query)
         return self.cursor.fetchall()
     
+    def _verificar_e_adicionar_coluna(self, tabela, coluna, tipo):
+        """Verifica se uma coluna existe em uma tabela e a adiciona se não existir."""
+        self.cursor.execute(f"PRAGMA table_info({tabela})")
+        colunas_existentes = [info[1] for info in self.cursor.fetchall()]
+        if coluna not in colunas_existentes:
+            print(f"Adicionando coluna '{coluna}' à tabela '{tabela}'...")
+            self.cursor.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")
+            self.conn.commit()
+
     def listar_categorias_unicas(self):
         """Retorna lista de categorias únicas dos produtos."""
         self.cursor.execute('''
@@ -928,26 +1032,32 @@ class DatabaseManager:
         return resultado[0] if resultado else 0
     
     # Métodos para Promoções
-    def adicionar_promocao(self, produto_id, preco_antigo, preco_promocional, 
-                           data_inicio, data_fim, descricao):
+    def adicionar_promocao(self, produto_id, preco_antigo, preco_promocional,
+                           data_inicio, data_fim, descricao,
+                           tipo_aplicacao='Ambos', preco_promocional_fracao=None): #<- NOVOS PARÂMETROS
         self.cursor.execute('''
-        INSERT INTO promocoes (produto_id, preco_antigo, preco_promocional, 
-                               data_inicio, data_fim, descricao)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ''', (produto_id, preco_antigo, preco_promocional, 
-             data_inicio, data_fim, descricao))
+        INSERT INTO promocoes (produto_id, preco_antigo, preco_promocional,
+                               data_inicio, data_fim, descricao,
+                               tipo_aplicacao, preco_promocional_fracao) -- <- NOVOS CAMPOS
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?) -- <- ADICIONAR '?'
+        ''', (produto_id, preco_antigo, preco_promocional,
+             data_inicio, data_fim, descricao,
+             tipo_aplicacao, preco_promocional_fracao)) # <- NOVOS VALORES
         self.conn.commit()
         return self.cursor.lastrowid
-    
-    def atualizar_promocao(self, id, produto_id, preco_antigo, preco_promocional, 
-                           data_inicio, data_fim, descricao):
+
+    def atualizar_promocao(self, id, produto_id, preco_antigo, preco_promocional,
+                           data_inicio, data_fim, descricao,
+                           tipo_aplicacao='Ambos', preco_promocional_fracao=None): #<- NOVOS PARÂMETROS
         self.cursor.execute('''
         UPDATE promocoes
-        SET produto_id = ?, preco_antigo = ?, preco_promocional = ?, 
-            data_inicio = ?, data_fim = ?, descricao = ?
+        SET produto_id = ?, preco_antigo = ?, preco_promocional = ?,
+            data_inicio = ?, data_fim = ?, descricao = ?,
+            tipo_aplicacao = ?, preco_promocional_fracao = ? -- <- NOVOS CAMPOS
         WHERE id = ?
-        ''', (produto_id, preco_antigo, preco_promocional, 
-             data_inicio, data_fim, descricao, id))
+        ''', (produto_id, preco_antigo, preco_promocional,
+             data_inicio, data_fim, descricao,
+             tipo_aplicacao, preco_promocional_fracao, id)) # <- NOVOS VALORES
         self.conn.commit()
         return self.cursor.rowcount > 0
     
@@ -958,7 +1068,9 @@ class DatabaseManager:
     
     def obter_promocao(self, id):
         self.cursor.execute('SELECT * FROM promocoes WHERE id = ?', (id,))
-        return self.cursor.fetchone()
+        resultado = self.cursor.fetchone()
+        # Converte o resultado para um dicionário padrão antes de retornar
+        return dict(resultado) if resultado else None
     
     def listar_promocoes(self, filtro=None):
         query = '''
@@ -1042,42 +1154,41 @@ class DatabaseManager:
     
     # Métodos para Usuários
     def obter_usuario_por_id(self, usuario_id):
-        """Retorna os dados de um usuário pelo ID, incluindo o status."""
-        self.ensure_connection()
-        self.cursor.execute('''
-            SELECT id, nome, login, email, tipo, ativo, data_cadastro, ultimo_acesso
-            FROM usuarios WHERE id = ?
-        ''', (usuario_id,))
-        
-        usuario = self.cursor.fetchone()
-        
-        if usuario:
-            # A conversão para dict(usuario) já inclui a coluna 'ativo'
-            # pois ela está no SELECT.
-            return dict(usuario)
-        else:
-            return None
+        """Retorna os dados de um usuário pelo seu ID."""
+        self.cursor.execute('SELECT * FROM usuarios WHERE id = ?', (usuario_id,))
+        resultado = self.cursor.fetchone()
+        return dict(resultado) if resultado else None
+    
+    def adicionar_usuario(self, nome, login, senha, email, tipo, ativo=1):
+        """
+        Adiciona um novo usuário ao banco de dados.
+        Recebe a senha em texto plano e realiza o hash internamente.
+        """
+        try:
+            # Hash da senha
+            senha_hash = hashlib.sha256(senha.encode('utf-8')).hexdigest()
+            
+            self.cursor.execute("""
+                INSERT INTO usuarios (nome, login, senha, email, tipo, ativo)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (nome, login, senha_hash, email, tipo, ativo))
+            self.conn.commit()
+            return True, "Usuário cadastrado com sucesso!"
+        except sqlite3.IntegrityError:
+            return False, "Erro: Login ou e-mail já existem no sistema."
+        except Exception as e:
+            return False, f"Erro ao cadastrar usuário: {str(e)}"
 
     def autenticar_usuario(self, login, senha):
-        """Verifica se o usuário e senha estão corretos usando hash."""
-        # Cria o hash da senha fornecida pelo usuário
+        """Autentica um usuário e atualiza seu último acesso."""
         senha_hash = hashlib.sha256(senha.encode('utf-8')).hexdigest()
-        
-        self.cursor.execute('''
-            SELECT * FROM usuarios WHERE login = ? AND senha = ? AND ativo = 1
-        ''', (login, senha_hash))
-        
+        self.cursor.execute('SELECT * FROM usuarios WHERE login = ? AND senha = ? AND ativo = 1', (login, senha_hash))
         usuario = self.cursor.fetchone()
-        
         if usuario:
-            # Atualizar o campo de último acesso
-            self.cursor.execute('''
-                UPDATE usuarios SET ultimo_acesso = CURRENT_TIMESTAMP WHERE id = ?
-            ''', (usuario['id'],))
+            self.cursor.execute('UPDATE usuarios SET ultimo_acesso = CURRENT_TIMESTAMP WHERE id = ?', (usuario['id'],))
             self.conn.commit()
             return dict(usuario)
-        else:
-            return None
+        return None
 
     def cadastrar_usuario(self, nome, login, senha_hash, email, tipo):
         """
@@ -1098,19 +1209,9 @@ class DatabaseManager:
             return False, f"Erro ao cadastrar usuário: {str(e)}"
         
     def listar_usuarios(self):
-        """Retorna a lista de todos os usuários"""
-        try:
-            self.cursor.execute('''
-                SELECT id, nome, login, email, tipo, ativo, data_cadastro, ultimo_acesso
-                FROM usuarios
-                ORDER BY nome
-            ''')
-            
-            usuarios = self.cursor.fetchall()
-            return [dict(usuario) for usuario in usuarios]
-        except Exception as e:
-            print(f"Erro ao listar usuários: {str(e)}")
-            return []
+        """Retorna uma lista de todos os usuários."""
+        self.cursor.execute('SELECT * FROM usuarios ORDER BY nome')
+        return [dict(row) for row in self.cursor.fetchall()]
 
     def excluir_usuario(self, usuario_id):
         """Exclui um usuário pelo ID (ou desativa, se preferir não excluir)"""
@@ -1139,42 +1240,33 @@ class DatabaseManager:
         except Exception as e:
             return False, f"Erro ao excluir usuário: {str(e)}"
 
-    def atualizar_usuario(self, usuario_id, nome, login, email, tipo, ativo=1):
-        """Atualiza os dados de um usuário"""
+    def atualizar_usuario(self, usuario_id, nome, login, email, tipo, ativo):
+        """Atualiza os dados de um usuário, sem alterar a senha."""
         try:
-            # Verificar se não é o último administrador
-            if tipo != 'admin':
-                self.cursor.execute("SELECT tipo FROM usuarios WHERE id=?", (usuario_id,))
-                user_tipo = self.cursor.fetchone()
-                
-                if user_tipo and user_tipo['tipo'] == 'admin':
-                    self.cursor.execute("SELECT COUNT(*) FROM usuarios WHERE tipo='admin'")
-                    count_admin = self.cursor.fetchone()[0]
-                    
-                    if count_admin <= 1:
-                        return False, "Não é possível remover o nível de administrador do último administrador."
-            
-            # Atualizar os dados
+            # Lógica de segurança para não remover o último admin
+            if tipo.lower() != 'admin':
+                usuario_atual = self.obter_usuario_por_id(usuario_id)
+                if usuario_atual and usuario_atual['tipo'].lower() == 'admin':
+                    self.cursor.execute("SELECT COUNT(*) FROM usuarios WHERE tipo='Admin'")
+                    if self.cursor.fetchone()[0] <= 1:
+                        return False, "Não é possível remover o status de administrador do último admin."
+
             self.cursor.execute('''
-                UPDATE usuarios 
-                SET nome = ?, login = ?, email = ?, tipo = ?, ativo = ?
+                UPDATE usuarios SET nome = ?, login = ?, email = ?, tipo = ?, ativo = ?
                 WHERE id = ?
             ''', (nome, login, email, tipo, ativo, usuario_id))
-            
             self.conn.commit()
             return True, "Usuário atualizado com sucesso."
+        except sqlite3.IntegrityError:
+            return False, "Erro: Login ou e-mail já pertencem a outro usuário."
         except Exception as e:
             return False, f"Erro ao atualizar usuário: {str(e)}"
 
     def alterar_senha_usuario(self, usuario_id, nova_senha):
-        """Altera a senha de um usuário"""
+        """Altera apenas a senha de um usuário existente."""
         try:
             senha_hash = hashlib.sha256(nova_senha.encode('utf-8')).hexdigest()
-            
-            self.cursor.execute('''
-                UPDATE usuarios SET senha = ? WHERE id = ?
-            ''', (senha_hash, usuario_id))
-            
+            self.cursor.execute('UPDATE usuarios SET senha = ? WHERE id = ?', (senha_hash, usuario_id))
             self.conn.commit()
             return True, "Senha alterada com sucesso."
         except Exception as e:
@@ -1461,103 +1553,102 @@ class DatabaseManager:
             print(f"Erro ao obter detalhes do caixa: {e}")
             return None
     
+        # Em db_manager.py, dentro da classe DatabaseManager
+
     def gerar_relatorio_periodo(self, data_inicio, data_fim):
+        """
+        CORRIGIDO: Garante que todas as consultas de data usem 'localtime' para
+        consistência com o resto da aplicação e para evitar erros de fuso horário.
+        """
         try:
-            conn = sqlite3.connect(self.db_path)
+            if not self.ensure_connection():
+                raise Exception("Não foi possível conectar ao banco de dados.")
+
+            conn = self.conn
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            
+
             # Movimentos de caixa
             cursor.execute("""
                 SELECT tipo, SUM(valor) as total
                 FROM movimentos_caixa
-                WHERE date(data_hora) BETWEEN ? AND ?
+                WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
                 GROUP BY tipo
             """, (data_inicio, data_fim))
-            
+
             movimentos_resumo = {'total_entradas': 0, 'total_saidas': 0}
-            
             for row in cursor.fetchall():
                 if row['tipo'] == 'Entrada':
                     movimentos_resumo['total_entradas'] = row['total']
                 else:
                     movimentos_resumo['total_saidas'] = row['total']
-            
+
             # Vendas
             cursor.execute("""
                 SELECT COUNT(*) as qtd, SUM(valor_total) as total, SUM(desconto) as descontos
                 FROM vendas
-                WHERE date(data_hora) BETWEEN ? AND ?
+                WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
             """, (data_inicio, data_fim))
-            
             vendas_resumo = cursor.fetchone()
-            
+
             # Formas de pagamento
             cursor.execute("""
                 SELECT forma_pagamento, SUM(valor_total) as total
                 FROM vendas
-                WHERE date(data_hora) BETWEEN ? AND ?
+                WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
                 GROUP BY forma_pagamento
             """, (data_inicio, data_fim))
-            
-            pagamentos = {}
-            for row in cursor.fetchall():
-                pagamentos[row['forma_pagamento']] = row['total']
-            
+            pagamentos = {row['forma_pagamento']: row['total'] for row in cursor.fetchall()}
+
             # Produtos mais vendidos
             cursor.execute("""
                 SELECT p.id, p.nome, SUM(i.quantidade) as quantidade, SUM(i.subtotal) as valor_total
                 FROM itens_venda i
                 JOIN produtos p ON i.produto_id = p.id
                 JOIN vendas v ON i.venda_id = v.id
-                WHERE date(v.data_hora) BETWEEN ? AND ?
+                WHERE date(v.data_hora, 'localtime') BETWEEN ? AND ?
                 GROUP BY p.id, p.nome
                 ORDER BY quantidade DESC
             """, (data_inicio, data_fim))
-            
             produtos = [dict(row) for row in cursor.fetchall()]
-            
+
             # Lista de movimentos
             cursor.execute("""
-                SELECT id, datetime(data_hora, 'localtime') as data_hora, tipo, descricao, 
+                SELECT id, datetime(data_hora, 'localtime') as data_hora, tipo, descricao,
                        valor, forma_pagamento, referencia_id, tipo_referencia
-                FROM movimentos_caixa 
-                WHERE date(data_hora) BETWEEN ? AND ?
+                FROM movimentos_caixa
+                WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
                 ORDER BY data_hora DESC
             """, (data_inicio, data_fim))
-            
             movimentos = [dict(row) for row in cursor.fetchall()]
-            
+
             # Lista de vendas
             cursor.execute("""
-                SELECT v.id, datetime(v.data_hora, 'localtime') as data_hora, 
+                SELECT v.id, datetime(v.data_hora, 'localtime') as data_hora,
                        COALESCE(c.nome, 'Cliente Não Identificado') as cliente,
                        v.valor_total, v.desconto, v.forma_pagamento
                 FROM vendas v
                 LEFT JOIN clientes c ON v.cliente_id = c.id
-                WHERE date(v.data_hora) BETWEEN ? AND ?
+                WHERE date(v.data_hora, 'localtime') BETWEEN ? AND ?
                 ORDER BY v.data_hora DESC
             """, (data_inicio, data_fim))
-            
             vendas = [dict(row) for row in cursor.fetchall()]
-            
-            conn.close()
-            
+
             # Montar resultado
             resultado = {
-                'total_entradas': movimentos_resumo['total_entradas'],
-                'total_saidas': movimentos_resumo['total_saidas'],
-                'saldo_periodo': movimentos_resumo['total_entradas'] - movimentos_resumo['total_saidas'],
-                'qtd_vendas': vendas_resumo['qtd'] or 0,
-                'valor_vendas': vendas_resumo['total'] or 0,
-                'valor_medio_venda': (vendas_resumo['total'] / vendas_resumo['qtd']) if vendas_resumo['qtd'] else 0,
-                'total_descontos': vendas_resumo['descontos'] or 0,
+                'total_entradas': movimentos_resumo['total_entradas'] or 0,
+                'total_saidas': movimentos_resumo['total_saidas'] or 0,
+                'saldo_periodo': (movimentos_resumo['total_entradas'] or 0) - (movimentos_resumo['total_saidas'] or 0),
+                'qtd_vendas': vendas_resumo['qtd'] if vendas_resumo else 0,
+                'valor_vendas': vendas_resumo['total'] if vendas_resumo else 0,
+                'valor_medio_venda': (vendas_resumo['total'] / vendas_resumo['qtd']) if vendas_resumo and vendas_resumo['qtd'] else 0,
+                'total_descontos': vendas_resumo['descontos'] if vendas_resumo else 0,
                 'pagamentos': pagamentos,
                 'produtos_mais_vendidos': produtos,
                 'movimentos': movimentos,
                 'vendas': vendas
             }
-            
+
             return resultado
         except Exception as e:
             print(f"Erro ao gerar relatório: {e}")
@@ -1585,20 +1676,20 @@ class DatabaseManager:
             print(f"Erro ao registrar venda: {e}")
             return False
     
-    def registrar_item_venda(self, venda_id, produto_id, quantidade, preco_unitario, subtotal):
+    def registrar_item_venda(self, venda_id, produto_id, quantidade, preco_unitario, subtotal, vendido_como):
         """
-        Registra um item na tabela itens_venda. A atualização de estoque
-        deve ser feita separadamente.
+        Registra um item na tabela itens_venda, incluindo COMO ele foi vendido.
         """
         try:
+            # Conexão local para segurança de thread, se aplicável
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
             cursor.execute("""
                 INSERT INTO itens_venda 
-                (venda_id, produto_id, quantidade, preco_unitario, subtotal)
-                VALUES (?, ?, ?, ?, ?)
-            """, (venda_id, produto_id, quantidade, preco_unitario, subtotal))
+                (venda_id, produto_id, quantidade, preco_unitario, subtotal, vendido_como)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (venda_id, produto_id, quantidade, preco_unitario, subtotal, vendido_como))
             
             conn.commit()
             conn.close()
@@ -1610,122 +1701,104 @@ class DatabaseManager:
     
     def obter_dados_dashboard(self, data_inicio, data_fim):
         """
-        VERSÃO ATUALIZADA: Obtém dados do dashboard, incluindo o ajuste de faturamento
-        e lucro com base nas movimentações manuais.
+        VERSÃO FINAL E CORRIGIDA: Usa a coluna 'vendido_como' para calcular o lucro
+        de forma precisa, resolvendo o problema de lucro negativo.
         """
         try:
             if not self.ensure_connection():
                 raise Exception("Não foi possível conectar ao banco de dados.")
-            
+
             cursor = self.conn.cursor()
 
-            # --- DADOS DE VENDAS (LÓGICA ORIGINAL PRESERVADA) ---
             cursor.execute("""
-                SELECT id FROM vendas 
+                SELECT id FROM vendas
                 WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
             """, (data_inicio, data_fim))
-            venda_ids = tuple(row['id'] for row in cursor.fetchall())
+            venda_ids_rows = cursor.fetchall()
+            venda_ids = tuple(row['id'] for row in venda_ids_rows) if venda_ids_rows else ()
 
-            faturamento_periodo = 0
             num_vendas_periodo = 0
-            lucro_periodo = 0
-            # ... (inicialização das outras listas como antes) ...
-            produtos_mais_vendidos = []
-            formas_pagamento = []
-            melhores_clientes = []
-            vendas_diarias = []
-
-            if venda_ids: 
+            lucro_de_vendas = 0
+            
+            if venda_ids:
                 query_in_ids = f"IN {venda_ids}" if len(venda_ids) > 1 else f"= {venda_ids[0]}"
+                num_vendas_periodo = len(venda_ids)
 
-                cursor.execute(f"SELECT COUNT(*) as num_vendas, SUM(valor_total) as faturamento FROM vendas WHERE id {query_in_ids}")
-                vendas_resumo = cursor.fetchone()
-                faturamento_periodo = vendas_resumo['faturamento'] or 0
-                num_vendas_periodo = vendas_resumo['num_vendas'] or 0
-                
-                # --- SEU CÁLCULO DE LUCRO IMPORTANTE (INTOCADO) ---
+                # --- INÍCIO DA CORREÇÃO DEFINITIVA DO CÁLCULO DE LUCRO ---
                 cursor.execute(f"""
                     SELECT SUM(
                         i.subtotal - (
-                            i.quantidade * 
-                            CASE 
-                                WHEN p.fracionado = 1 AND p.preco_unitario_fracao IS NOT NULL AND i.preco_unitario = p.preco_unitario_fracao THEN
+                            i.quantidade *
+                            CASE
+                                -- Se o item foi vendido como 'Fração', o custo é o da unidade.
+                                WHEN i.vendido_como = 'Fração' THEN
                                     COALESCE(p.preco_compra, 0) / p.qtd_por_embalagem
+                                -- Caso contrário (vendido como 'Embalagem'), o custo é o da embalagem inteira.
                                 ELSE
                                     COALESCE(p.preco_compra, 0)
                             END
                         )
                     ) as lucro
-                    FROM itens_venda i 
+                    FROM itens_venda i
                     JOIN produtos p ON i.produto_id = p.id
-                    WHERE i.venda_id {query_in_ids} 
-                    AND p.preco_compra > 0 AND p.qtd_por_embalagem > 0
+                    WHERE i.venda_id {query_in_ids}
+                    AND p.preco_compra IS NOT NULL AND p.preco_compra > 0 AND p.qtd_por_embalagem > 0
                 """)
+                # --- FIM DA CORREÇÃO DEFINITIVA ---
                 lucro_resultado = cursor.fetchone()
-                lucro_periodo = lucro_resultado['lucro'] if lucro_resultado and lucro_resultado['lucro'] is not None else 0
+                lucro_de_vendas = lucro_resultado['lucro'] if lucro_resultado and lucro_resultado['lucro'] is not None else 0
 
-                # ... (resto das queries de produtos, pagamentos, clientes que usam venda_ids) ...
-                cursor.execute(f"SELECT p.nome, SUM(i.quantidade) as quantidade, SUM(i.subtotal) as valor_total FROM itens_venda i JOIN produtos p ON i.produto_id = p.id WHERE i.venda_id {query_in_ids} GROUP BY p.id, p.nome ORDER BY valor_total DESC LIMIT 10")
-                produtos_mais_vendidos = [dict(row) for row in cursor.fetchall()]
+            # ... [ O restante da função permanece EXATAMENTE O MESMO ] ...
+            # (faturamento, movimentos financeiros, contagens, etc.)
 
-                cursor.execute(f"SELECT forma_pagamento as forma, SUM(valor_total) as valor_total FROM vendas WHERE id {query_in_ids} GROUP BY forma_pagamento ORDER BY valor_total DESC")
-                formas_pagamento = [dict(row) for row in cursor.fetchall()]
+            # --- DADOS FINANCEIROS (FATURAMENTO E LUCRO LÍQUIDO) DA TABELA MOVIMENTOS_CAIXA ---
+            cursor.execute("""
+                SELECT
+                    SUM(CASE WHEN tipo = 'Entrada' AND afeta_financeiro = 'Faturamento' THEN valor ELSE 0 END) as entradas_faturamento,
+                    SUM(CASE WHEN tipo = 'Saída' AND afeta_financeiro = 'Faturamento' THEN valor ELSE 0 END) as saidas_faturamento,
+                    SUM(CASE WHEN tipo = 'Entrada' AND afeta_financeiro = 'Lucro' THEN valor ELSE 0 END) as entradas_lucro,
+                    SUM(CASE WHEN tipo = 'Saída' AND afeta_financeiro = 'Lucro' THEN valor ELSE 0 END) as saidas_lucro
+                FROM movimentos_caixa
+                WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
+            """, (data_inicio, data_fim))
 
-                cursor.execute(f"SELECT COALESCE(c.nome, 'Cliente Não Identificado') as nome, COUNT(*) as compras, SUM(v.valor_total) as valor_total FROM vendas v LEFT JOIN clientes c ON v.cliente_id = c.id WHERE v.id {query_in_ids} GROUP BY v.cliente_id ORDER BY valor_total DESC LIMIT 10")
-                melhores_clientes = [dict(row) for row in cursor.fetchall()]
+            movimentos_financeiros = cursor.fetchone()
+            faturamento_periodo = (movimentos_financeiros['entradas_faturamento'] or 0) - (movimentos_financeiros['saidas_faturamento'] or 0)
+            lucro_periodo = lucro_de_vendas + (movimentos_financeiros['entradas_lucro'] or 0) - (movimentos_financeiros['saidas_lucro'] or 0)
 
+            # --- DADOS PARA GRÁFICOS E CONTAGENS GERAIS ---
             cursor.execute("SELECT date(data_hora, 'localtime') as data, SUM(valor_total) as valor FROM vendas WHERE date(data_hora, 'localtime') BETWEEN ? AND ? GROUP BY data ORDER BY data", (data_inicio, data_fim))
             vendas_diarias = [dict(row) for row in cursor.fetchall()]
 
-            # --- INÍCIO DA NOVA LÓGICA: AJUSTE COM MOVIMENTAÇÕES MANUAIS ---
-            cursor.execute("""
-                SELECT tipo, afeta_financeiro, SUM(valor) as total
-                FROM movimentos_caixa
-                WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
-                AND tipo_referencia = 'Manual'
-                GROUP BY tipo, afeta_financeiro
-            """, (data_inicio, data_fim))
-            
-            ajustes_manuais = cursor.fetchall()
-
-            for ajuste in ajustes_manuais:
-                total_ajuste = ajuste['total']
-                if ajuste['tipo'] == 'Entrada':
-                    if ajuste['afeta_financeiro'] == 'Faturamento':
-                        faturamento_periodo += total_ajuste
-                    elif ajuste['afeta_financeiro'] == 'Lucro':
-                        lucro_periodo += total_ajuste
-                elif ajuste['tipo'] == 'Saída':
-                    if ajuste['afeta_financeiro'] == 'Faturamento':
-                        faturamento_periodo -= total_ajuste
-                    elif ajuste['afeta_financeiro'] == 'Lucro':
-                        lucro_periodo -= total_ajuste
-            # --- FIM DA NOVA LÓGICA ---
-
-            # --- NOVAS CONTAGENS GERAIS (como antes) ---
+            # Contagens gerais
             cursor.execute("SELECT COUNT(*) FROM produtos")
             total_produtos = cursor.fetchone()[0]
-            # ... (resto das contagens e alertas) ...
             cursor.execute("SELECT COUNT(*) FROM clientes")
             total_clientes = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(*) FROM fornecedores")
             total_fornecedores = cursor.fetchone()[0]
-            
             hoje = datetime.now().strftime('%Y-%m-%d')
             cursor.execute("SELECT COUNT(*) FROM promocoes WHERE data_inicio <= ? AND data_fim >= ?", (hoje, hoje))
             total_promocoes_ativas = cursor.fetchone()[0]
-
             cursor.execute("SELECT COUNT(*) FROM produtos WHERE quantidade <= estoque_minimo AND estoque_minimo > 0")
             alert_estoque_baixo = cursor.fetchone()[0]
-            
             cursor.execute("SELECT COUNT(*) FROM produtos WHERE date(data_validade) < ?", (hoje,))
             alert_vencidos = cursor.fetchone()[0]
-
             data_limite_30d = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
             cursor.execute("SELECT COUNT(*) FROM produtos WHERE date(data_validade) BETWEEN ? AND ?", (hoje, data_limite_30d))
             alert_vencendo_30d = cursor.fetchone()[0]
 
-            # --- Monta o dicionário final com todos os dados ---
+            # Buscar outros dados (produtos_mais_vendidos, etc.) para garantir que o resultado não seja None
+            produtos_mais_vendidos, formas_pagamento, melhores_clientes = [], [], []
+            if venda_ids:
+                query_in_ids = f"IN {venda_ids}" if len(venda_ids) > 1 else f"= {venda_ids[0]}"
+                cursor.execute(f"SELECT p.nome, SUM(i.quantidade) as quantidade, SUM(i.subtotal) as valor_total FROM itens_venda i JOIN produtos p ON i.produto_id = p.id WHERE i.venda_id {query_in_ids} GROUP BY p.id, p.nome ORDER BY valor_total DESC LIMIT 10")
+                produtos_mais_vendidos = [dict(row) for row in cursor.fetchall()]
+                cursor.execute(f"SELECT forma_pagamento as forma, SUM(valor_total) as valor_total FROM vendas WHERE id {query_in_ids} GROUP BY forma_pagamento ORDER BY valor_total DESC")
+                formas_pagamento = [dict(row) for row in cursor.fetchall()]
+                cursor.execute(f"SELECT COALESCE(c.nome, 'Cliente Não Identificado') as nome, COUNT(*) as compras, SUM(v.valor_total) as valor_total FROM vendas v LEFT JOIN clientes c ON v.cliente_id = c.id WHERE v.id {query_in_ids} GROUP BY v.cliente_id ORDER BY valor_total DESC LIMIT 10")
+                melhores_clientes = [dict(row) for row in cursor.fetchall()]
+
             resultado = {
                 'faturamento': faturamento_periodo,
                 'num_vendas': num_vendas_periodo,

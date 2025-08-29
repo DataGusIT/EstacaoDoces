@@ -353,7 +353,7 @@ class MainWindow(QMainWindow):
 
     def carregar_logo(self):
         """Carrega a logo como QIcon para uso na barra de título"""
-        logo_path = os.path.join("assets", "img", "GestorX_logo.png")
+        logo_path = os.path.join("assets", "img", "Logo2.png")
         if os.path.exists(logo_path):
             return QIcon(logo_path)
         else:
@@ -371,7 +371,7 @@ class MainWindow(QMainWindow):
         
         # O resto da função continua exatamente como antes
         if not logo_path or not os.path.exists(logo_path):
-            logo_path = os.path.join("assets", "img", "GestorX (2).png")
+            logo_path = os.path.join("assets", "img", "Logo2.png")
         
         if os.path.exists(logo_path):
             pixmap = QPixmap(logo_path)

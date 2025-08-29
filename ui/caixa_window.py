@@ -601,23 +601,6 @@ class CaixaWindow(QWidget):
         # Focar no campo de produto ao iniciar, que agora também é usado para código de barras
         self.cb_produto.setFocus()
 
-    def obter_preco_final_produto(self, produto):
-        """
-        Busca o preço de um produto, verificando se há uma promoção ativa.
-        Retorna o preço promocional se existir, senão, o preço de venda normal.
-        """
-        if not produto:
-            return 0.0
-
-        # Verifica se há promoções ativas para este produto
-        promocoes = self.db.listar_promocoes_ativas()
-        for promocao in promocoes:
-            # Compara o ID do produto da promoção com o ID do produto fornecido
-            if promocao['produto_id'] == produto['id']:
-                return promocao['preco_promocional']
-        
-        # Se nenhuma promoção foi encontrada, retorna o preço de venda padrão
-        return produto.get('preco_venda', 0.0)
     
     def verificar_caixa_aberto(self):
         self.caixa_atual = self.db.obter_caixa_aberto()
@@ -718,46 +701,83 @@ class CaixaWindow(QWidget):
         else:
             return produto.get('quantidade', 0)  # Produto normal
     
+    def _atualizar_info_produto_selecionado(self, produto_base):
+        """
+        Método unificado para atualizar a UI (preço e imagem) com base em um produto.
+        Se o produto for None, limpa os campos.
+        """
+        if not produto_base:
+            self.spin_preco.setValue(0)
+            self.lbl_imagem_produto.clear()
+            self.lbl_imagem_produto.setText("Selecione um produto...")
+            return
+
+        # Busca o produto com o preço final (promocional ou não) para exibir na UI
+        produto_com_preco_final = self.db.obter_produto_com_preco_promocional(produto_base['id'])
+        if not produto_com_preco_final:
+            # Em caso de erro, usa o preço de venda padrão como fallback
+            self.spin_preco.setValue(produto_base.get('preco_venda', 0))
+        else:
+            # Exibe o preço de venda da EMBALAGEM (que pode ser o promocional)
+            self.spin_preco.setValue(produto_com_preco_final.get('preco_venda', 0))
+        
+        # Lógica da imagem (permanece a mesma)
+        imagem_path = produto_base.get('imagem_path')
+        if imagem_path and os.path.exists(imagem_path):
+            pixmap = QPixmap(imagem_path)
+            self.lbl_imagem_produto.setPixmap(pixmap.scaled(
+                self.lbl_imagem_produto.size(),
+                Qt.KeepAspectRatio, 
+                Qt.SmoothTransformation
+            ))
+        else:
+            self.lbl_imagem_produto.setText("Produto sem imagem")
+
     def adicionar_item(self):
         index = self.cb_produto.currentIndex()
         if index <= 0:
-            # Não mostra mais aviso, pois o Enter pode chamar isso com o campo já limpo
             return
 
-        produto = self.cb_produto.itemData(index)
-        if not produto:
+        # 1. Pega o produto base, com os dados originais, do ComboBox
+        produto_base = self.cb_produto.itemData(index)
+        if not produto_base:
             return
 
-        # Atualiza a imagem e o preço para garantir que estejam corretos antes de adicionar
-        self._atualizar_info_produto_selecionado(produto)
+        # 2. USA A FUNÇÃO CENTRAL DO DB PARA OBTER O PRODUTO COM O PREÇO FINAL JÁ APLICADO
+        produto_com_preco_final = self.db.obter_produto_com_preco_promocional(produto_base['id'])
+        if not produto_com_preco_final:
+            QMessageBox.critical(self, "Erro", "Não foi possível obter os dados de preço do produto.")
+            return
 
-        preco_unitario_final = self.obter_preco_final_produto(produto)
         sale_details = None
         
-        if produto['fracionado']:
-            dialog = DialogVendaFracionada(produto, self)
+        # 3. A lógica de venda agora usa o objeto 'produto_com_preco_final', que contém os preços corretos
+        if produto_com_preco_final.get('fracionado'):
+            # O diálogo de venda fracionada sempre receberá o produto com os preços promocionais corretos
+            dialog = DialogVendaFracionada(produto_com_preco_final, self)
             if dialog.exec_() == QDialog.Accepted:
                 sale_details = dialog.get_sale_details()
             else:
-                return
+                return # O usuário cancelou
         else:
+            # Lógica para produtos não fracionados
             quantidade = self.spin_quantidade.value()
-            if quantidade > produto['quantidade']:
-                QMessageBox.warning(self, "Estoque Insuficiente", f"Estoque disponível: {produto['quantidade']} unidades.")
+            if quantidade > produto_com_preco_final['quantidade']:
+                QMessageBox.warning(self, "Estoque Insuficiente", f"Estoque disponível: {produto_com_preco_final['quantidade']} unidades.")
                 return
 
             sale_details = {
                 "quantidade": quantidade,
-                "preco_unitario": preco_unitario_final, 
+                "preco_unitario": produto_com_preco_final['preco_venda'], # Usa o preço já corrigido
                 "is_embalagem": True,
-                "produto_nome": produto['nome']
+                "produto_nome": produto_com_preco_final['nome']
             }
 
         if not sale_details:
             return
 
         item_carrinho = {
-            'produto_id': produto['id'],
+            'produto_id': produto_com_preco_final['id'],
             'produto_nome': sale_details['produto_nome'],
             'quantidade': sale_details['quantidade'],
             'preco_unitario': sale_details['preco_unitario'],
@@ -769,14 +789,11 @@ class CaixaWindow(QWidget):
         self.atualizar_tabela_itens()
         self.calcular_total()
         
-        # --- INÍCIO DA CORREÇÃO ---
-        # Limpa os campos para a próxima adição, MAS MANTÉM A IMAGEM ATUAL.
+        # Limpa os campos para a próxima adição
         self.cb_produto.setCurrentText("")
         self.spin_quantidade.setValue(1)
         self.spin_preco.setValue(0)
         self.cb_produto.setFocus()
-        # A linha que limpava self.lbl_imagem_produto foi REMOVIDA.
-        # --- FIM DA CORREÇÃO ---
     
     def atualizar_tabela_itens(self):
         self.tabela_itens.setRowCount(0)
@@ -844,19 +861,24 @@ class CaixaWindow(QWidget):
         if not self.itens_venda:
             QMessageBox.warning(self, "Venda Vazia", "Adicione itens para finalizar a venda")
             return
+
+        # Busca as taxas salvas no banco de dados, com valores padrão caso não existam
+        taxa_debito_salva = float(self.db.obter_configuracao('taxa_cartao_debito', '1.99'))
+        taxa_credito_salva = float(self.db.obter_configuracao('taxa_cartao_credito', '4.98'))
         
         # Diálogo de finalização
         dialog = QDialog(self)
         dialog.setWindowTitle("Finalizar Venda")
-        dialog.setMinimumWidth(400)
+        dialog.setMinimumWidth(550) # Largura aumentada para os novos campos
         
         layout = QVBoxLayout(dialog)
         
+        # Layout principal do formulário
         form_layout = QFormLayout()
         
-        lbl_total = QLabel(f"R$ {self.total_venda:.2f}")
-        lbl_total.setStyleSheet("font-size: 16px; font-weight: bold;")
-        form_layout.addRow("Total da Venda:", lbl_total)
+        lbl_total_venda_bruta = QLabel(f"R$ {self.total_venda:.2f}")
+        lbl_total_venda_bruta.setStyleSheet("font-size: 14px;")
+        form_layout.addRow("Total dos Itens:", lbl_total_venda_bruta)
         
         spin_desconto = QDoubleSpinBox()
         spin_desconto.setPrefix("R$ ")
@@ -865,200 +887,232 @@ class CaixaWindow(QWidget):
         form_layout.addRow("Desconto:", spin_desconto)
         
         cb_forma_pagamento = QComboBox()
-        cb_forma_pagamento.addItems(["Dinheiro", "Cartão de Crédito", "Cartão de Débito", "PIX", "Boleto"])
+        cb_forma_pagamento.addItems(["Dinheiro", "Cartão de Débito", "Cartão de Crédito", "PIX", "Boleto"])
         form_layout.addRow("Forma de Pagamento:", cb_forma_pagamento)
+        layout.addLayout(form_layout)
+
+        # --- INÍCIO DO CÓDIGO NOVO: GRUPO DE TAXAS ---
+        group_taxas = QGroupBox("Taxas da Maquininha")
+        group_taxas.setVisible(False) # Começa oculto
+        group_taxas_layout = QFormLayout(group_taxas)
+        group_taxas_layout.setContentsMargins(10, 15, 10, 10)
+
+        spin_taxa_debito = QDoubleSpinBox()
+        spin_taxa_debito.setSuffix(" %")
+        spin_taxa_debito.setDecimals(2)
+        spin_taxa_debito.setMinimum(0)
+        spin_taxa_debito.setMaximum(100)
+        spin_taxa_debito.setValue(taxa_debito_salva)
+        group_taxas_layout.addRow("Taxa Débito:", spin_taxa_debito)
+
+        spin_taxa_credito = QDoubleSpinBox()
+        spin_taxa_credito.setSuffix(" %")
+        spin_taxa_credito.setDecimals(2)
+        spin_taxa_credito.setMinimum(0)
+        spin_taxa_credito.setMaximum(100)
+        spin_taxa_credito.setValue(taxa_credito_salva)
+        group_taxas_layout.addRow("Taxa Crédito:", spin_taxa_credito)
+
+        chk_salvar_taxas = QCheckBox("Lembrar taxas para próximas vendas")
+        chk_salvar_taxas.setChecked(True)
+        group_taxas_layout.addRow(chk_salvar_taxas)
+        layout.addWidget(group_taxas)
+        # --- FIM DO CÓDIGO NOVO: GRUPO DE TAXAS ---
+
+        # Layout secundário para campos condicionais (troco, parcelas)
+        form_layout_2 = QFormLayout()
         
-        # Criar labels para os rótulos dos campos de troco
         lbl_valor_recebido_text = QLabel("Valor Recebido:")
-        lbl_troco_text = QLabel("Troco:")
-        
-        # Campos de valor recebido e troco
         spin_valor_recebido = QDoubleSpinBox()
         spin_valor_recebido.setPrefix("R$ ")
         spin_valor_recebido.setMaximum(999999.99)
         spin_valor_recebido.setDecimals(2)
-        spin_valor_recebido.setValue(self.total_venda)  # Inicialmente igual ao total
+        form_layout_2.addRow(lbl_valor_recebido_text, spin_valor_recebido)
         
+        lbl_troco_text = QLabel("Troco:")
         lbl_troco = QLabel("R$ 0,00")
         lbl_troco.setStyleSheet("font-size: 14px; font-weight: bold; color: #FF5722;")
-        
-        # Adicionar ao layout
-        form_layout.addRow(lbl_valor_recebido_text, spin_valor_recebido)
-        form_layout.addRow(lbl_troco_text, lbl_troco)
-        
-        # Inicialmente ocultar campos relacionados ao troco
-        lbl_valor_recebido_text.setVisible(False)
-        spin_valor_recebido.setVisible(False)
-        lbl_troco_text.setVisible(False)
-        lbl_troco.setVisible(False)
+        form_layout_2.addRow(lbl_troco_text, lbl_troco)
         
         spin_parcelas = QSpinBox()
         spin_parcelas.setMinimum(1)
         spin_parcelas.setMaximum(12)
-        form_layout.addRow("Parcelas:", spin_parcelas)
+        form_layout_2.addRow("Parcelas:", spin_parcelas)
         
         text_observacao = QTextEdit()
         text_observacao.setMaximumHeight(80)
-        form_layout.addRow("Observação:", text_observacao)
+        form_layout_2.addRow("Observação:", text_observacao)
+        layout.addLayout(form_layout_2)
+
+        # --- INÍCIO DO CÓDIGO NOVO: CARDS DE TOTAIS ---
+        cards_layout = QHBoxLayout()
+        card_cliente = QFrame()
+        card_cliente.setFrameShape(QFrame.StyledPanel)
+        card_cliente_layout = QVBoxLayout(card_cliente)
+        lbl_cliente_title = QLabel("Cliente Paga")
+        lbl_cliente_title.setAlignment(Qt.AlignCenter)
+        lbl_cliente_title.setStyleSheet("font-size: 10pt; color: #6c757d;")
+        lbl_total_cliente = QLabel(f"R$ {self.total_venda:.2f}")
+        lbl_total_cliente.setAlignment(Qt.AlignCenter)
+        lbl_total_cliente.setStyleSheet("font-size: 18px; font-weight: bold; color: #007bff;")
+        card_cliente_layout.addWidget(lbl_cliente_title)
+        card_cliente_layout.addWidget(lbl_total_cliente)
+
+        card_loja = QFrame()
+        card_loja.setFrameShape(QFrame.StyledPanel)
+        card_loja_layout = QVBoxLayout(card_loja)
+        lbl_loja_title = QLabel("Você Recebe")
+        lbl_loja_title.setAlignment(Qt.AlignCenter)
+        lbl_loja_title.setStyleSheet("font-size: 10pt; color: #6c757d;")
+        lbl_total_receber = QLabel(f"R$ {self.total_venda:.2f}")
+        lbl_total_receber.setAlignment(Qt.AlignCenter)
+        lbl_total_receber.setStyleSheet("font-size: 18px; font-weight: bold; color: #28a745;")
+        card_loja_layout.addWidget(lbl_loja_title)
+        card_loja_layout.addWidget(lbl_total_receber)
         
-        layout.addLayout(form_layout)
-        
+        cards_layout.addWidget(card_cliente)
+        cards_layout.addWidget(card_loja)
+        layout.addLayout(cards_layout)
+        # --- FIM DO CÓDIGO NOVO: CARDS DE TOTAIS ---
+
         btn_confirmar = QPushButton("Confirmar Venda")
         btn_confirmar.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
         layout.addWidget(btn_confirmar)
         
-        # Total após desconto
-        lbl_total_final = QLabel(f"Total a Pagar: R$ {self.total_venda:.2f}")
-        lbl_total_final.setStyleSheet("font-size: 18px; font-weight: bold; color: #2196F3;")
-        layout.addWidget(lbl_total_final)
-        
-        # Atualizar total ao alterar desconto
-        def atualizar_total_final():
+        # --- INÍCIO DA LÓGICA ATUALIZADA ---
+        def calcular_valores_finais():
             desconto = spin_desconto.value()
-            total_final = self.total_venda - desconto
-            total_final = max(0, total_final)
-            lbl_total_final.setText(f"Total a Pagar: R$ {total_final:.2f}")
+            total_cliente_paga = max(0, self.total_venda - desconto)
             
-            # Atualizar valor recebido para corresponder ao novo total
-            if cb_forma_pagamento.currentText() == "Dinheiro":
-                # Apenas atualiza se for menor que o valor atual
-                if spin_valor_recebido.value() < total_final:
-                    spin_valor_recebido.setValue(total_final)
-                calcular_troco()
-                
-        def calcular_troco():
-            desconto = spin_desconto.value()
-            total_final = max(0, self.total_venda - desconto)
-            valor_recebido = spin_valor_recebido.value()
-            troco = max(0, valor_recebido - total_final)
-            lbl_troco.setText(f"R$ {troco:.2f}")
+            forma_pgto = cb_forma_pagamento.currentText()
+            taxa_percentual = 0.0
             
-            # Mudar cor conforme o valor do troco
-            if troco > 0:
-                lbl_troco.setStyleSheet("font-size: 14px; font-weight: bold; color: #4CAF50;")  # Verde se positivo
-            else:
-                lbl_troco.setStyleSheet("font-size: 14px; font-weight: bold; color: #F44336;")  # Vermelho se zero
-        
-        spin_desconto.valueChanged.connect(atualizar_total_final)
-        spin_valor_recebido.valueChanged.connect(calcular_troco)
-        
-        # Atualizar campos visíveis conforme forma de pagamento
-        def atualizar_campos_forma_pagamento():
+            if forma_pgto == "Cartão de Débito":
+                taxa_percentual = spin_taxa_debito.value()
+            elif forma_pgto == "Cartão de Crédito":
+                taxa_percentual = spin_taxa_credito.value()
+            
+            valor_da_taxa = total_cliente_paga * (taxa_percentual / 100.0)
+            total_loja_recebe = total_cliente_paga - valor_da_taxa
+            
+            # Atualiza os cards
+            lbl_total_cliente.setText(f"R$ {total_cliente_paga:.2f}")
+            lbl_total_receber.setText(f"R$ {total_loja_recebe:.2f}")
+            
+            # Lógica do troco
+            if forma_pgto == "Dinheiro":
+                valor_recebido = spin_valor_recebido.value()
+                if valor_recebido < total_cliente_paga:
+                     spin_valor_recebido.setValue(total_cliente_paga)
+                     valor_recebido = total_cliente_paga
+
+                troco = max(0, valor_recebido - total_cliente_paga)
+                lbl_troco.setText(f"R$ {troco:.2f}")
+                lbl_troco.setStyleSheet("font-size: 14px; font-weight: bold; color: #4CAF50;" if troco > 0 else "font-size: 14px; font-weight: bold; color: #F44336;")
+
+        def atualizar_visibilidade_campos():
             forma_pgto = cb_forma_pagamento.currentText()
             
-            # Configurar visibilidade e estado para forma de pagamento
-            if forma_pgto == "Cartão de Crédito":
-                spin_parcelas.setEnabled(True)
-            else:
-                spin_parcelas.setValue(1)
-                spin_parcelas.setEnabled(False)
+            # Visibilidade do grupo de taxas
+            is_cartao = forma_pgto in ["Cartão de Crédito", "Cartão de Débito"]
+            group_taxas.setVisible(is_cartao)
             
-            # Mostrar campos de troco apenas para pagamento em dinheiro
-            mostrar_campos_troco = (forma_pgto == "Dinheiro")
-            lbl_valor_recebido_text.setVisible(mostrar_campos_troco)
-            spin_valor_recebido.setVisible(mostrar_campos_troco)
-            lbl_troco_text.setVisible(mostrar_campos_troco)
-            lbl_troco.setVisible(mostrar_campos_troco)
+            # Visibilidade de parcelas
+            is_credito = (forma_pgto == "Cartão de Crédito")
+            spin_parcelas.setEnabled(is_credito)
+            if not is_credito: spin_parcelas.setValue(1)
             
-            # Inicializar o valor recebido com o total da venda
-            if mostrar_campos_troco:
-                desconto = spin_desconto.value()
-                total_final = max(0, self.total_venda - desconto)
-                spin_valor_recebido.setValue(total_final)
-                calcular_troco()
+            # Visibilidade do troco
+            is_dinheiro = (forma_pgto == "Dinheiro")
+            lbl_valor_recebido_text.setVisible(is_dinheiro)
+            spin_valor_recebido.setVisible(is_dinheiro)
+            lbl_troco_text.setVisible(is_dinheiro)
+            lbl_troco.setVisible(is_dinheiro)
+            
+            calcular_valores_finais()
+
+        # Conexões dos sinais
+        spin_desconto.valueChanged.connect(calcular_valores_finais)
+        spin_taxa_debito.valueChanged.connect(calcular_valores_finais)
+        spin_taxa_credito.valueChanged.connect(calcular_valores_finais)
+        spin_valor_recebido.valueChanged.connect(calcular_valores_finais)
+        cb_forma_pagamento.currentIndexChanged.connect(atualizar_visibilidade_campos)
         
-        cb_forma_pagamento.currentIndexChanged.connect(atualizar_campos_forma_pagamento)
-        atualizar_campos_forma_pagamento()  # Inicializar com os valores corretos
+        atualizar_visibilidade_campos() # Chamada inicial
+        # --- FIM DA LÓGICA ATUALIZADA ---
         
-        # Processar venda ao confirmar
         def processar_venda():
             cliente_id = self.cb_cliente.currentData()
             desconto = spin_desconto.value()
             forma_pagamento = cb_forma_pagamento.currentText()
             parcelas = spin_parcelas.value()
             observacao = text_observacao.toPlainText()
-            total_final = max(0, self.total_venda - desconto)
-            
-            # Verificar se é pagamento em dinheiro e se o valor recebido é suficiente
-            if forma_pagamento == "Dinheiro" and spin_valor_recebido.value() < total_final:
-                QMessageBox.warning(dialog, "Valor Insuficiente", 
-                                f"O valor recebido (R$ {spin_valor_recebido.value():.2f}) é menor que o total a pagar (R$ {total_final:.2f}).")
+
+            # Calcula os valores finais uma última vez para garantir
+            total_cliente_paga = max(0, self.total_venda - desconto)
+            taxa_percentual = 0.0
+            if forma_pagamento == "Cartão de Débito":
+                taxa_percentual = spin_taxa_debito.value()
+            elif forma_pagamento == "Cartão de Crédito":
+                taxa_percentual = spin_taxa_credito.value()
+
+            valor_da_taxa = total_cliente_paga * (taxa_percentual / 100.0)
+            valor_para_faturamento = total_cliente_paga - valor_da_taxa
+
+            if forma_pagamento == "Dinheiro" and spin_valor_recebido.value() < total_cliente_paga:
+                QMessageBox.warning(dialog, "Valor Insuficiente", f"O valor recebido é menor que o total a pagar.")
                 return
             
-            # Se tudo estiver certo, registrar a venda e os dados de pagamento
-            valor_recebido = spin_valor_recebido.value() if forma_pagamento == "Dinheiro" else total_final
-            troco = max(0, valor_recebido - total_final) if forma_pagamento == "Dinheiro" else 0
-            
-            # Adicionar informações de troco à observação se for pagamento em dinheiro
-            if forma_pagamento == "Dinheiro" and troco > 0:
-                if observacao:
-                    observacao += f"\nValor recebido: R$ {valor_recebido:.2f}. Troco: R$ {troco:.2f}"
-                else:
-                    observacao = f"Valor recebido: R$ {valor_recebido:.2f}. Troco: R$ {troco:.2f}"
-            
-            # Registrar venda
+            # Salvar taxas se a opção estiver marcada
+            if chk_salvar_taxas.isChecked():
+                self.db.definir_configuracao('taxa_cartao_debito', str(spin_taxa_debito.value()))
+                self.db.definir_configuracao('taxa_cartao_credito', str(spin_taxa_credito.value()))
+
+            # Registra a venda com o valor que o cliente pagou
             venda_id = self.db.registrar_venda(
-            cliente_id, total_final, desconto, forma_pagamento, 
-            parcelas, observacao, "Concluída", "Sistema"
+                cliente_id, total_cliente_paga, desconto, forma_pagamento, 
+                parcelas, observacao, "Concluída", "Sistema"
             )
             
             if venda_id:
-                # ===== INÍCIO DA CORREÇÃO =====
-                # AGORA SIM, DEDUZ O ESTOQUE DE CADA ITEM VENDIDO
                 for item in self.itens_venda:
-                    sucesso_estoque, msg_estoque = self.db.atualizar_estoque_venda(
-                        item['produto_id'],
-                        item['quantidade'],
-                        item['is_embalagem']
-                    )
-                    if not sucesso_estoque:
-                        # Idealmente, aqui deveria haver um tratamento de erro, 
-                        # como cancelar a venda ou registrar a falha.
-                        QMessageBox.critical(self, "Erro Crítico de Estoque", 
-                                            f"Não foi possível atualizar o estoque para o produto {item['produto_nome']}.\n"
-                                            f"Erro: {msg_estoque}\n"
-                                            "A venda foi registrada, mas o estoque precisa ser ajustado manualmente!")
-                # ===== FIM DA CORREÇÃO =====
-
-                # Registrar itens da venda na tabela itens_venda
-                for item in self.itens_venda:
+                    # Lógica de baixa de estoque...
+                    self.db.atualizar_estoque_venda(item['produto_id'], item['quantidade'], item['is_embalagem'])
+                     # --- INÍCIO DA MODIFICAÇÃO ---
+                    # Determina a string a ser salva com base no booleano
+                    vendido_como = 'Embalagem' if item['is_embalagem'] else 'Fração'
+                    
+                    # Passa a nova informação para a função do banco de dados
                     self.db.registrar_item_venda(
-                        venda_id, 
-                        item['produto_id'], 
-                        item['quantidade'], 
-                        item['preco_unitario'], 
-                        item['subtotal']
+                        venda_id, item['produto_id'], item['quantidade'],
+                        item['preco_unitario'], item['subtotal'], vendido_como
                     )
+                    # --- FIM DA MODIFICAÇÃO ---
                 
-                # Registrar entrada no caixa
+                # ****** MUDANÇA PRINCIPAL ******
+                # Registra a ENTRADA no caixa com o valor LÍQUIDO (já descontada a taxa)
                 self.db.registrar_movimento_caixa(
                     self.caixa_atual['id'], "Entrada", f"Venda #{venda_id}", 
-                    total_final, forma_pagamento, venda_id, "Venda", "Sistema"
+                    valor_para_faturamento, # <-- VALOR LÍQUIDO VAI PARA O FATURAMENTO
+                    forma_pagamento, venda_id, "Venda", "Sistema"
                 )
                 
-                # Atualizar saldo
+                # Atualiza saldo e UI
                 saldo_atual = self.db.obter_saldo_atual(self.caixa_atual['id'])
                 self.lbl_saldo.setText(f"Saldo Atual: R$ {saldo_atual:.2f}")
                 
-                # Mensagem de sucesso com informações do troco para pagamento em dinheiro
-                if forma_pagamento == "Dinheiro" and troco > 0:
-                    QMessageBox.information(self, "Venda Finalizada", 
-                                        f"Venda finalizada com sucesso!\nTotal: R$ {total_final:.2f}\nRecebido: R$ {valor_recebido:.2f}\nTroco: R$ {troco:.2f}")
+                troco_final = spin_valor_recebido.value() - total_cliente_paga
+                if forma_pagamento == "Dinheiro" and troco_final > 0:
+                     QMessageBox.information(self, "Venda Finalizada", f"Venda finalizada com sucesso!\nTroco: R$ {troco_final:.2f}")
                 else:
                     QMessageBox.information(self, "Sucesso", "Venda finalizada com sucesso!")
                 
-                # Limpar venda atual
                 self.itens_venda = []
                 self.atualizar_tabela_itens()
                 self.calcular_total()
                 self.cb_cliente.setCurrentIndex(0)
-                
-                # ===== INÍCIO DA MUDANÇA =====
                 self.lbl_imagem_produto.clear()
                 self.lbl_imagem_produto.setText("Selecione um produto para ver a imagem")
-                # ===== FIM DA MUDANÇA =====
-                
-                # Recarregar movimentos
                 self.carregar_movimentos()
                 
                 dialog.accept()
@@ -1679,16 +1733,21 @@ class CaixaWindow(QWidget):
         self.dt_rel_inicio.setEnabled(personalizado)
         self.dt_rel_fim.setEnabled(personalizado)
 
+    # SUBSTITUA O MÉTODO gerar_relatorio INTEIRO PELA VERSÃO ABAIXO
+
     def gerar_relatorio(self):
-        # PASSO 1: Coletar datas e buscar os dados
+        # PASSO 1: Coletar datas e buscar os dados USANDO A NOVA FUNÇÃO
         data_inicio = self.dt_rel_inicio.date().toString("yyyy-MM-dd")
         data_fim = self.dt_rel_fim.date().toString("yyyy-MM-dd")
         
-        dados = self.db.gerar_relatorio_periodo(data_inicio, data_fim)
+        # ***** MUDANÇA PRINCIPAL AQUI *****
+        # A chamada ao método que estava causando o erro
+        dados = self._buscar_dados_relatorio(data_inicio, data_fim)
+        # *********************************
         
         # Se não houver dados, limpa a tela e esconde o botão de exportar
-        if not dados:
-            QMessageBox.information(self, "Sem Dados", "Não foram encontrados dados para o período selecionado.")
+        if not dados or not dados.get('vendas'):
+            QMessageBox.information(self, "Sem Dados", "Não foram encontradas vendas ou movimentos para o período selecionado.")
             self.btn_exportar_pdf.setVisible(False)
             self.text_resumo.clear()
             self.tabela_rel_movimentos.setRowCount(0)
@@ -1712,10 +1771,10 @@ class CaixaWindow(QWidget):
         #       PASSO 4: PREENCHER A INTERFACE GRÁFICA (UI)                 #
         # ================================================================= #
 
-        # --- 4.1: Preencher a NOVA Aba de Resumo Visual ---
+        # --- 4.1: Preencher a Aba de Resumo Visual ---
         self.preencher_resumo_visual(dados, data_inicio, data_fim)
 
-        # --- 4.2: Preencher a Tabela de Movimentos Detalhados (CORRIGIDO) ---
+        # --- 4.2: Preencher a Tabela de Movimentos Detalhados ---
         self.tabela_rel_movimentos.setRowCount(0)
         movimentos = dados.get('movimentos', [])
         for i, movimento in enumerate(movimentos):
@@ -1724,7 +1783,6 @@ class CaixaWindow(QWidget):
             tipo = movimento['tipo']
             valor = movimento['valor']
             
-            # Define a cor baseada no tipo de movimento
             cor_valor = QColor(self.theme_colors.get('accent_color', '#28a745')) if tipo == "Entrada" else QColor("#dc3545")
             
             self.tabela_rel_movimentos.setItem(i, 0, QTableWidgetItem(str(movimento['id'])))
@@ -1742,7 +1800,7 @@ class CaixaWindow(QWidget):
             valor_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.tabela_rel_movimentos.setItem(i, 5, valor_item)
 
-        # --- 4.3: Preencher a Tabela de Vendas Realizadas (CORRIGIDO) ---
+        # --- 4.3: Preencher a Tabela de Vendas Realizadas ---
         self.tabela_rel_vendas.setRowCount(0)
         vendas = dados.get('vendas', [])
         for i, venda in enumerate(vendas):
@@ -1764,6 +1822,32 @@ class CaixaWindow(QWidget):
             
         # PASSO 5: Tornar o botão de exportar visível
         self.btn_exportar_pdf.setVisible(True)
+
+    # --- INÍCIO DO CÓDIGO A SER ADICIONADO ---
+    # Este método precisa estar INDENTADO para dentro da classe CaixaWindow
+    def _buscar_dados_relatorio(self, data_inicio, data_fim):
+        """
+        Busca e consolida todos os dados necessários para os relatórios financeiros.
+        """
+        try:
+            # Substituído para usar o método já existente no db manager
+            dados = self.db.gerar_relatorio_periodo(data_inicio, data_fim)
+            if dados:
+                return dados
+            else:
+                raise Exception("A busca de dados no banco retornou None.")
+
+        except Exception as e:
+            print(f"Erro ao buscar dados para relatório na UI: {e}")
+            QMessageBox.critical(self, "Erro de Banco de Dados", f"Não foi possível buscar os dados do relatório: {e}")
+            return None
+    # --- FIM DO CÓDIGO A SER ADICIONADO ---
+
+
+    def preencher_resumo_visual(self, dados, data_inicio, data_fim):
+        """Gera um HTML elaborado para a aba de resumo, herdando as cores do tema."""
+        
+        # ... (restante do método)
 
     def preencher_resumo_visual(self, dados, data_inicio, data_fim):
         """Gera um HTML elaborado para a aba de resumo, herdando as cores do tema."""
@@ -2003,6 +2087,83 @@ class CaixaWindow(QWidget):
         # Chama a função de template para gerar o PDF
         self._gerar_pdf_com_template(file_path, "Relatório Financeiro", elementos)
 
+
+    # COLE ESTE NOVO MÉTODO COMPLETO DENTRO DA CLASSE CaixaWindow
+
+def _buscar_dados_relatorio(self, data_inicio, data_fim):
+    """
+    Busca e consolida todos os dados necessários para os relatórios financeiros
+    diretamente da UI, garantindo que os dados sejam consistentes com o Dashboard.
+    """
+    try:
+        if not self.db.ensure_connection():
+            raise Exception("Sem conexão com o banco de dados.")
+            
+        cursor = self.db.conn.cursor()
+
+        # 1. Buscar todas as vendas no período
+        cursor.execute("""
+            SELECT
+                v.id,
+                v.data_hora,
+                COALESCE(c.nome, 'Cliente Não Identificado') as cliente,
+                v.valor_total,
+                v.desconto,
+                v.forma_pagamento
+            FROM vendas v
+            LEFT JOIN clientes c ON v.cliente_id = c.id
+            WHERE date(v.data_hora, 'localtime') BETWEEN ? AND ?
+        """, (data_inicio, data_fim))
+        vendas = [dict(row) for row in cursor.fetchall()]
+        venda_ids = tuple(v['id'] for v in vendas) if vendas else ()
+
+        # 2. Buscar todos os movimentos de caixa no período
+        cursor.execute("""
+            SELECT * FROM movimentos_caixa
+            WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
+        """, (data_inicio, data_fim))
+        movimentos = [dict(row) for row in cursor.fetchall()]
+
+        # 3. Calcular totais e agregações
+        total_entradas = sum(m['valor'] for m in movimentos if m['tipo'] == 'Entrada')
+        total_saidas = sum(m['valor'] for m in movimentos if m['tipo'] == 'Saída')
+        valor_vendas = sum(v['valor_total'] for v in vendas)
+        saldo_periodo = total_entradas - total_saidas
+        valor_medio_venda = valor_vendas / len(vendas) if vendas else 0
+
+        # 4. Top produtos e pagamentos (apenas se houver vendas)
+        produtos_mais_vendidos = []
+        pagamentos = defaultdict(float)
+        if venda_ids:
+            query_in_ids = f"IN {venda_ids}" if len(venda_ids) > 1 else f"= {venda_ids[0]}"
+            cursor.execute(f"""
+                SELECT p.nome, SUM(i.quantidade) as quantidade, SUM(i.subtotal) as valor_total
+                FROM itens_venda i
+                JOIN produtos p ON i.produto_id = p.id
+                WHERE i.venda_id {query_in_ids}
+                GROUP BY p.id, p.nome ORDER BY valor_total DESC LIMIT 5
+            """)
+            produtos_mais_vendidos = [dict(row) for row in cursor.fetchall()]
+            
+            for venda in vendas:
+                pagamentos[venda['forma_pagamento']] += venda['valor_total']
+
+        return {
+            'vendas': vendas,
+            'movimentos': movimentos,
+            'total_entradas': total_entradas,
+            'total_saidas': total_saidas,
+            'valor_vendas': valor_vendas,
+            'saldo_periodo': saldo_periodo,
+            'valor_medio_venda': valor_medio_venda,
+            'produtos_mais_vendidos': produtos_mais_vendidos,
+            'pagamentos': dict(pagamentos) # Converte de volta para um dict normal
+        }
+    except Exception as e:
+        print(f"Erro ao buscar dados para relatório: {e}")
+        QMessageBox.critical(self, "Erro de Banco de Dados", f"Não foi possível buscar os dados do relatório: {e}")
+        return None
+
 class DialogOpcoesFracionado(QDialog):
     def __init__(self, produto, parent=None):
         super().__init__(parent)
@@ -2095,11 +2256,10 @@ class DialogVendaFracionada(QDialog):
         form_layout.addRow("Preço Unitário:", self.lbl_info_preco)
         form_layout.addRow("Estoque Disponível:", self.lbl_info_estoque)
 
-        # Quantidade - CORRIGIDO PARA QDoubleSpinBox
+        # O campo de quantidade continua sendo QDoubleSpinBox para flexibilidade,
+        # mas vamos controlar suas propriedades (decimais, mínimo) dinamicamente.
         self.spin_quantidade = QDoubleSpinBox()
-        self.spin_quantidade.setMinimum(0.001) # Mínimo para venda fracionada
-        self.spin_quantidade.setDecimals(3) # Para kg (ex: 0.250)
-        self.spin_quantidade.setSingleStep(0.1)
+        self.spin_quantidade.setSingleStep(1) # Padrão para pular de 1 em 1
         form_layout.addRow("Quantidade:", self.spin_quantidade)
 
         layout.addLayout(form_layout)
@@ -2115,29 +2275,45 @@ class DialogVendaFracionada(QDialog):
         button_box.addWidget(self.confirmar_btn)
         layout.addLayout(button_box)
 
-        self.radio_embalagem.setChecked(True)
+        # Inicia com a embalagem selecionada, se houver estoque
+        if self.produto.get('quantidade', 0) > 0:
+            self.radio_embalagem.setChecked(True)
+        else:
+            self.radio_unidade.setChecked(True)
 
     def update_info(self):
         if self.radio_embalagem.isChecked():
-            self.spin_quantidade.setDecimals(0) # Embalagem é inteira
+            # Configuração para Venda de Embalagem (Inteiros)
+            self.spin_quantidade.setDecimals(0)
             self.spin_quantidade.setMinimum(1)
             self.spin_quantidade.setValue(1)
+            
             self.lbl_info_preco.setText(f"R$ {self.produto['preco_venda']:.2f}")
-            self.lbl_info_estoque.setText(f"{self.produto['quantidade']} embalagens")
-            self.spin_quantidade.setMaximum(self.produto['quantidade'])
+            
+            estoque_embalagem = int(self.produto.get('quantidade', 0))
+            self.lbl_info_estoque.setText(f"{estoque_embalagem} embalagens")
+            self.spin_quantidade.setMaximum(estoque_embalagem)
         else:
-            self.spin_quantidade.setDecimals(3) # Fração pode ter decimais
-            self.spin_quantidade.setMinimum(0.001)
+            # --- INÍCIO DA CORREÇÃO ---
+            # Configuração para Venda de Unidade (Inteiros)
+            self.spin_quantidade.setDecimals(0) 
+            self.spin_quantidade.setMinimum(1)
             self.spin_quantidade.setValue(1)
+            
             self.lbl_info_preco.setText(f"R$ {self.produto['preco_unitario_fracao']:.2f}")
-            self.lbl_info_estoque.setText(f"{self.produto['estoque_fracionado']} {self.produto['unidade_medida']}")
-            # estoque_fracionado é float, setMaximum aceita float em QDoubleSpinBox
-            self.spin_quantidade.setMaximum(self.produto['estoque_fracionado'])
+            
+            # Exibe o estoque fracionado como um número inteiro
+            estoque_disponivel = int(self.produto.get('estoque_fracionado', 0))
+            self.lbl_info_estoque.setText(f"{estoque_disponivel} {self.produto['unidade_medida']}")
+            self.spin_quantidade.setMaximum(estoque_disponivel)
+            # --- FIM DA CORREÇÃO ---
 
     def confirmar(self):
         quantidade = self.spin_quantidade.value()
-        if quantidade > self.spin_quantidade.maximum() or quantidade == 0:
-            QMessageBox.warning(self, "Estoque Insuficiente", "A quantidade solicitada excede o estoque disponível.")
+        
+        # A validação agora considera o máximo configurado dinamicamente
+        if quantidade <= 0 or quantidade > self.spin_quantidade.maximum():
+            QMessageBox.warning(self, "Estoque ou Quantidade Inválida", "A quantidade solicitada é inválida ou excede o estoque disponível.")
             return
 
         is_embalagem = self.radio_embalagem.isChecked()

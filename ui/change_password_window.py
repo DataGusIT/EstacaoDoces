@@ -1,11 +1,162 @@
-# Arquivo: ui/change_password_window.py (VERSÃO PROFISSIONAL)
+# Arquivo: ui/change_password_window.py (VERSÃO PROFISSIONAL ATUALIZADA)
 
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-                             QLineEdit, QPushButton, QMessageBox, QFrame, QWidget)
-from PyQt5.QtCore import Qt
+                             QLineEdit, QPushButton, QMessageBox, QFrame, 
+                             QWidget, QTextEdit)
+from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtGui import QPixmap, QPainter, QPainterPath, QColor
 import hashlib
 
 from .icon_manager import IconManager
+
+# --- INÍCIO DA ADIÇÃO: CLASSE AlertDialog E DEPENDÊNCIAS ---
+# Adicionamos a classe de diálogo customizada para manter a consistência visual.
+
+class AlertDialog(QDialog):
+    """Dialog customizado, integrado ao tema e visualmente aprimorado para alertas."""
+    
+    def __init__(self, parent, title, message, alert_type="info", theme_colors=None):
+        super().__init__(parent)
+        self.alert_type = alert_type
+        self.theme_colors = theme_colors or self._get_default_colors()
+        self.title_text = title
+        
+        self.setModal(True)
+        self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        self._setup_alert_info()
+        self.setup_ui(message)
+
+        self.drag_position = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton:
+            self.move(event.globalPos() - self.drag_position)
+            event.accept()
+            
+    def _get_default_colors(self):
+        return {
+            'bg_color': "#ffffff", 'surface_color': "#f2f2f7", 'text_color': "#000000",
+            'text_secondary': "#6d6d70", 'border_color': "#d1d1d6"
+        }
+
+    def _setup_alert_info(self):
+        alerts = {
+            "critical": {"icon": "delete", "color": "#d73a49", "prefix": "Erro"},
+            "warning":  {"icon": "estoque_baixo", "color": "#ffc107", "prefix": "Atenção"},
+            "info":     {"icon": "check", "color": "#28a745", "prefix": "Sucesso"}
+        }
+        self.alert_info = alerts.get(self.alert_type, alerts["info"])
+
+    def setup_ui(self, message):
+        container = QFrame(self)
+        container.setObjectName("alertDialogContainer")
+        
+        main_layout = QVBoxLayout(container)
+        main_layout.setContentsMargins(1, 1, 1, 1)
+        main_layout.setSpacing(0)
+
+        self.setLayout(QVBoxLayout())
+        self.layout().addWidget(container)
+        self.layout().setContentsMargins(0,0,0,0)
+
+        header = QFrame()
+        header.setObjectName("alertHeader")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(15, 10, 15, 10)
+        
+        title_label = QLabel(self.alert_info['prefix'])
+        title_label.setObjectName("alertTitle")
+        
+        header_layout.addWidget(title_label, 1)
+
+        body = QFrame()
+        body.setObjectName("alertBody")
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(20, 15, 20, 20)
+        
+        subtitle_label = QLabel(self.title_text)
+        subtitle_label.setObjectName("alertSubtitle")
+
+        message_label = QLabel(message)
+        message_label.setWordWrap(True)
+        message_label.setObjectName("alertMessage")
+        
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        ok_button = QPushButton("OK")
+        ok_button.setObjectName("okButton")
+        ok_button.clicked.connect(self.accept)
+        ok_button.setCursor(Qt.PointingHandCursor)
+        button_layout.addWidget(ok_button)
+
+        body_layout.addWidget(subtitle_label)
+        body_layout.addSpacing(5)
+        body_layout.addWidget(message_label)
+        body_layout.addSpacing(15)
+        body_layout.addLayout(button_layout)
+        
+        main_layout.addWidget(header)
+        main_layout.addWidget(body)
+
+        self.apply_style(self.alert_info['color'])
+
+    def apply_style(self, border_color):
+        style = f"""
+        #alertDialogContainer {{
+            background-color: {self.theme_colors['surface_color']};
+            border: 1px solid {border_color};
+            border-radius: 12px;
+        }}
+        #alertHeader {{
+            background-color: {self.theme_colors['surface_color']};
+            border-bottom: 1px solid {self.theme_colors['border_color']};
+            border-top-left-radius: 11px;
+            border-top-right-radius: 11px;
+        }}
+        #alertTitle {{
+            color: {self.theme_colors['text_color']};
+            font-size: 11pt;
+            font-weight: bold;
+        }}
+        #alertBody {{
+            background-color: {self.theme_colors['surface_color']};
+            border-bottom-left-radius: 11px;
+            border-bottom-right-radius: 11px;
+        }}
+        #alertSubtitle {{
+             color: {self.theme_colors['text_color']};
+             font-size: 12pt;
+             font-weight: bold;
+        }}
+        #alertMessage {{
+             color: {self.theme_colors['text_secondary']};
+             font-size: 10pt;
+        }}
+        #okButton {{
+            background-color: {border_color};
+            color: white;
+            font-weight: bold;
+            font-size: 10pt;
+            padding: 8px 25px;
+            border-radius: 6px;
+            border: none;
+            min-width: 90px;
+        }}
+        #okButton:hover {{
+            opacity: 0.9;
+        }}
+        """
+        self.setStyleSheet(style)
+        self.setMinimumWidth(400)
+# --- FIM DA ADIÇÃO ---
+
 
 class ChangePasswordWindow(QDialog):
     """Janela para alterar senha com design profissional e adaptada ao tema."""
@@ -18,7 +169,6 @@ class ChangePasswordWindow(QDialog):
         self.logo_pixmap = logo_pixmap
         self.drag_position = None
 
-        # Tornar a janela sem borda e com fundo transparente para cantos arredondados
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         
@@ -28,7 +178,6 @@ class ChangePasswordWindow(QDialog):
         self.setFixedSize(480, 450)
         self.setModal(True)
         
-        # Container principal para aplicar o estilo
         container = QFrame(self)
         container.setObjectName("mainContainer")
 
@@ -41,7 +190,6 @@ class ChangePasswordWindow(QDialog):
 
         main_layout.addWidget(self._create_content())
 
-        # Adiciona o container ao layout do QDialog
         base_layout = QVBoxLayout(self)
         base_layout.setContentsMargins(0, 0, 0, 0)
         base_layout.addWidget(container)
@@ -49,7 +197,6 @@ class ChangePasswordWindow(QDialog):
         self.apply_styles()
 
     def apply_styles(self):
-        """Aplica a folha de estilo QSS baseada no tema."""
         colors = self.theme_colors
         self.setStyleSheet(f"""
             #mainContainer {{
@@ -143,7 +290,6 @@ class ChangePasswordWindow(QDialog):
         layout.addWidget(subtitle_label)
         layout.addSpacing(15)
 
-        # Campos do formulário
         layout.addWidget(QLabel("Senha Atual"))
         self.current_password = QLineEdit()
         self.current_password.setPlaceholderText("Digite sua senha atual")
@@ -164,8 +310,7 @@ class ChangePasswordWindow(QDialog):
         
         layout.addStretch()
 
-        # Botões
-        from .profile_window import ThemedButton # Reutilizando o botão temático
+        from .profile_window import ThemedButton
         buttons_layout = QHBoxLayout()
         buttons_layout.setSpacing(12)
         
@@ -177,13 +322,11 @@ class ChangePasswordWindow(QDialog):
         buttons_layout.addWidget(self.save_button)
         layout.addLayout(buttons_layout)
         
-        # Conectar sinais
         self.save_button.clicked.connect(self.save_password)
         self.cancel_button.clicked.connect(self.reject)
         
         return content_widget
 
-    # Métodos para arrastar a janela
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and self.header.underMouse():
             self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
@@ -194,7 +337,6 @@ class ChangePasswordWindow(QDialog):
             self.move(event.globalPos() - self.drag_position)
             event.accept()
             
-    # Métodos save_password e show_message (sem alterações na lógica)
     def save_password(self):
         current_pass_plain = self.current_password.text()
         new_pass_plain = self.new_password.text()
@@ -233,36 +375,17 @@ class ChangePasswordWindow(QDialog):
         else:
             self.show_message("Erro ao Salvar", msg, "critical")
     
+    # --- CORREÇÃO APLICADA AQUI ---
+    # Substituímos o QMessageBox pelo AlertDialog customizado.
     def show_message(self, title, message, level="info"):
-        icon_map = {"info": QMessageBox.Information, "warning": QMessageBox.Warning, "critical": QMessageBox.Critical}
+        """Exibe uma mensagem usando o diálogo customizado AlertDialog."""
         
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle(title)
-        msg_box.setText(message)
-        msg_box.setIcon(icon_map.get(level, QMessageBox.Information))
-        
-        colors = self.theme_colors
-        msg_box.setStyleSheet(f"""
-            QMessageBox {{
-                background-color: {colors['surface_color']};
-                border-radius: 12px;
-            }}
-            QMessageBox QLabel {{
-                color: {colors['text_color']};
-                font-size: 15px;
-                min-width: 300px;
-            }}
-            QPushButton {{
-                background-color: {colors['accent_color']};
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 8px 16px;
-                min-width: 80px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: #005bb5;
-            }}
-        """)
-        msg_box.exec_()
+        alert_type_map = {
+            "info": "info",
+            "warning": "warning",
+            "critical": "critical"
+        }
+        alert_type = alert_type_map.get(level, "info")
+
+        alert_dialog = AlertDialog(self, title, message, alert_type=alert_type, theme_colors=self.theme_colors)
+        alert_dialog.exec_()

@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                            QPushButton, QTableWidget, QTableWidgetItem, QFormLayout,
                            QMessageBox, QHeaderView, QDialog, QFrame, QComboBox, QFileDialog,
-                           QTextEdit, QSpinBox, QCheckBox, QGroupBox, QProgressDialog, QSizePolicy, QProgressBar) # QProgressDialog
+                           QTextEdit, QSpinBox, QCheckBox, QGroupBox, QProgressDialog, QSizePolicy, QProgressBar, QApplication) # QProgressDialog
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
 from PyQt5.QtGui import QFont, QIcon,  QColor
 import csv
@@ -15,6 +15,151 @@ import math # Adicionado para paginação
 # Importações necessárias
 from ui.icon_manager import IconManager
 from database.db_manager import DatabaseManager # Importante para a thread
+
+# --- CLASSE 1: DIÁLOGO DE ALERTA (ESTILO PERFIL) ---
+class AlertDialog(QDialog):
+    """Caixa de diálogo com o estilo sutil da tela de perfil."""
+    def __init__(self, parent, title, message, alert_type='info', buttons=QMessageBox.Ok, theme_colors=None):
+        super().__init__(parent)
+        self.theme_colors = theme_colors if theme_colors is not None else {}
+        self.drag_position = None
+
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(True)
+
+        type_info = {
+            'success':  {'icon': 'check', 'color': '#28a745'},
+            'warning':  {'icon': 'estoque_baixo', 'color': '#ffc107'},
+            'error':    {'icon': 'delete', 'color': '#dc3545'},
+            'question': {'icon': 'question', 'color': '#17a2b8'},
+            'info':     {'icon': 'sobre', 'color': self.theme_colors.get('accent_color', '#007AFF')},
+        }.get(alert_type, {'icon': 'sobre', 'color': '#007AFF'})
+
+        self.accent_color = type_info['color']
+        self.icon_name = type_info['icon']
+        
+        self._setup_ui(title, message, buttons)
+
+    def _setup_ui(self, title, message, buttons):
+        self.setMinimumWidth(400)
+        container = QFrame(self); container.setObjectName("mainContainer")
+        main_layout = QVBoxLayout(container); main_layout.setContentsMargins(0, 0, 0, 0); main_layout.setSpacing(0)
+
+        self.header = QFrame(); self.header.setObjectName("header")
+        header_layout = QHBoxLayout(self.header); header_layout.setContentsMargins(20, 15, 10, 15)
+        header_title_label = QLabel(title); header_title_label.setObjectName("headerTitleLabel")
+        close_button = QPushButton(); close_button.setObjectName("controlButton"); close_button.setFixedSize(28, 28)
+        close_button.setIcon(IconManager.get_icon('fechar', color=self.theme_colors.get('text_secondary', '#666')))
+        close_button.clicked.connect(self.reject)
+        header_layout.addWidget(header_title_label); header_layout.addStretch(); header_layout.addWidget(close_button)
+        main_layout.addWidget(self.header)
+
+        body = QWidget(); body_layout = QVBoxLayout(body); body_layout.setContentsMargins(25, 20, 25, 25); body_layout.setSpacing(20)
+        subtitle_layout = QHBoxLayout()
+        icon_label = QLabel(); icon_label.setPixmap(IconManager.get_icon(self.icon_name, color=self.accent_color).pixmap(24, 24))
+        subtitle_label = QLabel(title); subtitle_label.setObjectName("subtitleLabel")
+        subtitle_layout.addWidget(icon_label); subtitle_layout.addWidget(subtitle_label); subtitle_layout.addStretch()
+        
+        message_label = QLabel(message); message_label.setWordWrap(True); message_label.setObjectName("messageLabel")
+        
+        button_layout = QHBoxLayout(); button_layout.addStretch()
+        if buttons & QMessageBox.Yes: button_layout.addWidget(self._create_button("Sim", lambda: self.done(QMessageBox.Yes), is_primary=True))
+        if buttons & QMessageBox.Ok: button_layout.addWidget(self._create_button("OK", self.accept, is_primary=True))
+        if buttons & QMessageBox.No: button_layout.addWidget(self._create_button("Não", self.reject))
+        if buttons & QMessageBox.Cancel: button_layout.addWidget(self._create_button("Cancelar", self.reject))
+        
+        body_layout.addLayout(subtitle_layout); body_layout.addWidget(message_label); body_layout.addLayout(button_layout)
+        main_layout.addWidget(body)
+        
+        base_layout = QVBoxLayout(self); base_layout.addWidget(container)
+        self.apply_styles()
+
+    def _create_button(self, text, on_click, is_primary=False):
+        btn = QPushButton(text); btn.clicked.connect(on_click); btn.setCursor(Qt.PointingHandCursor)
+        btn.setObjectName("primaryButton" if is_primary else "secondaryButton")
+        return btn
+        
+    def apply_styles(self):
+        colors = self.theme_colors
+        self.setStyleSheet(f"""
+            #mainContainer {{ background-color: {colors.get('surface_color', '#fff')}; border-radius: 12px; border: 1px solid {colors.get('border_color', '#ccc')}; }}
+            #header {{ border-bottom: 1px solid {colors.get('border_color', '#ccc')}; }}
+            #headerTitleLabel {{ color: {colors.get('text_color', '#000')}; font-weight: bold; }}
+            #subtitleLabel {{ color: {colors.get('text_color', '#000')}; font-size: 14pt; font-weight: bold; }}
+            #messageLabel {{ color: {colors.get('text_secondary', '#333')}; font-size: 11pt; }}
+            #controlButton {{ background: transparent; border: none; border-radius: 14px; }}
+            #controlButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }}
+            QPushButton {{ font-weight: bold; padding: 10px 25px; border-radius: 8px; min-width: 90px;}}
+            #primaryButton {{ background-color: {self.accent_color}; color: white; border: none; }}
+            #secondaryButton {{ background-color: transparent; color: {colors.get('text_color', '#000')}; border: 1px solid {colors.get('border_color', '#ccc')}; }}
+            #secondaryButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }}
+        """)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton: self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton: self.move(event.globalPos() - self.drag_position)
+
+# --- CLASSE 2: DIÁLOGO DE PROGRESSO TEMÁTICO ---
+class ThemedProgressDialog(QDialog):
+    """Um diálogo de progresso customizado e temático."""
+    canceled = pyqtSignal()
+    def __init__(self, parent, title, message, theme_colors):
+        super().__init__(parent)
+        self.theme_colors = theme_colors if theme_colors is not None else {}
+        self.drag_position = None
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(True)
+        self._setup_ui(title, message)
+        self.apply_styles()
+
+    def _setup_ui(self, title, message):
+        self.setMinimumWidth(400)
+        container = QFrame(self); container.setObjectName("mainContainer")
+        main_layout = QVBoxLayout(container); main_layout.setContentsMargins(0, 0, 0, 0); main_layout.setSpacing(0)
+
+        self.header = QFrame(); self.header.setObjectName("header")
+        header_layout = QHBoxLayout(self.header); header_layout.setContentsMargins(20, 15, 10, 15)
+        title_label = QLabel(title); title_label.setObjectName("headerTitleLabel")
+        header_layout.addWidget(title_label)
+        main_layout.addWidget(self.header)
+
+        body = QWidget(); body_layout = QVBoxLayout(body); body_layout.setContentsMargins(25, 20, 25, 25); body_layout.setSpacing(15)
+        message_label = QLabel(message); message_label.setWordWrap(True); message_label.setObjectName("messageLabel")
+        self.progress_bar = QProgressBar(); self.progress_bar.setTextVisible(True); self.progress_bar.setAlignment(Qt.AlignCenter)
+        
+        button_layout = QHBoxLayout(); button_layout.addStretch()
+        cancel_button = QPushButton("Cancelar"); cancel_button.setObjectName("secondaryButton"); cancel_button.setCursor(Qt.PointingHandCursor)
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_button)
+
+        body_layout.addWidget(message_label); body_layout.addWidget(self.progress_bar); body_layout.addLayout(button_layout)
+        main_layout.addWidget(body)
+        
+        base_layout = QVBoxLayout(self); base_layout.addWidget(container)
+
+    def apply_styles(self):
+        colors = self.theme_colors
+        self.setStyleSheet(f"""
+            #mainContainer {{ background-color: {colors.get('surface_color', '#fff')}; border-radius: 12px; border: 1px solid {colors.get('border_color', '#ccc')}; }}
+            #header {{ border-bottom: 1px solid {colors.get('border_color', '#ccc')}; }}
+            #headerTitleLabel {{ color: {colors.get('text_color', '#000')}; font-weight: bold; }}
+            #messageLabel {{ color: {colors.get('text_secondary', '#333')}; font-size: 11pt; }}
+            QPushButton#secondaryButton {{ font-weight: bold; padding: 10px 25px; border-radius: 8px; background-color: transparent; color: {colors.get('text_color', '#000')}; border: 1px solid {colors.get('border_color', '#ccc')}; }}
+            QPushButton#secondaryButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }}
+            QProgressBar {{ border: 1px solid {colors.get('border_color', '#ccc')}; border-radius: 8px; padding: 1px; text-align: center; background-color: {colors.get('bg_color', '#eee')}; color: {colors.get('text_color', '#000')}; }}
+            QProgressBar::chunk {{ background-color: {colors.get('accent_color', '#007AFF')}; border-radius: 7px; }}
+        """)
+
+    def setValue(self, value): self.progress_bar.setValue(value)
+    def reject(self): self.canceled.emit(); super().reject()
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton: self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton: self.move(event.globalPos() - self.drag_position)
+
 
 class FornecedorCsvImportWorker(QThread):
     """Executa a importação de CSV de fornecedores em uma thread."""
@@ -358,95 +503,81 @@ class FornecedorWindow(QWidget):
             self.atualizar_visualizacao_dados()
 
     def excluir_fornecedor(self, fornecedor_id):
-        confirmacao = QMessageBox.question(self, "Confirmar Exclusão", "...", QMessageBox.Yes | QMessageBox.No)
-        if confirmacao == QMessageBox.Yes:
+        dialog = AlertDialog(self, "Confirmar Exclusão",
+                             "Tem certeza que deseja excluir este fornecedor e todos os produtos associados a ele?",
+                             alert_type='question', buttons=QMessageBox.Yes | QMessageBox.No, theme_colors=self.theme_colors)
+        
+        if dialog.exec_() == QMessageBox.Yes:
             if self.db.excluir_fornecedor(fornecedor_id):
-                QMessageBox.information(self, "Sucesso", "Fornecedor excluído.")
-                self.atualizar_visualizacao_dados() # Recarrega a view
+                AlertDialog(self, "Sucesso", "Fornecedor excluído com sucesso.", alert_type='success', theme_colors=self.theme_colors).exec_()
+                self.atualizar_visualizacao_dados()
+            else:
+                AlertDialog(self, "Erro", "Não foi possível excluir o fornecedor.", alert_type='error', theme_colors=self.theme_colors).exec_()
 
     # ... O restante do código de FornecedorWindow permanece o mesmo (importar, exportar, etc.) ...
     def importar_csv(self):
-        """Importa fornecedores de um arquivo CSV."""
-        arquivo, _ = QFileDialog.getOpenFileName(
-            self, 
-            "Importar Fornecedores CSV", 
-            "", 
-            "CSV Files (*.csv)"
-        )
+        arquivo, _ = QFileDialog.getOpenFileName(self, "Importar Fornecedores CSV", "", "CSV Files (*.csv)")
+        if not arquivo:
+            return
+
+        dialog = AlertDialog(self, "Confirmar Importação",
+                             "A importação será executada em segundo plano.\nDeseja continuar?",
+                             alert_type='question', buttons=QMessageBox.Yes | QMessageBox.No, theme_colors=self.theme_colors)
+        if dialog.exec_() != QMessageBox.Yes:
+            return
+
+        self.progress_dialog = ThemedProgressDialog(self, "Importando Fornecedores", "Aguarde enquanto os dados são processados...", self.theme_colors)
+        self.progress_dialog.canceled.connect(self.cancelar_importacao)
+
+        self.import_thread = FornecedorCsvImportWorker(self.db.db_path, arquivo)
+        self.import_thread.progress.connect(self.progress_dialog.setValue)
+        self.import_thread.finished.connect(self.importacao_concluida)
         
-        if arquivo:
-            try:
-                with open(arquivo, 'r', encoding='utf-8') as file:
-                    reader = csv.DictReader(file)
-                    fornecedores_importados = 0
-                    
-                    for row in reader:
-                        # Validar dados obrigatórios
-                        if not row.get('empresa', '').strip():
-                            continue
-                            
-                        # Adicionar fornecedor
-                        sucesso = self.db.adicionar_fornecedor(
-                            empresa=row.get('empresa', '').strip(),
-                            representante=row.get('representante', '').strip(),
-                            frequencia_compra=row.get('frequencia_compra', '').strip(),
-                            telefone=row.get('telefone', '').strip(),
-                            email=row.get('email', '').strip(),
-                            endereco=row.get('endereco', '').strip(),
-                            contato=row.get('contato', '').strip()
-                        )
-                        
-                        if sucesso:
-                            fornecedores_importados += 1
-                    
-                    self.carregar_dados()
-                    QMessageBox.information(
-                        self, 
-                        "Importação Concluída", 
-                        f"Importados {fornecedores_importados} fornecedores com sucesso!"
-                    )
-                    
-            except Exception as e:
-                QMessageBox.critical(self, "Erro na Importação", f"Erro ao importar CSV: {str(e)}")
+        self.import_thread.start()
+        self.progress_dialog.exec_()
+    
+     # NOVO MÉTODO (adicionar abaixo de importar_csv)
+    def importacao_concluida(self, importados, erros, detalhes_erros):
+        self.progress_dialog.close()
+        self.carregar_dados() # Recarrega tudo
+        
+        mensagem = f"Importação concluída!\n\n- Fornecedores importados: {importados}\n- Linhas com erro: {erros}"
+        
+        if erros > 0:
+            mensagem += "\n\n" + "\n".join(detalhes_erros[:5])
+            AlertDialog(self, "Importação com Erros", mensagem, alert_type='warning', theme_colors=self.theme_colors).exec_()
+        else:
+            AlertDialog(self, "Importação Concluída", mensagem, alert_type='success', theme_colors=self.theme_colors).exec_()
+
+    # NOVO MÉTODO (adicionar abaixo de importacao_concluida)
+    def cancelar_importacao(self):
+        if hasattr(self, 'import_thread') and self.import_thread.isRunning():
+            self.import_thread.terminate()
+            AlertDialog(self, "Cancelado", "A importação foi cancelada pelo usuário.", alert_type='info', theme_colors=self.theme_colors).exec_()
+
     
     def exportar_csv(self):
-        """Exporta fornecedores para um arquivo CSV."""
-        arquivo, _ = QFileDialog.getSaveFileName(
-            self, 
-            "Exportar Fornecedores CSV", 
-            f"fornecedores_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", 
-            "CSV Files (*.csv)"
-        )
-        
-        if arquivo:
-            try:
-                fornecedores = self.db.listar_fornecedores()
+        arquivo, _ = QFileDialog.getSaveFileName(self, "Exportar Fornecedores CSV", f"fornecedores_{datetime.now().strftime('%Y%m%d')}.csv", "CSV Files (*.csv)")
+        if not arquivo:
+            return
+            
+        try:
+            fornecedores = self.db.listar_fornecedores()
+            if not fornecedores:
+                AlertDialog(self, "Exportar", "Não há fornecedores para exportar.", alert_type='info', theme_colors=self.theme_colors).exec_()
+                return
+
+            with open(arquivo, 'w', newline='', encoding='utf-8') as file:
+                fieldnames = ['empresa', 'representante', 'frequencia_compra', 'telefone', 'email', 'endereco', 'contato']
+                writer = csv.DictWriter(file, fieldnames=fieldnames)
+                writer.writeheader()
+                for f in fornecedores:
+                    writer.writerow({k: f.get(k, '') for k in fieldnames})
+            
+            AlertDialog(self, "Exportação Concluída", f"Fornecedores exportados com sucesso para:\n{arquivo}", alert_type='success', theme_colors=self.theme_colors).exec_()
                 
-                with open(arquivo, 'w', newline='', encoding='utf-8') as file:
-                    fieldnames = ['empresa', 'representante', 'frequencia_compra', 'telefone', 'email', 'endereco', 'contato']
-                    writer = csv.DictWriter(file, fieldnames=fieldnames)
-                    
-                    writer.writeheader()
-                    
-                    for fornecedor in fornecedores:
-                        writer.writerow({
-                            'empresa': fornecedor['empresa'],
-                            'representante': fornecedor['representante'] or '',
-                            'frequencia_compra': fornecedor['frequencia_compra'] or '',
-                            'telefone': fornecedor['telefone'] or '',
-                            'email': fornecedor['email'] or '',
-                            'endereco': fornecedor['endereco'] or '',
-                            'contato': fornecedor['contato'] or ''
-                        })
-                
-                QMessageBox.information(
-                    self, 
-                    "Exportação Concluída", 
-                    f"Fornecedores exportados para: {arquivo}"
-                )
-                
-            except Exception as e:
-                QMessageBox.critical(self, "Erro na Exportação", f"Erro ao exportar CSV: {str(e)}")
+        except Exception as e:
+            AlertDialog(self, "Erro na Exportação", f"Ocorreu um erro ao exportar o arquivo:\n{e}", alert_type='error', theme_colors=self.theme_colors).exec_()
     
     def verificar_estoque_baixo(self):
         produtos_baixo = self.db.verificar_produtos_estoque_baixo()
@@ -597,33 +728,27 @@ Atenciosamente,
         self.tabela_fornecedores.resizeRowsToContents()
 
     def enviar_emails(self):
-        """Envia emails APENAS para os fornecedores selecionados."""
         usuario = self.email_usuario.text().strip()
         senha = self.email_senha.text().strip()
         
         if not usuario or not senha:
-            QMessageBox.warning(self, "Credenciais Faltando", "Por favor, preencha seu e-mail e senha para enviar.")
+            AlertDialog(self, "Credenciais Faltando", "Por favor, preencha seu e-mail e senha para enviar.", alert_type='warning', theme_colors=self.theme_colors).exec_()
             return
 
         smtp_config = self.settings.get_smtp_config()
         if not smtp_config or not smtp_config.get('host') or not smtp_config.get('port'):
-            QMessageBox.critical(self, "Erro de Configuração", "As configurações de servidor SMTP não foram encontradas. Por favor, configure-as na janela de Configurações.")
+            AlertDialog(self, "Erro de Configuração", "As configurações de servidor SMTP não foram encontradas.", alert_type='error', theme_colors=self.theme_colors).exec_()
             return
 
-        fornecedores_selecionados = []
-        for i in range(self.tabela_fornecedores.rowCount()):
-            checkbox = self.tabela_fornecedores.cellWidget(i, 0).layout().itemAt(0).widget()
-            if checkbox.isChecked():
-                nome_fornecedor = self.tabela_fornecedores.item(i, 1).text()
-                fornecedores_selecionados.append(nome_fornecedor)
-
+        fornecedores_selecionados = [self.tabela_fornecedores.item(i, 1).text() for i in range(self.tabela_fornecedores.rowCount()) if self.tabela_fornecedores.cellWidget(i, 0).layout().itemAt(0).widget().isChecked()]
+        
         if not fornecedores_selecionados:
-            QMessageBox.warning(self, "Nenhuma Seleção", "Por favor, selecione pelo menos um fornecedor para notificar.")
+            AlertDialog(self, "Nenhuma Seleção", "Por favor, selecione pelo menos um fornecedor para notificar.", alert_type='warning', theme_colors=self.theme_colors).exec_()
             return
 
-        progress = QProgressDialog("Enviando e-mails...", "Cancelar", 0, len(fornecedores_selecionados), self)
-        progress.setWindowModality(Qt.WindowModal)
+        progress = ThemedProgressDialog(self, "Enviando E-mails", "Conectando ao servidor...", self.theme_colors)
         progress.show()
+        QApplication.processEvents() # Garante que o diálogo apareça
 
         try:
             server = smtplib.SMTP(smtp_config['host'], smtp_config['port'])
@@ -631,50 +756,30 @@ Atenciosamente,
             server.login(usuario, senha)
             
             enviados, falhas = 0, 0
-            
             for i, nome_fornecedor in enumerate(fornecedores_selecionados):
-                progress.setValue(i)
-                if progress.wasCanceled():
-                    break
-
+                progress.setValue(int((i / len(fornecedores_selecionados)) * 100))
                 email_fornecedor = self.obter_email_fornecedor(nome_fornecedor)
                 if not email_fornecedor:
-                    falhas += 1
-                    continue
-
-                # Monta a lista de produtos para este fornecedor
-                produtos = self.produtos_por_fornecedor[nome_fornecedor]
-                lista_produtos_str = ""
-                for p in produtos:
-                    lista_produtos_str += f"  • {p['nome']} (Estoque atual: {p['quantidade']})\n"
-
-                # Personaliza o corpo do e-mail
-                corpo_final = self.corpo_email.toPlainText().format(
-                    fornecedor_nome=nome_fornecedor,
-                    lista_produtos=lista_produtos_str
-                )
+                    falhas += 1; continue
                 
-                msg = MIMEMultipart()
-                msg['From'] = usuario
-                msg['To'] = email_fornecedor
-                msg['Subject'] = self.assunto_email.text()
+                produtos = self.produtos_por_fornecedor[nome_fornecedor]
+                lista_produtos_str = "".join([f"  • {p['nome']} (Estoque: {p['quantidade']})\n" for p in produtos])
+                corpo_final = self.corpo_email.toPlainText().format(fornecedor_nome=nome_fornecedor, lista_produtos=lista_produtos_str)
+                
+                msg = MIMEMultipart(); msg['From'] = usuario; msg['To'] = email_fornecedor; msg['Subject'] = self.assunto_email.text()
                 msg.attach(MIMEText(corpo_final, 'plain'))
                 
                 try:
-                    server.sendmail(usuario, email_fornecedor, msg.as_string())
-                    enviados += 1
-                except Exception as e:
-                    print(f"Erro ao enviar para {nome_fornecedor}: {e}")
-                    falhas += 1
+                    server.sendmail(usuario, email_fornecedor, msg.as_string()); enviados += 1
+                except Exception: falhas += 1
             
             server.quit()
-            progress.setValue(len(fornecedores_selecionados))
-            QMessageBox.information(self, "Envio Concluído", f"E-mails enviados com sucesso: {enviados}\nFalhas: {falhas}")
+            progress.close()
+            AlertDialog(self, "Envio Concluído", f"E-mails enviados com sucesso: {enviados}\nFalhas: {falhas}", alert_type='success', theme_colors=self.theme_colors).exec_()
 
         except Exception as e:
-            QMessageBox.critical(self, "Erro de Conexão", f"Não foi possível conectar ao servidor de e-mail: {e}")
-        finally:
             progress.close()
+            AlertDialog(self, "Erro de Conexão", f"Não foi possível conectar ou enviar e-mails:\n{e}", alert_type='error', theme_colors=self.theme_colors).exec_()
 
     def apply_styles(self):
         # O mesmo estilo do FormularioFornecedor para consistência
@@ -842,36 +947,33 @@ class FormularioFornecedor(QDialog):
         self.contato_input.setText(self.fornecedor['contato'] or "")
     
     def salvar_fornecedor(self):
-        """Salva os dados do fornecedor no banco de dados."""
         if not self.empresa_input.text().strip():
-            QMessageBox.warning(self, "Erro", "O nome da empresa é obrigatório!")
+            AlertDialog(self, "Campo Obrigatório", "O nome da empresa é obrigatório!", alert_type='warning', theme_colors=self.theme_colors).exec_()
             return
         
-        empresa = self.empresa_input.text().strip()
-        representante = self.representante_input.text().strip()
-        frequencia_compra = self.frequencia_input.currentText()
-        telefone = self.telefone_input.text().strip()
-        email = self.email_input.text().strip()
-        endereco = self.endereco_input.text().strip()
-        contato = self.contato_input.text().strip()
+        dados = {
+            'empresa': self.empresa_input.text().strip(),
+            'representante': self.representante_input.text().strip(),
+            'frequencia_compra': self.frequencia_input.currentText(),
+            'telefone': self.telefone_input.text().strip(),
+            'email': self.email_input.text().strip(),
+            'endereco': self.endereco_input.text().strip(),
+            'contato': self.contato_input.text().strip()
+        }
         
         try:
             if self.fornecedor_id:
-                sucesso = self.db.atualizar_fornecedor(
-                    self.fornecedor_id, empresa, representante, frequencia_compra, telefone, email, endereco, contato
-                )
+                sucesso = self.db.atualizar_fornecedor(self.fornecedor_id, **dados)
                 mensagem = "Fornecedor atualizado com sucesso!"
             else:
-                sucesso = self.db.adicionar_fornecedor(
-                    empresa, representante, frequencia_compra, telefone, email, endereco, contato
-                )
+                sucesso = self.db.adicionar_fornecedor(**dados)
                 mensagem = "Fornecedor cadastrado com sucesso!"
             
             if sucesso:
-                QMessageBox.information(self, "Sucesso", mensagem)
+                AlertDialog(self, "Sucesso", mensagem, alert_type='success', theme_colors=self.theme_colors).exec_()
                 self.accept()
             else:
-                QMessageBox.warning(self, "Erro", "Não foi possível salvar o fornecedor.")
+                AlertDialog(self, "Erro", "Não foi possível salvar o fornecedor.", alert_type='error', theme_colors=self.theme_colors).exec_()
         
         except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Erro ao salvar fornecedor: {str(e)}")
+            AlertDialog(self, "Erro Crítico", f"Ocorreu um erro inesperado ao salvar:\n{e}", alert_type='error', theme_colors=self.theme_colors).exec_()

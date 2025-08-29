@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdi
                            QPushButton, QTableWidget, QTableWidgetItem, QFormLayout,
                            QDateEdit, QComboBox, QMessageBox, QHeaderView, QSpinBox,
                            QDoubleSpinBox, QDialog, QFrame, QToolButton, QGroupBox,
-                           QFileDialog, QCheckBox, QProgressDialog, QGridLayout)
+                           QFileDialog, QCheckBox, QProgressDialog, QGridLayout, QProgressBar)
 from PyQt5.QtCore import Qt, QDate, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QIcon, QColor, QBrush, QPixmap
 import os
@@ -22,31 +22,34 @@ from database.db_manager import DatabaseManager
 
 # Coloque esta nova classe no início do arquivo estoque_window.py
 
-class CustomMessageBox(QDialog):
-    """Um QMessageBox customizado e temático."""
-    def __init__(self, parent, title, message, theme_colors, msg_type='info', buttons=QMessageBox.Ok):
+# Coloque esta nova classe no início do seu arquivo estoque_window.py
+# (Substitua a classe CustomMessageBox existente)
+
+# Cole esta classe no início do seu arquivo ui/estoque_window.py, 
+# substituindo a versão anterior da AlertDialog.
+
+class AlertDialog(QDialog):
+    """Caixa de diálogo com o estilo sutil da tela de perfil."""
+    def __init__(self, parent, title, message, alert_type='info', buttons=QMessageBox.Ok, theme_colors=None):
         super().__init__(parent)
-        self.theme_colors = theme_colors
+        self.theme_colors = theme_colors if theme_colors is not None else {}
         self.drag_position = None
 
-        # Configurações da janela
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setModal(True)
 
-        # Determina o ícone e a cor de destaque com base no tipo de mensagem
         type_info = {
-            'info':     {'icon': 'check_stock', 'color': theme_colors['accent_color']},
             'success':  {'icon': 'check', 'color': '#28a745'},
             'warning':  {'icon': 'estoque_baixo', 'color': '#ffc107'},
             'error':    {'icon': 'delete', 'color': '#dc3545'},
-            'question': {'icon': 'sobre', 'color': '#17a2b8'},
-        }.get(msg_type, 'info')
+            'question': {'icon': 'question', 'color': '#17a2b8'},
+            'info':     {'icon': 'sobre', 'color': self.theme_colors.get('accent_color', '#007AFF')},
+        }.get(alert_type, {'icon': 'sobre', 'color': '#007AFF'})
 
         self.accent_color = type_info['color']
         self.icon_name = type_info['icon']
         
-        # UI
         self._setup_ui(title, message, buttons)
 
     def _setup_ui(self, title, message, buttons):
@@ -59,47 +62,61 @@ class CustomMessageBox(QDialog):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Cabeçalho
+        # Cabeçalho Sutil
         self.header = QFrame(); self.header.setObjectName("header")
         header_layout = QHBoxLayout(self.header)
-        icon_label = QLabel()
-        icon_label.setPixmap(IconManager.get_icon(self.icon_name, color='white').pixmap(18, 18))
-        title_label = QLabel(title)
-        title_label.setObjectName("titleLabel")
-        close_button = QPushButton(); close_button.setObjectName("controlButton")
-        close_button.setIcon(IconManager.get_icon('fechar', color=self.theme_colors['text_secondary']))
+        header_layout.setContentsMargins(20, 15, 10, 15)
+        
+        header_title_label = QLabel(title)
+        header_title_label.setObjectName("headerTitleLabel")
+        
+        close_button = QPushButton()
+        close_button.setObjectName("controlButton")
+        close_button.setFixedSize(28, 28)
+        close_button.setIcon(IconManager.get_icon('fechar', color=self.theme_colors.get('text_secondary', '#666')))
         close_button.clicked.connect(self.reject)
-        header_layout.addWidget(icon_label); header_layout.addWidget(title_label); header_layout.addStretch(); header_layout.addWidget(close_button)
+        
+        header_layout.addWidget(header_title_label)
+        header_layout.addStretch()
+        header_layout.addWidget(close_button)
         main_layout.addWidget(self.header)
 
         # Corpo
         body = QWidget()
         body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(20, 20, 20, 25)
-        message_label = QLabel(message); message_label.setWordWrap(True); message_label.setObjectName("messageLabel")
-        body_layout.addWidget(message_label)
-        main_layout.addWidget(body)
+        body_layout.setContentsMargins(25, 20, 25, 25)
+        body_layout.setSpacing(20)
 
-        # Rodapé (Botões)
-        footer = QFrame(); footer.setObjectName("footer")
-        footer_layout = QHBoxLayout(footer)
-        footer_layout.addStretch()
+        # Ícone e Subtítulo
+        subtitle_layout = QHBoxLayout()
+        icon_label = QLabel()
+        icon_label.setPixmap(IconManager.get_icon(self.icon_name, color=self.accent_color).pixmap(24, 24))
+        subtitle_label = QLabel(title)
+        subtitle_label.setObjectName("subtitleLabel")
+        subtitle_layout.addWidget(icon_label)
+        subtitle_layout.addWidget(subtitle_label)
+        subtitle_layout.addStretch()
         
-        # Adiciona botões dinamicamente
-        if buttons & QMessageBox.Ok:
-            ok_btn = self._create_button("OK", self.accept, is_primary=True)
-            footer_layout.addWidget(ok_btn)
+        # Mensagem Principal
+        message_label = QLabel(message); message_label.setWordWrap(True); message_label.setObjectName("messageLabel")
+        
+        # Botões
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
         if buttons & QMessageBox.Yes:
-            yes_btn = self._create_button("Sim", lambda: self.done(QMessageBox.Yes), is_primary=True)
-            footer_layout.addWidget(yes_btn)
+            button_layout.addWidget(self._create_button("Sim", lambda: self.done(QMessageBox.Yes), is_primary=True))
+        if buttons & QMessageBox.Ok:
+            button_layout.addWidget(self._create_button("OK", self.accept, is_primary=True))
         if buttons & QMessageBox.No:
-            no_btn = self._create_button("Não", lambda: self.done(QMessageBox.No))
-            footer_layout.addWidget(no_btn)
+            button_layout.addWidget(self._create_button("Não", self.reject))
         if buttons & QMessageBox.Cancel:
-            cancel_btn = self._create_button("Cancelar", self.reject)
-            footer_layout.addWidget(cancel_btn)
-
-        main_layout.addWidget(footer)
+            button_layout.addWidget(self._create_button("Cancelar", self.reject))
+        
+        body_layout.addLayout(subtitle_layout)
+        body_layout.addWidget(message_label)
+        body_layout.addLayout(button_layout)
+        main_layout.addWidget(body)
         
         base_layout = QVBoxLayout(self)
         base_layout.addWidget(container)
@@ -108,36 +125,132 @@ class CustomMessageBox(QDialog):
     def _create_button(self, text, on_click, is_primary=False):
         btn = QPushButton(text)
         btn.clicked.connect(on_click)
+        btn.setCursor(Qt.PointingHandCursor)
         btn.setObjectName("primaryButton" if is_primary else "secondaryButton")
         return btn
         
     def apply_styles(self):
         colors = self.theme_colors
         style = f"""
-            #mainContainer {{ background-color: {colors['surface_color']}; border-radius: 12px; border: 1px solid {colors['border_color']}; }}
-            #header {{ background-color: {self.accent_color}; border-top-left-radius: 11px; border-top-right-radius: 11px; padding: 8px 12px; }}
-            #titleLabel {{ color: white; font-weight: bold; font-size: 11pt; }}
-            #messageLabel {{ color: {colors['text_color']}; font-size: 11pt; }}
-            #controlButton {{ background: transparent; border: none; padding: 4px; border-radius: 4px; }}
-            #controlButton:hover {{ background-color: rgba(255, 255, 255, 0.2); }}
-            #footer {{ background-color: {colors['bg_color']}; border-bottom-left-radius: 11px; border-bottom-right-radius: 11px; padding: 10px; border-top: 1px solid {colors['border_color']}; }}
-            QPushButton {{ font-weight: bold; padding: 8px 20px; border-radius: 6px; }}
+            #mainContainer {{ background-color: {colors.get('surface_color', '#fff')}; border-radius: 12px; border: 1px solid {colors.get('border_color', '#ccc')}; }}
+            #header {{ border-bottom: 1px solid {colors.get('border_color', '#ccc')}; }}
+            #headerTitleLabel {{ color: {colors.get('text_color', '#000')}; font-weight: bold; }}
+            #subtitleLabel {{ color: {colors.get('text_color', '#000')}; font-size: 14pt; font-weight: bold; }}
+            #messageLabel {{ color: {colors.get('text_secondary', '#333')}; font-size: 11pt; }}
+            #controlButton {{ background: transparent; border: none; border-radius: 14px; }}
+            #controlButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }}
+            QPushButton {{ font-weight: bold; padding: 10px 25px; border-radius: 8px; min-width: 90px;}}
             #primaryButton {{ background-color: {self.accent_color}; color: white; border: none; }}
-            #secondaryButton {{ background-color: {colors['surface_color']}; color: {colors['text_color']}; border: 1px solid {colors['border_color']}; }}
-            #secondaryButton:hover {{ border-color: {colors['text_secondary']}; }}
+            #secondaryButton {{ background-color: transparent; color: {colors.get('text_color', '#000')}; border: 1px solid {colors.get('border_color', '#ccc')}; }}
+            #secondaryButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }}
         """
         self.setStyleSheet(style)
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton and self.header.underMouse():
-            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+        if event.button() == Qt.LeftButton: self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
     def mouseMoveEvent(self, event):
-        if self.drag_position and event.buttons() == Qt.LeftButton:
-            self.move(event.globalPos() - self.drag_position)
+        if self.drag_position and event.buttons() == Qt.LeftButton: self.move(event.globalPos() - self.drag_position)
+
+# Adicione esta importação extra no topo do seu arquivo, junto com as outras
+from PyQt5.QtWidgets import QProgressBar
+
+# Cole esta nova classe abaixo da classe AlertDialog
+class ThemedProgressDialog(QDialog):
+    """Um diálogo de progresso customizado e temático."""
+    canceled = pyqtSignal()
+
+    def __init__(self, parent, title, message, theme_colors):
+        super().__init__(parent)
+        self.theme_colors = theme_colors if theme_colors is not None else {}
+        self.drag_position = None
+
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(True)
+
+        self._setup_ui(title, message)
+        self.apply_styles()
+
+    def _setup_ui(self, title, message):
+        self.setMinimumWidth(400)
+        
+        container = QFrame(self)
+        container.setObjectName("mainContainer")
+        
+        main_layout = QVBoxLayout(container)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Cabeçalho
+        self.header = QFrame(); self.header.setObjectName("header")
+        header_layout = QHBoxLayout(self.header)
+        header_layout.setContentsMargins(20, 15, 10, 15)
+        title_label = QLabel(title); title_label.setObjectName("headerTitleLabel")
+        header_layout.addWidget(title_label)
+        main_layout.addWidget(self.header)
+
+        # Corpo
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(25, 20, 25, 25)
+        body_layout.setSpacing(15)
+
+        message_label = QLabel(message); message_label.setWordWrap(True); message_label.setObjectName("messageLabel")
+        
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setAlignment(Qt.AlignCenter)
+        
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        cancel_button = QPushButton("Cancelar")
+        cancel_button.setObjectName("secondaryButton")
+        cancel_button.setCursor(Qt.PointingHandCursor)
+        cancel_button.clicked.connect(self.reject) # Usar reject para fechar e sinalizar
+        button_layout.addWidget(cancel_button)
+
+        body_layout.addWidget(message_label)
+        body_layout.addWidget(self.progress_bar)
+        body_layout.addLayout(button_layout)
+        main_layout.addWidget(body)
+        
+        base_layout = QVBoxLayout(self)
+        base_layout.addWidget(container)
+
+    def apply_styles(self):
+        colors = self.theme_colors
+        style = f"""
+            #mainContainer {{ background-color: {colors.get('surface_color', '#fff')}; border-radius: 12px; border: 1px solid {colors.get('border_color', '#ccc')}; }}
+            #header {{ border-bottom: 1px solid {colors.get('border_color', '#ccc')}; }}
+            #headerTitleLabel {{ color: {colors.get('text_color', '#000')}; font-weight: bold; }}
+            #messageLabel {{ color: {colors.get('text_secondary', '#333')}; font-size: 11pt; }}
+            QPushButton#secondaryButton {{ font-weight: bold; padding: 10px 25px; border-radius: 8px; background-color: transparent; color: {colors.get('text_color', '#000')}; border: 1px solid {colors.get('border_color', '#ccc')}; }}
+            QPushButton#secondaryButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }}
+            QProgressBar {{ border: 1px solid {colors.get('border_color', '#ccc')}; border-radius: 8px; padding: 1px; text-align: center; background-color: {colors.get('bg_color', '#eee')}; color: {colors.get('text_color', '#000')}; }}
+            QProgressBar::chunk {{ background-color: {colors.get('accent_color', '#007AFF')}; border-radius: 7px; }}
+        """
+        self.setStyleSheet(style)
+
+    def setValue(self, value):
+        self.progress_bar.setValue(value)
+
+    def reject(self):
+        self.canceled.emit() # Emite o sinal de cancelamento
+        super().reject() # Fecha a janela
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton: self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton: self.move(event.globalPos() - self.drag_position)
 
 # ================================================================= #
 #       CLASSE CSV IMPORT WORKER TOTALMENTE IMPLEMENTADA            #
 # ================================================================= #
+# ================================================================= #
+#       CLASSE CSV IMPORT WORKER - CORREÇÃO FINAL (FLOAT)           #
+# ================================================================= #
+# Substitua a sua classe CsvImportWorker inteira por esta
+
 class CsvImportWorker(QThread):
     """
     Executa a importação de CSV em uma thread para não congelar a UI.
@@ -145,12 +258,11 @@ class CsvImportWorker(QThread):
     progress = pyqtSignal(int)
     finished = pyqtSignal(int, int, list)
 
-    # MUDANÇA 1: O __init__ agora recebe db_path em vez de um objeto db
     def __init__(self, db_path, file_path):
         super().__init__()
         self.db_path = db_path
         self.file_path = file_path
-        self.local_db = None # Será a nossa conexão local
+        self.local_db = None
 
     def run(self):
         produtos_importados = 0
@@ -158,19 +270,15 @@ class CsvImportWorker(QThread):
         erros_detalhes = []
 
         try:
-            # MUDANÇA 2: Crie uma nova instância do DatabaseManager DENTRO da thread.
-            # Isso cria uma nova conexão que pertence a ESTA thread.
             self.local_db = DatabaseManager(self.db_path)
 
             with open(self.file_path, 'r', encoding='utf-8') as f:
-                # Corrigindo um potencial erro se o arquivo estiver vazio
                 linhas = list(f)
                 total_linhas = max(1, len(linhas) - 1)
 
             with open(self.file_path, 'r', encoding='utf-8') as csvfile:
                 reader = csv.DictReader(csvfile)
                 
-                # MUDANÇA 3: Use a conexão local (local_db) para todas as operações
                 self.local_db.begin_transaction() 
 
                 for i, row in enumerate(reader):
@@ -178,32 +286,29 @@ class CsvImportWorker(QThread):
                         if not row.get('nome', '').strip():
                             raise ValueError("Nome do produto é obrigatório")
 
-                        # Adapte esta parte para usar os métodos de extração que você já tem
-                        # (tornando-os estáticos ou recriando a lógica aqui)
-                        preco_compra = self._extrair_preco(row.get('preco_compra', '0'))
-                        preco_venda = self._extrair_preco(row.get('preco_venda', '0'))
-                        margem_lucro = self._extrair_margem(row.get('margem', '0'))
-                        quantidade = self._extrair_quantidade_do_estoque_detalhado(row.get('estoque_detalhado', '0'))
-                        data_validade = self._formatar_data_validade(row.get('validade', ''))
-
+                        is_fracionado = int(row.get('fracionado', '0') or 0)
+                        
                         produto_data = {
                             'codigo_barras': row.get('codigo_barras', '').strip(),
                             'nome': row.get('nome', '').strip(),
                             'descricao': row.get('descricao', ''),
-                            'quantidade': quantidade,
+                            'quantidade': self._extrair_quantidade_do_estoque_detalhado(row.get('estoque_detalhado', '0')),
                             'estoque_minimo': int(row.get('estoque_minimo', '0') or 0),
-                            'preco_compra': preco_compra,
-                            'margem_lucro': margem_lucro,
-                            'preco_venda': preco_venda,
-                            'data_validade': data_validade,
+                            'preco_compra': self._extrair_preco(row.get('preco_compra', '0')),
+                            'margem_lucro': self._extrair_margem(row.get('margem', '0')),
+                            'preco_venda': self._extrair_preco(row.get('preco_venda', '0')),
+                            'data_validade': self._formatar_data_validade(row.get('validade', '')),
                             'localizacao': row.get('localizacao', '').strip() or None,
                             'fornecedor_id': None,
                             'categoria': row.get('categoria', '').strip() or None,
-                            'fracionado': 0,
-                            'unidade_medida': 'unidade',
-                            'qtd_por_embalagem': 1,
-                            'preco_unitario_fracao': 0,
-                            'estoque_fracionado': 0
+                            'fracionado': is_fracionado,
+                            'unidade_medida': row.get('unidade_medida', 'unidade').strip() if is_fracionado else 'unidade',
+                            'qtd_por_embalagem': int(row.get('qtd_por_embalagem', '1') or 1) if is_fracionado else 1,
+                            'preco_unitario_fracao': self._extrair_preco(row.get('preco_unitario_fracao', '0')) if is_fracionado else 0.0,
+                            
+                            # --- A CORREÇÃO ESTÁ AQUI ---
+                            # Trocamos int() por float() para aceitar números decimais como 0.5
+                            'estoque_fracionado': float(row.get('estoque_fracionado', '0.0') or 0.0) if is_fracionado else 0.0
                         }
                         
                         produto_existente = None
@@ -213,16 +318,14 @@ class CsvImportWorker(QThread):
                             produto_existente = self.local_db.buscar_produto_por_nome_exato(produto_data['nome'])
 
                         if produto_existente:
-                            # A sua função de atualizar espera os parâmetros um por um
                             self.local_db.atualizar_produto(produto_existente['id'], **produto_data)
                         else:
-                            # A sua função de adicionar espera os parâmetros um por um
                             self.local_db.adicionar_produto(**produto_data)
                         
                         produtos_importados += 1
                     except Exception as e:
                         produtos_erro += 1
-                        erros_detalhes.append(f"Linha {i+2}: {str(e)}")
+                        erros_detalhes.append(f"Linha {i+2}: {row.get('nome', 'N/A')} - {str(e)}")
                     
                     self.progress.emit(int(((i + 1) / total_linhas) * 100))
                 
@@ -233,13 +336,12 @@ class CsvImportWorker(QThread):
                 self.local_db.rollback_transaction()
             erros_detalhes.append(f"Erro geral: {str(e)}")
         finally:
-            # MUDANÇA 4: Garanta que a conexão local seja fechada
             if self.local_db:
                 self.local_db.fechar()
 
         self.finished.emit(produtos_importados, produtos_erro, erros_detalhes)
     
-    # Copiei seus métodos de extração aqui para a lógica funcionar
+    # Métodos auxiliares (sem alterações)
     def _extrair_quantidade_do_estoque_detalhado(self, estoque_str):
         try:
             if estoque_str.isdigit(): return int(estoque_str)
@@ -714,18 +816,20 @@ class EstoqueWindow(QWidget):
             self.dados_produtos_alterados.emit()
     
     def excluir_produto(self, produto_id):
-        dialog = CustomMessageBox(self, "Confirmar Exclusão", 
+        # Chamada corrigida
+        dialog = AlertDialog(self, "Confirmar Exclusão", 
                                 "Tem certeza que deseja excluir este produto?\nEsta ação não pode ser desfeita.",
-                                self.theme_colors, 'question', QMessageBox.Yes | QMessageBox.No)
-        confirmacao = dialog.exec_()
+                                alert_type='question', buttons=QMessageBox.Yes | QMessageBox.No, theme_colors=self.theme_colors)
         
-        if confirmacao == QMessageBox.Yes:
+        if dialog.exec_() == QMessageBox.Yes:
             if self.db.excluir_produto(produto_id):
-                CustomMessageBox(self, "Sucesso", "Produto excluído com sucesso!", self.theme_colors, 'success').exec_()
+                # Chamada corrigida
+                AlertDialog(self, "Sucesso", "Produto excluído com sucesso!", alert_type='success', theme_colors=self.theme_colors).exec_()
                 self.carregar_dados()
                 self.dados_produtos_alterados.emit()
             else:
-                CustomMessageBox(self, "Erro", "Não foi possível excluir o produto.", self.theme_colors, 'error').exec_()
+                # Chamada corrigida
+                AlertDialog(self, "Erro", "Não foi possível excluir o produto.", alert_type='error', theme_colors=self.theme_colors).exec_()
     
     # ===================================================================== #
     #       NOVAS FUNÇÕES DE RELATÓRIO (AVANÇADAS E PROFISSIONAIS)        #
@@ -815,22 +919,32 @@ class EstoqueWindow(QWidget):
             
             doc.build(elementos, onFirstPage=header_footer, onLaterPages=header_footer)
             
-            CustomMessageBox(self, "Sucesso", f"Relatório salvo com sucesso em:\n{file_path}", self.theme_colors, 'success').exec_()
+             # --- CORREÇÃO APLICADA AQUI ---
+            AlertDialog(self, "Sucesso", f"Relatório salvo com sucesso em:\n{file_path}", 
+                        alert_type='success', theme_colors=self.theme_colors).exec_()
 
         except FileNotFoundError:
-            CustomMessageBox(self, "Erro de Logo", f"Arquivo de logo não encontrado em:\n{self.logo_path}", self.theme_colors, 'error').exec_()
+            # --- CORREÇÃO APLICADA AQUI ---
+            AlertDialog(self, "Erro de Logo", f"Arquivo de logo não encontrado em:\n{self.logo_path}", 
+                        alert_type='error', theme_colors=self.theme_colors).exec_()
         except Exception as e:
-            CustomMessageBox(self, "Erro ao Gerar PDF", f"Ocorreu um erro inesperado: {str(e)}", self.theme_colors, 'error').exec_()
+            # --- CORREÇÃO APLICADA AQUI ---
+            AlertDialog(self, "Erro ao Gerar PDF", f"Ocorreu um erro inesperado: {str(e)}", 
+                        alert_type='error', theme_colors=self.theme_colors).exec_()
 
     def relatorio_vencimentos(self):
         produtos = self.db.verificar_produtos_vencendo(dias=30)
         if not produtos:
-            CustomMessageBox(self, "Relatório", "Não há produtos vencendo nos próximos 30 dias.", self.theme_colors, 'info').exec_()
+            # --- CORREÇÃO APLICADA AQUI ---
+            AlertDialog(self, "Relatório", "Não há produtos vencendo nos próximos 30 dias.", 
+                        alert_type='info', theme_colors=self.theme_colors).exec_()
             return
 
         file_path, _ = QFileDialog.getSaveFileName(self, "Salvar Relatório de Vencimentos", os.path.expanduser("~/relatorio_vencimentos.pdf"), "PDF Files (*.pdf)")
         if file_path:
             self.gerar_pdf_vencimentos(produtos, file_path)
+
+    # Substitua este método inteiro na classe EstoqueWindow
 
     def gerar_pdf_vencimentos(self, produtos, file_path):
         styles = getSampleStyleSheet()
@@ -847,15 +961,14 @@ class EstoqueWindow(QWidget):
         valor_custo_risco = sum(p['quantidade'] * (p['preco_compra'] or 0) for p in produtos)
         produto_mais_critico = min(produtos, key=lambda p: (datetime.strptime(p['data_validade'], "%Y-%m-%d").date() - hoje).days)
 
-        # --- Definição de Largura e Criação dos KPIs ---
-        left_margin = 2*cm
-        right_margin = 2*cm
+        left_margin, right_margin = 2*cm, 2*cm
         doc_width = A4[0] - left_margin - right_margin
         
+        # --- CORREÇÃO 1: Usando a função de formatação de moeda no KPI ---
         kpi_data = [
             {'label': 'PRODUTOS MAPEADOS', 'value': str(len(produtos))},
             {'label': 'UNIDADES EM RISCO', 'value': str(total_unidades)},
-            {'label': 'VALOR DE CUSTO EM RISCO', 'value': f"R$ {valor_custo_risco:.2f}"},
+            {'label': 'VALOR DE CUSTO EM RISCO', 'value': f"R$ {self._format_currency_brl(valor_custo_risco)}"},
             {'label': 'ITEM MAIS CRÍTICO', 'value': Paragraph(produto_mais_critico['nome'], styles['Normal'])}
         ]
         elementos.append(self._criar_kpi_boxes(kpi_data, doc_width))
@@ -870,15 +983,19 @@ class EstoqueWindow(QWidget):
             data_validade = datetime.strptime(p['data_validade'], "%Y-%m-%d").date()
             dias_para_vencer = (data_validade - hoje).days
             data.append([
-                Paragraph(p['nome'], styles['Normal']), data_validade.strftime("%d/%m/%Y"), str(dias_para_vencer),
-                str(p['quantidade']), f"R$ {p['preco_compra'] or 0:.2f}", Paragraph(p['fornecedor_nome'] or "N/A", styles['Normal'])
+                Paragraph(p['nome'], styles['Normal']), 
+                data_validade.strftime("%d/%m/%Y"), 
+                str(dias_para_vencer),
+                str(p['quantidade']), 
+                # --- CORREÇÃO 2: Usando a função de formatação de moeda na tabela ---
+                f"R$ {self._format_currency_brl(p['preco_compra'] or 0)}", 
+                Paragraph(p['fornecedor_nome'] or "N/A", styles['Normal'])
             ])
         
         tabela = Table(data, colWidths=[5*cm, 2.5*cm, 2*cm, 2*cm, 2.5*cm, 3.5*cm], repeatRows=1)
         
-        # --- CORREÇÃO: Estilo da tabela simplificado e laço para a cor das linhas ---
         style = TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#002060")), # Azul escuro
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#002060")),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
@@ -888,36 +1005,46 @@ class EstoqueWindow(QWidget):
         ])
         tabela.setStyle(style)
 
-        # Adiciona o estilo de zebra e cores de alerta de forma segura
-        for i in range(1, len(data)): # Começa em 1 para pular o cabeçalho
-            # Cor da zebra
+        for i in range(1, len(data)):
             bgColor = colors.HexColor("#DDEBF7") if i % 2 != 0 else colors.white
             tabela.setStyle(TableStyle([('BACKGROUND', (0, i), (-1, i), bgColor)]))
             
-            # Cor do alerta de vencimento (sobrescreve a cor da zebra se necessário)
             dias_para_vencer = (datetime.strptime(produtos_ordenados[i-1]['data_validade'], "%Y-%m-%d").date() - hoje).days
             if dias_para_vencer <= 0:
                 tabela.setStyle(TableStyle([('BACKGROUND', (0, i), (-1, i), colors.HexColor("#FFC7CE"))]))
             elif dias_para_vencer <= 15:
-                 tabela.setStyle(TableStyle([('BACKGROUND', (0, i), (-1, i), colors.HexColor("#FFEB9C"))]))
+                tabela.setStyle(TableStyle([('BACKGROUND', (0, i), (-1, i), colors.HexColor("#FFEB9C"))]))
 
         elementos.append(tabela)
         
-        # Chama a função principal de geração de PDF
         self._gerar_pdf_com_template(file_path, "Relatório de Vencimentos", elementos)
 
     def relatorio_estoque_baixo(self):
         produtos = self.db.verificar_produtos_estoque_baixo()
         if not produtos:
-            CustomMessageBox(self, "Relatório", "Não há produtos com estoque abaixo do mínimo.", self.theme_colors, 'info').exec_()
+            # --- CORREÇÃO APLICADA AQUI ---
+            AlertDialog(self, "Relatório", "Não há produtos com estoque abaixo do mínimo.", 
+                        alert_type='info', theme_colors=self.theme_colors).exec_()
             return
 
         file_path, _ = QFileDialog.getSaveFileName(self, "Salvar Relatório de Estoque Baixo", os.path.expanduser("~/relatorio_estoque_baixo.pdf"), "PDF Files (*.pdf)")
         if file_path:
             self.gerar_pdf_estoque_baixo(produtos, file_path)
 
+    def _format_currency_brl(self, value):
+        """Formata um número float para o padrão monetário brasileiro (1.234,56)."""
+        try:
+            # Formata com vírgula como separador decimal e ponto para milhares
+            return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        except (ValueError, TypeError):
+            return "0,00"
+
+
     def gerar_pdf_estoque_baixo(self, produtos, file_path):
         styles = getSampleStyleSheet()
+        styles.add(ParagraphStyle(name='RightAlign', parent=styles['Normal'], alignment=TA_RIGHT))
+        # --- CORREÇÃO 1: Criando um novo estilo para texto centralizado ---
+        styles.add(ParagraphStyle(name='CenterAlign', parent=styles['Normal'], alignment=TA_CENTER))
         elementos = []
 
         # --- Título e Data ---
@@ -925,19 +1052,17 @@ class EstoqueWindow(QWidget):
         elementos.append(Paragraph(f"Relatório gerado em: {datetime.now().strftime('%d/%m/%Y')}", styles['Normal']))
         elementos.append(Spacer(1, 0.8 * cm))
         
-        # --- KPIs Inteligentes ---
+        # --- KPIs ---
         produtos_por_fornecedor = defaultdict(list)
         for p in produtos: produtos_por_fornecedor[p['fornecedor_nome'] or "Fornecedor Não Definido"].append(p)
         custo_reposicao = sum(p['preco_compra'] * ((p['estoque_minimo'] * 2) - p['quantidade']) for p in produtos if p['preco_compra'] and (p['estoque_minimo'] * 2) > p['quantidade'])
         
-        # Define as margens do documento aqui
-        left_margin = 2*cm
-        right_margin = 2*cm
+        left_margin, right_margin = 2*cm, 2*cm
         doc_width = A4[0] - left_margin - right_margin
 
         kpi_data = [
             {'label': 'PRODUTOS CRÍTICOS', 'value': str(len(produtos))},
-            {'label': 'CUSTO TOTAL DE REPOSIÇÃO', 'value': f"R$ {custo_reposicao:.2f}"},
+            {'label': 'CUSTO TOTAL DE REPOSIÇÃO', 'value': f"R$ {self._format_currency_brl(custo_reposicao)}"},
             {'label': 'FORNECEDORES ACIONADOS', 'value': str(len(produtos_por_fornecedor))}
         ]
         elementos.append(self._criar_kpi_boxes(kpi_data, doc_width))
@@ -957,21 +1082,32 @@ class EstoqueWindow(QWidget):
                 qtd_sugerida = max(0, (p['estoque_minimo'] * 2) - p['quantidade'])
                 custo_item = qtd_sugerida * (p['preco_compra'] or 0)
                 total_custo_fornecedor += custo_item
+                
+                # --- CORREÇÃO 2: Removendo o negrito e usando o novo estilo 'CenterAlign' ---
                 data.append([
-                    Paragraph(p['nome'], styles['Normal']), str(p['quantidade']), str(p['estoque_minimo']),
-                    f"<b>{qtd_sugerida}</b>", f"R$ {custo_item:.2f}"
+                    Paragraph(p['nome'], styles['Normal']), 
+                    str(p['quantidade']), 
+                    str(p['estoque_minimo']),
+                    Paragraph(str(qtd_sugerida), styles['CenterAlign']), # <--- MUDANÇA AQUI
+                    f"R$ {self._format_currency_brl(custo_item)}"
                 ])
             
-            # Linha de total do fornecedor
-            data.append(['', '', Paragraph("<b>Total do Pedido:</b>", styles['Normal']), '', f"<b>R$ {total_custo_fornecedor:.2f}</b>"])
+            data.append([
+                '', '', 
+                Paragraph("<b>Total do Pedido:</b>", styles['RightAlign']),
+                '', 
+                Paragraph(f"<b>R$ {self._format_currency_brl(total_custo_fornecedor)}</b>", styles['Normal'])
+            ])
 
             tabela = Table(data, colWidths=[6.5*cm, 2.5*cm, 2.5*cm, 3*cm, 3*cm], repeatRows=1)
             style = TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#4F81BD")), # Azul corporativo
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke), ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey), ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                # Estilo da linha de Total
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#4F81BD")),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke), 
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), 
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey), 
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
                 ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor("#C5D9F1")),
                 ('ALIGN', (2, -1), (2, -1), 'RIGHT'),
                 ('SPAN', (0, -1), (1, -1)),
@@ -1038,28 +1174,34 @@ class EstoqueWindow(QWidget):
         if not file_path:
             return
 
-        confirmacao = QMessageBox.question(
-            self, "Confirmar Importação",
-            "A importação será executada em segundo plano.\nDeseja continuar?",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if confirmacao != QMessageBox.Yes:
+        dialog = AlertDialog(self, "Confirmar Importação",
+                             "A importação será executada em segundo plano.\nDeseja continuar?",
+                             alert_type='question', buttons=QMessageBox.Yes | QMessageBox.No, theme_colors=self.theme_colors)
+        
+        if dialog.exec_() != QMessageBox.Yes:
             return
 
-        # Configura o diálogo de progresso
-        self.progress_dialog = QProgressDialog("Importando dados do CSV...", "Cancelar", 0, 100, self)
-        self.progress_dialog.setWindowModality(Qt.WindowModal)
-        self.progress_dialog.setAutoClose(True)
+        # --- INÍCIO DA MUDANÇA ---
+        # 1. Criamos nossa nova caixa de diálogo de progresso temática
+        self.progress_dialog = ThemedProgressDialog(self, 
+                                                    "Importando Dados", 
+                                                    "Aguarde enquanto os produtos do arquivo CSV são processados...", 
+                                                    self.theme_colors)
+        
+        # 2. Conectamos o sinal de cancelamento ao nosso slot
         self.progress_dialog.canceled.connect(self.cancelar_importacao)
 
-        # Cria e inicia a thread
+        # 3. Criamos a thread de trabalho (como antes)
         self.import_thread = CsvImportWorker(self.db.db_path, file_path)
     
+        # 4. Conectamos o progresso da thread ao método setValue do nosso diálogo
         self.import_thread.progress.connect(self.progress_dialog.setValue)
         self.import_thread.finished.connect(self.importacao_concluida)
-        self.import_thread.start()
         
-        self.progress_dialog.show()
+        # 5. Iniciamos a thread e mostramos nosso diálogo temático
+        self.import_thread.start()
+        self.progress_dialog.exec_() # Usar exec_() para que ela bloqueie a interação com a janela principal
+        # --- FIM DA MUDANÇA ---
 
     def cancelar_importacao(self):
         if self.import_thread and self.import_thread.isRunning():
@@ -1068,23 +1210,20 @@ class EstoqueWindow(QWidget):
 
     def importacao_concluida(self, importados, erros, detalhes_erros):
         self.progress_dialog.close()
-        
-        # Atualiza a visualização da própria tela de estoque
         self.atualizar_visualizacao_dados()
 
-        # <<< EMITA O SINAL SE PELO MENOS UM PRODUTO FOI IMPORTADO >>>
         if importados > 0:
-            print("DEBUG: Importação CSV de produtos concluída. Emitindo sinal 'dados_produtos_alterados'.")
+            print("DEBUG: Importação CSV concluída. Emitindo sinal 'dados_produtos_alterados'.")
             self.dados_produtos_alterados.emit()
 
-        # O resto da sua lógica de mensagem de feedback está correta
-        mensagem = f"Importação concluída!\n\n"
-        # ...
+        mensagem = f"Importação concluída!\n\n- Produtos importados/atualizados: {importados}\n- Linhas com erro: {erros}"
+        
         if erros > 0:
-            CustomMessageBox(self, "Importação com Erros", mensagem, self.theme_colors, 'warning').exec_()
+            detalhes = "\n\nDetalhes dos erros:\n" + "\n".join(detalhes_erros[:5]) # Limita a 5 erros para não poluir
+            mensagem += detalhes
+            AlertDialog(self, "Importação Concluída com Erros", mensagem, alert_type='warning', theme_colors=self.theme_colors).exec_()
         else:
-            CustomMessageBox(self, "Importação Concluída", mensagem, self.theme_colors, 'success').exec_()
-
+            AlertDialog(self, "Importação Concluída", mensagem, alert_type='success', theme_colors=self.theme_colors).exec_()
 
     def _extrair_quantidade_do_estoque_detalhado(self, estoque_str):
         """Extrai a quantidade numérica do campo estoque detalhado."""
@@ -1512,7 +1651,7 @@ class FormularioProduto(QDialog):
 
     def salvar_produto(self):
         if not self.nome_input.text().strip():
-            CustomMessageBox(self, "Campo Obrigatório", "O nome do produto é obrigatório!", self.theme_colors, 'warning').exec_()
+            AlertDialog(self, "Campo Obrigatório", "O nome do produto é obrigatório!", alert_type='warning', theme_colors=self.theme_colors).exec_()           
             return
             
         dados = {
@@ -1545,12 +1684,15 @@ class FormularioProduto(QDialog):
                 mensagem = "Produto cadastrado com sucesso!"
             
             if sucesso:
-                CustomMessageBox(self, "Sucesso", mensagem, self.theme_colors, 'success').exec_()
+                # Chamada corrigida (a que causou o primeiro erro)
+                AlertDialog(self, "Sucesso", mensagem, alert_type='success', theme_colors=self.theme_colors).exec_()
                 self.accept()
             else:
-                CustomMessageBox(self, "Erro no Banco de Dados", "Não foi possível salvar o produto.", self.theme_colors, 'error').exec_()
+                # Chamada corrigida
+                AlertDialog(self, "Erro no Banco de Dados", "Não foi possível salvar o produto.", alert_type='error', theme_colors=self.theme_colors).exec_()
         except Exception as e:
-            CustomMessageBox(self, "Erro Inesperado", f"Ocorreu um erro: {e}", self.theme_colors, 'error').exec_()
+            # Chamada corrigida (a que causou o segundo erro)
+            AlertDialog(self, "Erro Inesperado", f"Ocorreu um erro: {e}", alert_type='error', theme_colors=self.theme_colors).exec_()
 
     def selecionar_imagem(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -1808,14 +1950,16 @@ class DialogQuebrarEmbalagem(QDialog):
     
     def quebrar_embalagem(self):
         qtd_quebrar = self.quantidade_input.value()
-        dialog = CustomMessageBox(self, "Confirmar Quebra",
+        # Chamada corrigida
+        dialog = AlertDialog(self, "Confirmar Quebra",
                                 f"Confirma quebrar {qtd_quebrar} embalagem(ns) em unidades?",
-                                self.theme_colors, 'question', QMessageBox.Yes | QMessageBox.No)
-        confirmacao = dialog.exec_()
+                                alert_type='question', buttons=QMessageBox.Yes | QMessageBox.No, theme_colors=self.theme_colors)
         
-        if confirmacao == QMessageBox.Yes:
+        if dialog.exec_() == QMessageBox.Yes:
             if self.db.quebrar_embalagem(self.produto_info['produto_id'], qtd_quebrar):
-                CustomMessageBox(self, "Sucesso", "Embalagem quebrada com sucesso!", self.theme_colors, 'success').exec_()
+                # Chamada corrigida
+                AlertDialog(self, "Sucesso", "Embalagem quebrada com sucesso!", alert_type='success', theme_colors=self.theme_colors).exec_()
                 self.accept()
             else:
-                CustomMessageBox(self, "Erro", "Não foi possível quebrar a embalagem.", self.theme_colors, 'error').exec_()
+                # Chamada corrigida
+                AlertDialog(self, "Erro", "Não foi possível quebrar a embalagem.", alert_type='error', theme_colors=self.theme_colors).exec_()

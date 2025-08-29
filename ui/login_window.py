@@ -2,17 +2,160 @@ import base64
 import random
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                              QPushButton, QMessageBox, QCheckBox, QFrame,
-                             QGraphicsDropShadowEffect, QToolButton, QStackedWidget)
+                             QGraphicsDropShadowEffect, QToolButton, QStackedWidget,
+                             QTextEdit) # Adicionado para AlertDialog
 from PyQt5.QtCore import (Qt, pyqtSignal, QSize, QSettings, QPropertyAnimation,
                           QSequentialAnimationGroup, QPoint, QEasingCurve)
-from PyQt5.QtGui import QIcon, QPixmap, QColor, QFont, QCursor
+from PyQt5.QtGui import (QIcon, QPixmap, QColor, QFont, QCursor, QPainter, 
+                         QPainterPath) # Adicionado para AlertDialog
 
-# Remova o CHECK_ICON_BASE64, pois usaremos um ícone dinâmico
-
-# Importe o IconManager da sua UI. 
-# Certifique-se que o caminho do import está correto para a sua estrutura de pastas.
 from ui.icon_manager import IconManager
 import os
+
+# --- INÍCIO DA ADIÇÃO: CLASSE AlertDialog E DEPENDÊNCIAS ---
+# Adicionamos a classe de diálogo customizada para as mensagens de erro.
+
+class AlertDialog(QDialog):
+    """Dialog customizado, integrado ao tema e visualmente aprimorado para alertas."""
+    
+    def __init__(self, parent, title, message, alert_type="info", theme_colors=None):
+        super().__init__(parent)
+        self.alert_type = alert_type
+        self.theme_colors = theme_colors or self._get_default_colors()
+        self.title_text = title
+        
+        self.setModal(True)
+        self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        self._setup_alert_info()
+        self.setup_ui(message)
+        self.drag_position = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton:
+            self.move(event.globalPos() - self.drag_position)
+            event.accept()
+            
+    def _get_default_colors(self):
+        return {
+            'bg_color': "#ffffff", 'surface_color': "#f2f2f7", 'text_color': "#000000",
+            'text_secondary': "#6d6d70", 'border_color': "#d1d1d6"
+        }
+
+    def _setup_alert_info(self):
+        alerts = {
+            "critical": {"icon": "delete", "color": "#d73a49", "prefix": "Erro"},
+            "warning":  {"icon": "estoque_baixo", "color": "#ffc107", "prefix": "Atenção"},
+            "info":     {"icon": "check", "color": "#28a745", "prefix": "Sucesso"}
+        }
+        self.alert_info = alerts.get(self.alert_type, alerts["info"])
+
+    def setup_ui(self, message):
+        container = QFrame(self)
+        container.setObjectName("alertDialogContainer")
+        
+        main_layout = QVBoxLayout(container)
+        main_layout.setContentsMargins(1, 1, 1, 1)
+        main_layout.setSpacing(0)
+
+        self.setLayout(QVBoxLayout())
+        self.layout().addWidget(container)
+        self.layout().setContentsMargins(0,0,0,0)
+
+        header = QFrame()
+        header.setObjectName("alertHeader")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(15, 10, 15, 10)
+        
+        title_label = QLabel(self.alert_info['prefix'])
+        title_label.setObjectName("alertTitle")
+        header_layout.addWidget(title_label, 1)
+
+        body = QFrame()
+        body.setObjectName("alertBody")
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(20, 15, 20, 20)
+        
+        subtitle_label = QLabel(self.title_text)
+        subtitle_label.setObjectName("alertSubtitle")
+
+        message_label = QLabel(message)
+        message_label.setWordWrap(True)
+        message_label.setObjectName("alertMessage")
+        
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        ok_button = QPushButton("OK")
+        ok_button.setObjectName("okButton")
+        ok_button.clicked.connect(self.accept)
+        ok_button.setCursor(Qt.PointingHandCursor)
+        button_layout.addWidget(ok_button)
+
+        body_layout.addWidget(subtitle_label)
+        body_layout.addSpacing(5)
+        body_layout.addWidget(message_label)
+        body_layout.addSpacing(15)
+        body_layout.addLayout(button_layout)
+        
+        main_layout.addWidget(header)
+        main_layout.addWidget(body)
+
+        self.apply_style(self.alert_info['color'])
+
+    def apply_style(self, border_color):
+        style = f"""
+        #alertDialogContainer {{
+            background-color: {self.theme_colors['surface_color']};
+            border: 1px solid {border_color};
+            border-radius: 12px;
+        }}
+        #alertHeader {{
+            background-color: {self.theme_colors['surface_color']};
+            border-bottom: 1px solid {self.theme_colors['border_color']};
+            border-top-left-radius: 11px;
+            border-top-right-radius: 11px;
+        }}
+        #alertTitle {{
+            color: {self.theme_colors['text_color']};
+            font-size: 11pt;
+            font-weight: bold;
+        }}
+        #alertBody {{
+            background-color: {self.theme_colors['surface_color']};
+            border-bottom-left-radius: 11px;
+            border-bottom-right-radius: 11px;
+        }}
+        #alertSubtitle {{
+             color: {self.theme_colors['text_color']};
+             font-size: 12pt;
+             font-weight: bold;
+        }}
+        #alertMessage {{
+             color: {self.theme_colors['text_secondary']};
+             font-size: 10pt;
+        }}
+        #okButton {{
+            background-color: {border_color};
+            color: white;
+            font-weight: bold;
+            font-size: 10pt;
+            padding: 8px 25px;
+            border-radius: 6px;
+            border: none;
+            min-width: 90px;
+        }}
+        #okButton:hover {{ opacity: 0.9; }}
+        """
+        self.setStyleSheet(style)
+        self.setMinimumWidth(400)
+# --- FIM DA ADIÇÃO ---
+
 
 #==============================================================================
 # CLASSE DA JANELA DE LOGIN PRINCIPAL
@@ -20,16 +163,12 @@ import os
 class LoginWindow(QDialog):
     login_success_signal = pyqtSignal(dict)
 
-    # Modificação 1: Receber 'settings' e 'theme_colors' no construtor
     def __init__(self, db_manager, theme_colors):
         super().__init__()
         self.db = db_manager
-        self.theme_colors = theme_colors # Recebemos o tema, que é o que importa
+        self.theme_colors = theme_colors
         self.usuario = None
         self.offset = None
-        
-        # CRIAMOS UMA INSTÂNCIA DE QSETTINGS APENAS PARA ESTA JANELA
-        # Isso resolve o erro, pois agora self.settings é do tipo correto (QSettings).
         self.settings = QSettings("SuaEmpresa", "SeuERP") 
 
         self.setWindowFlags(Qt.FramelessWindowHint)
@@ -38,35 +177,8 @@ class LoginWindow(QDialog):
         self.init_ui()
         self.load_saved_credentials()
 
-    def showEvent(self, event):
-        super().showEvent(event)
-        self.fade_in_animation = QPropertyAnimation(self, b"windowOpacity")
-        self.fade_in_animation.setDuration(400)
-        self.fade_in_animation.setStartValue(0.0)
-        self.fade_in_animation.setEndValue(1.0)
-        self.fade_in_animation.setEasingCurve(QEasingCurve.InOutQuad)
-        self.fade_in_animation.start()
-
-    def shake_window(self):
-        original_pos = self.pos()
-        self.shake_animation_group = QSequentialAnimationGroup(self)
-        movements = [
-            (50, QPoint(original_pos.x() - 10, original_pos.y())),
-            (50, QPoint(original_pos.x() + 20, original_pos.y())),
-            (50, QPoint(original_pos.x() - 20, original_pos.y())),
-            (50, QPoint(original_pos.x() + 10, original_pos.y())),
-            (50, original_pos)
-        ]
-        last_pos = original_pos
-        for duration, end_pos in movements:
-            anim = QPropertyAnimation(self, b"pos")
-            anim.setDuration(duration)
-            anim.setStartValue(last_pos)
-            anim.setEndValue(end_pos)
-            anim.setEasingCurve(QEasingCurve.InOutSine)
-            self.shake_animation_group.addAnimation(anim)
-            last_pos = end_pos
-        self.shake_animation_group.start()
+    # ... (métodos showEvent, shake_window, init_ui e outros permanecem os mesmos) ...
+    # ... (vou omitir por brevidade, apenas cole o arquivo inteiro aqui) ...
 
     def init_ui(self):
         self.setMinimumWidth(420)
@@ -104,22 +216,13 @@ class LoginWindow(QDialog):
         title_layout.setContentsMargins(0, 0, 0, 30)
         logo_label = QLabel()
 
-        # --- INÍCIO DA ALTERAÇÃO NA TELA DE LOGIN ---
-        # 1. Verifica se há uma logo personalizada salva
         logo_path = self.settings.value("custom_logo_path", "")
-
-        # 2. Se não houver ou o arquivo não existir, usa a logo padrão
         if not logo_path or not os.path.exists(logo_path):
-            logo_path = 'assets/img/GestorX (2).png' # Logo Padrão
-
-        # 3. Carrega o QPixmap a partir do caminho decidido
+            logo_path = 'assets/img/Logo2.png'
         logo_pixmap = QPixmap(logo_path)
-
-        # 4. Redimensiona e aplica o pixmap
         logo_label.setPixmap(logo_pixmap.scaled(QSize(150, 150), Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        # --- FIM DA ALTERAÇÃO ---
-
         logo_label.setAlignment(Qt.AlignCenter)
+
         title_label = QLabel("Bem-vindo de volta")
         title_label.setObjectName("titleLabel")
         title_label.setAlignment(Qt.AlignCenter)
@@ -130,7 +233,6 @@ class LoginWindow(QDialog):
         title_layout.addWidget(title_label)
         title_layout.addWidget(subtitle_label)
         
-        # ... O restante do método init_ui continua exatamente como estava ...
         form_layout = QVBoxLayout()
         form_layout.setSpacing(18)
         user_label_widget = self._create_field_label_with_icon("user", "USUÁRIO")
@@ -192,7 +294,72 @@ class LoginWindow(QDialog):
         main_layout.addLayout(button_layout)
         base_layout.addWidget(login_container)
 
-    # Modificação 5: Método _create_field_label_with_icon atualizado
+    def try_login(self):
+        login = self.login_edit.text().strip()
+        senha = self.senha_edit.text().strip()
+        usuario = self.db.autenticar_usuario(login, senha)
+        if usuario:
+            self.usuario = usuario
+            self.save_credentials(login, senha)
+            self.login_success_signal.emit(usuario)
+            self.accept()
+        else:
+            self.shake_window()
+            if self.settings.value("remember_user", False, type=bool):
+                self.clear_saved_credentials()
+                self.remember_checkbox.setChecked(False)
+            # A chamada agora usa o novo método
+            self.show_error_message("Falha no Login", "Usuário ou senha incorretos. Verifique e tente novamente.")
+
+    # --- CORREÇÃO APLICADA AQUI ---
+    # Substituímos o QMessageBox pelo AlertDialog.
+    def show_error_message(self, title, text, level="warning"):
+        """Exibe uma mensagem de erro usando o diálogo customizado."""
+        alert_type_map = {
+            "warning": "warning",
+            "critical": "critical"
+        }
+        alert_type = alert_type_map.get(level, "warning")
+
+        # Cria e executa o diálogo personalizado, passando as cores do tema
+        alert_dialog = AlertDialog(self, title, text, alert_type=alert_type, theme_colors=self.theme_colors)
+        alert_dialog.exec_()
+        
+    # --- O RESTANTE DO CÓDIGO PERMANECE O MESMO ---
+    # ... cole aqui o restante dos métodos da sua classe LoginWindow
+    # (get_stylesheet, _create_field_label_with_icon, handle_forgot_password, 
+    #  load_saved_credentials, etc.)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.fade_in_animation = QPropertyAnimation(self, b"windowOpacity")
+        self.fade_in_animation.setDuration(400)
+        self.fade_in_animation.setStartValue(0.0)
+        self.fade_in_animation.setEndValue(1.0)
+        self.fade_in_animation.setEasingCurve(QEasingCurve.InOutQuad)
+        self.fade_in_animation.start()
+
+    def shake_window(self):
+        original_pos = self.pos()
+        self.shake_animation_group = QSequentialAnimationGroup(self)
+        movements = [
+            (50, QPoint(original_pos.x() - 10, original_pos.y())),
+            (50, QPoint(original_pos.x() + 20, original_pos.y())),
+            (50, QPoint(original_pos.x() - 20, original_pos.y())),
+            (50, QPoint(original_pos.x() + 10, original_pos.y())),
+            (50, original_pos)
+        ]
+        last_pos = original_pos
+        for duration, end_pos in movements:
+            anim = QPropertyAnimation(self, b"pos")
+            anim.setDuration(duration)
+            anim.setStartValue(last_pos)
+            anim.setEndValue(end_pos)
+            anim.setEasingCurve(QEasingCurve.InOutSine)
+            self.shake_animation_group.addAnimation(anim)
+            last_pos = end_pos
+        self.shake_animation_group.start()
+
     def _create_field_label_with_icon(self, icon_name, text):
         widget = QFrame()
         layout = QHBoxLayout(widget)
@@ -211,9 +378,7 @@ class LoginWindow(QDialog):
         layout.addStretch()
         return widget
 
-    # Modificação 6: Stylesheet agora é dinâmico com base no tema
     def get_stylesheet(self):
-        # Extrai cores do dicionário de tema com valores padrão para segurança
         bg_color = self.theme_colors.get('bg_color', '#ffffff')
         surface_color = self.theme_colors.get('surface_color', '#f5f5f7')
         text_color = self.theme_colors.get('text_color', '#1d1d1f')
@@ -222,132 +387,37 @@ class LoginWindow(QDialog):
         border_color = self.theme_colors.get('border_color', '#e5e5e5')
         accent_color = self.theme_colors.get('accent_color', '#007AFF')
         
-        # O ícone do checkmark agora também pode ser temático se necessário
         check_icon = IconManager.get_icon('check', color='white').pixmap(QSize(16, 16))
         check_icon_path = "assets/temp_check_icon.png"
-        check_icon.save(check_icon_path) # Salva temporariamente para usar na URL
+        check_icon.save(check_icon_path)
 
         return f"""
-            #loginContainer {{ 
-                background-color: {bg_color}; 
-                border-radius: 16px; 
-            }}
-            #titleLabel {{ 
-                font-family: -apple-system, system-ui, sans-serif; 
-                font-size: 26px; font-weight: 600; 
-                color: {text_color}; 
-            }}
-            #subtitleLabel {{ 
-                font-family: -apple-system, system-ui, sans-serif; 
-                font-size: 15px; 
-                color: {text_secondary}; 
-            }}
-            #fieldLabel {{ 
-                font-family: -apple-system, system-ui, sans-serif; 
-                font-size: 11px; font-weight: 600; 
-                color: {field_label_color}; 
-                padding-left: 3px; 
-                letter-spacing: 0.5px; 
-            }}
-            QLineEdit {{ 
-                background-color: {surface_color}; 
-                border: 1.5px solid {border_color}; 
-                border-radius: 10px; 
-                padding: 13px 15px; 
-                font-size: 15px; 
-                color: {text_color}; 
-            }}
-            QLineEdit:focus {{ 
-                border-color: {accent_color}; 
-                background-color: {bg_color}; 
-            }}
-            #inputContainer {{ 
-                border-radius: 10px; 
-                background-color: {surface_color}; 
-                border: 1.5px solid {border_color}; 
-            }}
-            #inputContainer:focus-within {{ 
-                border-color: {accent_color}; 
-                background-color: {bg_color}; 
-            }}
-            #inputContainer QLineEdit {{ 
-                border: none; 
-                background-color: transparent; 
-            }}
-            #togglePasswordButton {{ 
-                background-color: transparent; 
-                border: none; padding: 8px; 
-            }}
-            #loginButton {{ 
-                background: {accent_color}; 
-                color: #ffffff; 
-                font-size: 14px; 
-                font-weight: 600; 
-                padding: 16px; 
-                border-radius: 12px; 
-                border: none; 
-            }}
-            #loginButton:hover {{ 
-                background: #005bb5; /* Cor de hover para o accent color */
-            }}
-            #loginButton:pressed {{ 
-                background-color: #004c99; 
-            }}
-            #loginButton:disabled {{ 
-                background: {border_color}; 
-                color: {text_secondary}; 
-            }}
-            #closeButton {{ 
-                background-color: {surface_color}; 
-                border: none; border-radius: 14px; 
-            }}
+            #loginContainer {{ background-color: {bg_color}; border-radius: 16px; }}
+            #titleLabel {{ font-family: -apple-system, system-ui, sans-serif; font-size: 26px; font-weight: 600; color: {text_color}; }}
+            #subtitleLabel {{ font-family: -apple-system, system-ui, sans-serif; font-size: 15px; color: {text_secondary}; }}
+            #fieldLabel {{ font-family: -apple-system, system-ui, sans-serif; font-size: 11px; font-weight: 600; color: {field_label_color}; padding-left: 3px; letter-spacing: 0.5px; }}
+            QLineEdit {{ background-color: {surface_color}; border: 1.5px solid {border_color}; border-radius: 10px; padding: 13px 15px; font-size: 15px; color: {text_color}; }}
+            QLineEdit:focus {{ border-color: {accent_color}; background-color: {bg_color}; }}
+            #inputContainer {{ border-radius: 10px; background-color: {surface_color}; border: 1.5px solid {border_color}; }}
+            #inputContainer:focus-within {{ border-color: {accent_color}; background-color: {bg_color}; }}
+            #inputContainer QLineEdit {{ border: none; background-color: transparent; }}
+            #togglePasswordButton {{ background-color: transparent; border: none; padding: 8px; }}
+            #loginButton {{ background: {accent_color}; color: #ffffff; font-size: 14px; font-weight: 600; padding: 16px; border-radius: 12px; border: none; }}
+            #loginButton:hover {{ background: #005bb5; }}
+            #loginButton:pressed {{ background-color: #004c99; }}
+            #loginButton:disabled {{ background: {border_color}; color: {text_secondary}; }}
+            #closeButton {{ background-color: {surface_color}; border: none; border-radius: 14px; }}
             #closeButton:hover {{ background-color: {border_color}; }}
             #closeButton:pressed {{ background-color: #d0d0d0; }}
-            QCheckBox {{ 
-                font-size: 13px; 
-                color: {text_color}; 
-                spacing: 8px; 
-            }}
-            QCheckBox::indicator {{ 
-                width: 18px; height: 18px; 
-                border: 1.5px solid {border_color}; 
-                border-radius: 6px; 
-                background-color: {bg_color}; 
-            }}
+            QCheckBox {{ font-size: 13px; color: {text_color}; spacing: 8px; }}
+            QCheckBox::indicator {{ width: 18px; height: 18px; border: 1.5px solid {border_color}; border-radius: 6px; background-color: {bg_color}; }}
             QCheckBox::indicator:hover {{ border-color: {text_secondary}; }}
-            QCheckBox::indicator:checked {{ 
-                background-color: {accent_color}; 
-                border-color: {accent_color}; 
-                image: url({check_icon_path}); 
-            }}
-            #forgotPasswordLabel a {{ 
-                color: {accent_color}; 
-                text-decoration: none; 
-                font-size: 13px; 
-                font-weight: 500; 
-            }}
+            QCheckBox::indicator:checked {{ background-color: {accent_color}; border-color: {accent_color}; image: url({check_icon_path}); }}
+            #forgotPasswordLabel a {{ color: {accent_color}; text-decoration: none; font-size: 13px; font-weight: 500; }}
             #forgotPasswordLabel a:hover {{ text-decoration: underline; }}
         """
 
-    def try_login(self):
-        login = self.login_edit.text().strip()
-        senha = self.senha_edit.text().strip()
-        usuario = self.db.autenticar_usuario(login, senha)
-        if usuario:
-            self.usuario = usuario
-            self.save_credentials(login, senha)
-            self.login_success_signal.emit(usuario)
-            self.accept()
-        else:
-            self.shake_window()
-            if self.settings.value("remember_user", False, type=bool):
-                self.clear_saved_credentials()
-                self.remember_checkbox.setChecked(False)
-            self.show_error_message("Falha no Login", "Usuário ou senha incorretos. Verifique e tente novamente.")
-
     def handle_forgot_password(self):
-        """Lida com o clique no link 'Esqueci minha senha'."""
-        # Modificação 7: Passar o tema para a janela de recuperação
         recovery_dialog = PasswordRecoveryDialog(self.db, self.theme_colors, self)
         recovery_dialog.exec_()
     
@@ -394,27 +464,7 @@ class LoginWindow(QDialog):
 
     def validate_inputs(self):
         self.login_button.setEnabled(bool(self.login_edit.text().strip() and self.senha_edit.text().strip()))
-        
-    def show_error_message(self, title, text):
-        error_dialog = QMessageBox(self)
-        error_dialog.setWindowTitle(title)
-        error_dialog.setText(text)
-        error_dialog.setIcon(QMessageBox.Warning)
-        # Estilo do QMessageBox também pode usar as cores do tema
-        bg_color = self.theme_colors.get('bg_color', '#ffffff')
-        text_color = self.theme_colors.get('text_color', '#1d1d1f')
-        accent_color = self.theme_colors.get('accent_color', '#007AFF')
-        border_color = self.theme_colors.get('border_color', '#d2d2d7')
-        
-        error_dialog.setStyleSheet(f"""
-            QMessageBox {{ background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 8px; }}
-            QMessageBox QLabel {{ color: {text_color}; font-family: -apple-system, system-ui, sans-serif; font-size: 14px; }}
-            QPushButton {{ background-color: {accent_color}; color: white; border: none; border-radius: 6px; padding: 8px 20px; font-weight: 500; min-width: 80px; }}
-            QPushButton:hover {{ background-color: #005bb5; }}
-        """)
-        error_dialog.exec_()
 
-    # Modificação 8: Atualizar ícones de olho com IconManager
     def update_password_toggle_icon(self):
         icon_color = self.theme_colors.get('text_secondary', '#6e6e73')
         icon_name = "eye-off" if self.password_visible else "eye"
@@ -426,8 +476,6 @@ class LoginWindow(QDialog):
         self.password_visible = not self.password_visible
         self.senha_edit.setEchoMode(QLineEdit.Normal if self.password_visible else QLineEdit.Password)
         self.update_password_toggle_icon()
-
-
 #==============================================================================
 # CLASSE DA JANELA DE RECUPERAÇÃO DE SENHA
 #==============================================================================

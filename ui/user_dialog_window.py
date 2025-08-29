@@ -1,247 +1,178 @@
+# Arquivo: ui/user_dialog_window.py (VERSÃO CORRIGIDA E APRIMORADA)
+
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-                             QPushButton, QMessageBox, QFormLayout, QComboBox,
-                             QCheckBox, QGroupBox, QRadioButton, QButtonGroup)
+                             QPushButton, QFormLayout, QComboBox, QGroupBox, 
+                             QRadioButton, QCheckBox)
 from PyQt5.QtCore import Qt
-import hashlib 
+import hashlib
+
+# Importa o AlertDialog que já definimos em outros arquivos
+# Certifique-se que o caminho do import esteja correto para sua estrutura
+from .admin_window import AlertDialog 
+from .icon_manager import IconManager
 
 class UserDialogWindow(QDialog):
-    """Diálogo para adicionar ou editar usuários"""
+    """Diálogo aprimorado para adicionar ou editar usuários."""
     
-    def __init__(self, db_manager, theme_colors, usuario_id=None):
-        super().__init__()
+    def __init__(self, db_manager, theme_colors, usuario_id=None, parent=None):
+        super().__init__(parent)
         self.db = db_manager
         self.theme_colors = theme_colors
         self.usuario_id = usuario_id
         self.is_edit_mode = usuario_id is not None
         
         self.init_ui()
-        self.apply_styles() # Aplica o tema
+        self.apply_styles()
         
         if self.is_edit_mode:
             self.carregar_dados_usuario()
     
     def init_ui(self):
-        self.setWindowTitle("Adicionar Usuário" if not self.is_edit_mode else "Editar Usuário")
+        self.setWindowTitle("Adicionar Novo Usuário" if not self.is_edit_mode else "Editar Usuário")
         self.setMinimumWidth(450)
         
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(15)
-        
-        form_layout = QFormLayout()
+        form_group = QGroupBox("Dados do Usuário")
+        form_layout = QFormLayout(form_group)
         form_layout.setLabelAlignment(Qt.AlignRight)
-        form_layout.setSpacing(10)
         
         self.nome_edit = QLineEdit()
         self.login_edit = QLineEdit()
         self.email_edit = QLineEdit()
-        
         self.tipo_combo = QComboBox()
-        self.tipo_combo.addItems(["Comum", "Administrador"])
+        self.tipo_combo.addItems(["Comum", "Admin"]) # Corrigido para "Admin" para consistência
         
         form_layout.addRow("Nome Completo:", self.nome_edit)
         form_layout.addRow("Nome de Usuário (login):", self.login_edit)
         form_layout.addRow("E-mail:", self.email_edit)
         form_layout.addRow("Tipo de Conta:", self.tipo_combo)
 
+        # --- CORREÇÃO 1: ADICIONANDO O CAMPO DE STATUS ---
+        status_group = QGroupBox("Status")
+        status_layout = QHBoxLayout(status_group)
+        self.ativo_radio = QRadioButton("Ativo")
+        self.inativo_radio = QRadioButton("Inativo")
+        self.ativo_radio.setChecked(True) # Padrão
+        status_layout.addWidget(self.ativo_radio)
+        status_layout.addWidget(self.inativo_radio)
+        form_layout.addRow(status_group)
+        # --- FIM DA CORREÇÃO 1 ---
+        
         senha_group = QGroupBox("Senha" if not self.is_edit_mode else "Alterar Senha")
-        senha_layout = QFormLayout()
-        self.senha_edit = QLineEdit()
-        self.senha_edit.setEchoMode(QLineEdit.Password)
-        self.confirmar_senha_edit = QLineEdit()
-        self.confirmar_senha_edit.setEchoMode(QLineEdit.Password)
-        senha_layout.addRow("Nova Senha:", self.senha_edit)
-        senha_layout.addRow("Confirmar Senha:", self.confirmar_senha_edit)
-        senha_group.setLayout(senha_layout)
+        senha_layout = QFormLayout(senha_group)
+        self.senha_edit = QLineEdit(); self.senha_edit.setEchoMode(QLineEdit.Password)
+        self.confirmar_senha_edit = QLineEdit(); self.confirmar_senha_edit.setEchoMode(QLineEdit.Password)
         
         if self.is_edit_mode:
             self.alterar_senha_check = QCheckBox("Marque para alterar a senha")
             self.alterar_senha_check.toggled.connect(self.toggle_senha_fields)
-            senha_layout.insertRow(0, self.alterar_senha_check)
+            senha_layout.addRow(self.alterar_senha_check)
             self.toggle_senha_fields(False)
+
+        senha_layout.addRow("Nova Senha:", self.senha_edit)
+        senha_layout.addRow("Confirmar Senha:", self.confirmar_senha_edit)
         
         buttons_layout = QHBoxLayout()
         self.cancel_button = QPushButton("Cancelar")
         self.cancel_button.clicked.connect(self.reject)
         self.save_button = QPushButton("Salvar")
-        self.save_button.setObjectName("primaryButton") # Para estilo especial
+        self.save_button.setObjectName("primaryButton")
         self.save_button.clicked.connect(self.salvar_usuario)
         buttons_layout.addStretch()
         buttons_layout.addWidget(self.cancel_button)
         buttons_layout.addWidget(self.save_button)
         
-        main_layout.addLayout(form_layout)
+        main_layout.addWidget(form_group)
         main_layout.addWidget(senha_group)
-        main_layout.addStretch()
         main_layout.addLayout(buttons_layout)
-        self.setLayout(main_layout)
 
     def apply_styles(self):
         colors = self.theme_colors
         self.setStyleSheet(f"""
-            QDialog {{
-                background-color: {colors['bg_color']};
-                color: {colors['text_color']};
-                font-size: 10pt;
-            }}
-            QLineEdit, QComboBox {{
-                background-color: {colors['surface_color']};
-                color: {colors['text_color']};
-                border: 1px solid {colors['border_color']};
-                padding: 8px;
-                border-radius: 6px;
-            }}
-            QLineEdit:focus, QComboBox:focus {{
-                border: 1px solid {colors['accent_color']};
-            }}
-            QGroupBox {{
-                color: {colors['text_color']};
-                border: 1px solid {colors['border_color']};
-                border-radius: 6px;
-                margin-top: 10px;
-            }}
-            QGroupBox::title {{
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 5px;
-                left: 10px;
-            }}
-            QPushButton {{
-                background-color: {colors['surface_color']};
-                color: {colors['text_color']};
-                border: 1px solid {colors['border_color']};
-                padding: 8px 16px;
-                border-radius: 6px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                border-color: {colors['accent_color']};
-            }}
-            #primaryButton {{
-                background-color: {colors['accent_color']};
-                color: white;
-                border: none;
-            }}
-            #primaryButton:hover {{
-                background-color: #005bb5;
-            }}
+            QDialog {{ background-color: {colors['bg_color']}; color: {colors['text_color']}; }}
+            QGroupBox, QLabel, QRadioButton, QCheckBox {{ color: {colors['text_color']}; }}
+            QLineEdit, QComboBox {{ background-color: {colors['surface_color']}; color: {colors['text_color']}; border: 1px solid {colors['border_color']}; padding: 8px; border-radius: 6px; }}
+            QLineEdit:focus, QComboBox:focus {{ border: 1px solid {colors['accent_color']}; }}
+            QGroupBox {{ border: 1px solid {colors['border_color']}; border-radius: 6px; margin-top: 10px; padding: 10px; }}
+            QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left; padding: 0 5px; left: 10px; }}
+            QPushButton {{ background-color: {colors['surface_color']}; color: {colors['text_color']}; border: 1px solid {colors['border_color']}; padding: 8px 16px; border-radius: 6px; font-weight: bold; }}
+            QPushButton:hover {{ border-color: {colors['accent_color']}; }}
+            #primaryButton {{ background-color: {colors['accent_color']}; color: white; border: none; }}
         """)
+        self.save_button.setIcon(IconManager.get_icon('save', 'white'))
+        self.cancel_button.setIcon(IconManager.get_icon('cancel', colors['text_color']))
 
     def toggle_senha_fields(self, checked):
         self.senha_edit.setEnabled(checked)
         self.confirmar_senha_edit.setEnabled(checked)
         if not checked:
-            self.senha_edit.clear()
-            self.confirmar_senha_edit.clear()
+            self.senha_edit.clear(); self.confirmar_senha_edit.clear()
     
     def carregar_dados_usuario(self):
-        """Carrega os dados do usuário para edição"""
         usuario = self.db.obter_usuario_por_id(self.usuario_id)
-        
         if not usuario:
-            QMessageBox.critical(self, "Erro", "Usuário não encontrado.")
-            self.reject()
-            return
+            AlertDialog(self, "Erro", "Usuário não encontrado.", alert_type='error', theme_colors=self.theme_colors).exec_()
+            self.reject(); return
         
-        # Preencher os campos
         self.nome_edit.setText(usuario['nome'])
         self.login_edit.setText(usuario['login'])
-        self.email_edit.setText(usuario['email'] if usuario['email'] else "")
+        self.email_edit.setText(usuario.get('email', ''))
         
-        # Selecionar o tipo
-        index = self.tipo_combo.findData(usuario['tipo'])
-        if index >= 0:
-            self.tipo_combo.setCurrentIndex(index)
+        index = self.tipo_combo.findText(usuario['tipo'], Qt.MatchFixedString)
+        if index >= 0: self.tipo_combo.setCurrentIndex(index)
         
-        # Selecionar o status
-        if hasattr(self, 'ativo_radio'):
-            if usuario.get('ativo', 1) == 1:
-                self.ativo_radio.setChecked(True)
-            else:
-                self.inativo_radio.setChecked(True)
-    
-    def validar_campos(self):
-        """Valida os campos do formulário"""
-        nome = self.nome_edit.text().strip()
-        login = self.login_edit.text().strip()
-        senha = self.senha_edit.text()
-        confirmar_senha = self.confirmar_senha_edit.text()
-        
-        # Validar campos obrigatórios
-        if not nome:
-            QMessageBox.warning(self, "Campos obrigatórios", "O nome é obrigatório.")
-            return False
-        
-        if not login:
-            QMessageBox.warning(self, "Campos obrigatórios", "O login é obrigatório.")
-            return False
-        
-        # Validar senha no modo de adicionar ou se escolheu alterar senha
-        if not self.is_edit_mode or (self.is_edit_mode and hasattr(self, 'alterar_senha_check') and self.alterar_senha_check.isChecked()):
-            if not senha:
-                QMessageBox.warning(self, "Campos obrigatórios", "A senha é obrigatória.")
-                return False
-            
-            if senha != confirmar_senha:
-                QMessageBox.warning(self, "Senhas diferentes", "As senhas não coincidem.")
-                return False
-        
-        return True
+        # --- CORREÇÃO 2: CARREGANDO O STATUS CORRETO ---
+        if usuario.get('ativo', 1) == 1:
+            self.ativo_radio.setChecked(True)
+        else:
+            self.inativo_radio.setChecked(True)
+        # --- FIM DA CORREÇÃO 2 ---
     
     def salvar_usuario(self):
-        """Salva o usuário no banco de dados"""
-        if not self.validar_campos():
-            return
-
         nome = self.nome_edit.text().strip()
         login = self.login_edit.text().strip()
-        email = self.email_edit.text().strip()
-        tipo = self.tipo_combo.currentData()
         
+        if not nome or not login:
+            AlertDialog(self, "Campos Obrigatórios", "Nome e Login são obrigatórios.", alert_type='warning', theme_colors=self.theme_colors).exec_()
+            return
+
+        dados = {
+            'nome': nome,
+            'login': login,
+            'email': self.email_edit.text().strip(),
+            'tipo': self.tipo_combo.currentText(),
+            # --- CORREÇÃO 3: LENDO O STATUS DOS RADIO BUTTONS ---
+            'ativo': 1 if self.ativo_radio.isChecked() else 0
+        }
+        
+        senha = self.senha_edit.text()
+        alterar_senha = not self.is_edit_mode or self.alterar_senha_check.isChecked()
+
+        if alterar_senha:
+            if len(senha) < 6:
+                AlertDialog(self, "Senha Inválida", "A senha deve ter no mínimo 6 caracteres.", alert_type='warning', theme_colors=self.theme_colors).exec_()
+                return
+            if senha != self.confirmar_senha_edit.text():
+                AlertDialog(self, "Senhas Diferentes", "As senhas não coincidem.", alert_type='warning', theme_colors=self.theme_colors).exec_()
+                return
+
         try:
             if self.is_edit_mode:
-                # ... (a lógica de edição já está correta, pois chama `alterar_senha_usuario` que já faz o hash)
-                # O código abaixo permanece o mesmo
-                ativo = 1 if self.ativo_radio.isChecked() else 0
-                result, message = self.db.atualizar_usuario(self.usuario_id, nome, login, email, tipo, ativo)
-
-                if not result:
-                    QMessageBox.critical(self, "Erro", message)
-                    return
-                
-                if hasattr(self, 'alterar_senha_check') and self.alterar_senha_check.isChecked():
-                    senha = self.senha_edit.text()
-                    senha_result, senha_message = self.db.alterar_senha_usuario(self.usuario_id, senha)
-                    
-                    if not senha_result:
-                        QMessageBox.warning(self, "Aviso", f"Dados salvos, mas houve um erro ao alterar a senha: {senha_message}")
+                sucesso, msg = self.db.atualizar_usuario(self.usuario_id, **dados)
+                if sucesso and alterar_senha:
+                    # Altera a senha separadamente se necessário
+                    sucesso, msg = self.db.alterar_senha_usuario(self.usuario_id, senha)
+                mensagem_sucesso = "Usuário atualizado com sucesso!"
             else:
-                # ###########################################################
-                # ## AQUI ESTÁ A CORREÇÃO PRINCIPAL ##
-                # ###########################################################
-                
-                # Adicionar novo usuário
-                senha_plana = self.senha_edit.text()
-                
-                # 1. Faz o hash da senha antes de enviar para o banco
-                senha_hash = hashlib.sha256(senha_plana.encode('utf-8')).hexdigest()
+                dados['senha'] = senha # Adiciona a senha para o novo usuário
+                sucesso, msg = self.db.adicionar_usuario(**dados)
+                mensagem_sucesso = "Usuário cadastrado com sucesso!"
 
-                # 2. Passa o hash para a função do banco de dados
-                result, message = self.db.cadastrar_usuario(nome, login, senha_hash, email, tipo)
-                
-                if not result:
-                    QMessageBox.critical(self, "Erro", message)
-                    return
-
-            # Se tudo ocorreu bem
-            QMessageBox.information(self, "Sucesso", "Operação realizada com sucesso!")
-            self.accept()
+            if sucesso:
+                AlertDialog(self, "Sucesso", mensagem_sucesso, alert_type='success', theme_colors=self.theme_colors).exec_()
+                self.accept()
+            else:
+                AlertDialog(self, "Erro no Banco de Dados", msg, alert_type='error', theme_colors=self.theme_colors).exec_()
 
         except Exception as e:
-            QMessageBox.critical(self, "Erro Inesperado", f"Ocorreu um erro: {str(e)}")
-    
-    def get_username(self):
-        """Função auxiliar para retornar o nome de usuário após o cadastro."""
-        return self.login_edit.text().strip()
-            
-# Adicionar alias para compatibilidade
-UserDialog = UserDialogWindow
+            AlertDialog(self, "Erro Inesperado", f"Ocorreu um erro: {str(e)}", alert_type='error', theme_colors=self.theme_colors).exec_()

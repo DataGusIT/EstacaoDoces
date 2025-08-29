@@ -13,6 +13,109 @@ import math
 from ui.icon_manager import IconManager
 from database.db_manager import DatabaseManager
 
+# Adicione estas importações extras no topo do seu arquivo
+from PyQt5.QtWidgets import QProgressBar, QFrame
+from PyQt5.QtCore import Qt
+
+# --- CLASSE 1: DIÁLOGO DE ALERTA (ESTILO PERFIL) ---
+class AlertDialog(QDialog):
+    """Caixa de diálogo com o estilo sutil da tela de perfil."""
+    def __init__(self, parent, title, message, alert_type='info', buttons=QMessageBox.Ok, theme_colors=None):
+        super().__init__(parent)
+        self.theme_colors = theme_colors if theme_colors is not None else {}
+        self.drag_position = None
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(True)
+        type_info = { 'success':  {'icon': 'check', 'color': '#28a745'}, 'warning':  {'icon': 'estoque_baixo', 'color': '#ffc107'}, 'error':    {'icon': 'delete', 'color': '#dc3545'}, 'question': {'icon': 'question', 'color': '#17a2b8'}, 'info':     {'icon': 'sobre', 'color': self.theme_colors.get('accent_color', '#007AFF')}, }.get(alert_type, {'icon': 'sobre', 'color': '#007AFF'})
+        self.accent_color = type_info['color']
+        self.icon_name = type_info['icon']
+        self._setup_ui(title, message, buttons)
+
+    def _setup_ui(self, title, message, buttons):
+        self.setMinimumWidth(400)
+        container = QFrame(self); container.setObjectName("mainContainer")
+        main_layout = QVBoxLayout(container); main_layout.setContentsMargins(0, 0, 0, 0); main_layout.setSpacing(0)
+        self.header = QFrame(); self.header.setObjectName("header")
+        header_layout = QHBoxLayout(self.header); header_layout.setContentsMargins(20, 15, 10, 15)
+        header_title_label = QLabel(title); header_title_label.setObjectName("headerTitleLabel")
+        close_button = QPushButton(); close_button.setObjectName("controlButton"); close_button.setFixedSize(28, 28)
+        close_button.setIcon(IconManager.get_icon('fechar', color=self.theme_colors.get('text_secondary', '#666')))
+        close_button.clicked.connect(self.reject)
+        header_layout.addWidget(header_title_label); header_layout.addStretch(); header_layout.addWidget(close_button)
+        main_layout.addWidget(self.header)
+        body = QWidget(); body_layout = QVBoxLayout(body); body_layout.setContentsMargins(25, 20, 25, 25); body_layout.setSpacing(20)
+        subtitle_layout = QHBoxLayout()
+        icon_label = QLabel(); icon_label.setPixmap(IconManager.get_icon(self.icon_name, color=self.accent_color).pixmap(24, 24))
+        subtitle_label = QLabel(title); subtitle_label.setObjectName("subtitleLabel")
+        subtitle_layout.addWidget(icon_label); subtitle_layout.addWidget(subtitle_label); subtitle_layout.addStretch()
+        message_label = QLabel(message); message_label.setWordWrap(True); message_label.setObjectName("messageLabel")
+        button_layout = QHBoxLayout(); button_layout.addStretch()
+        if buttons & QMessageBox.Yes: button_layout.addWidget(self._create_button("Sim", lambda: self.done(QMessageBox.Yes), is_primary=True))
+        if buttons & QMessageBox.Ok: button_layout.addWidget(self._create_button("OK", self.accept, is_primary=True))
+        if buttons & QMessageBox.No: button_layout.addWidget(self._create_button("Não", self.reject))
+        if buttons & QMessageBox.Cancel: button_layout.addWidget(self._create_button("Cancelar", self.reject))
+        body_layout.addLayout(subtitle_layout); body_layout.addWidget(message_label); body_layout.addLayout(button_layout)
+        main_layout.addWidget(body)
+        base_layout = QVBoxLayout(self); base_layout.addWidget(container)
+        self.apply_styles()
+
+    def _create_button(self, text, on_click, is_primary=False):
+        btn = QPushButton(text); btn.clicked.connect(on_click); btn.setCursor(Qt.PointingHandCursor)
+        btn.setObjectName("primaryButton" if is_primary else "secondaryButton")
+        return btn
+        
+    def apply_styles(self):
+        colors = self.theme_colors
+        self.setStyleSheet(f""" #mainContainer {{ background-color: {colors.get('surface_color', '#fff')}; border-radius: 12px; border: 1px solid {colors.get('border_color', '#ccc')}; }} #header {{ border-bottom: 1px solid {colors.get('border_color', '#ccc')}; }} #headerTitleLabel {{ color: {colors.get('text_color', '#000')}; font-weight: bold; }} #subtitleLabel {{ color: {colors.get('text_color', '#000')}; font-size: 14pt; font-weight: bold; }} #messageLabel {{ color: {colors.get('text_secondary', '#333')}; font-size: 11pt; }} #controlButton {{ background: transparent; border: none; border-radius: 14px; }} #controlButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }} QPushButton {{ font-weight: bold; padding: 10px 25px; border-radius: 8px; min-width: 90px;}} #primaryButton {{ background-color: {self.accent_color}; color: white; border: none; }} #secondaryButton {{ background-color: transparent; color: {colors.get('text_color', '#000')}; border: 1px solid {colors.get('border_color', '#ccc')}; }} #secondaryButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }} """)
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton: self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton: self.move(event.globalPos() - self.drag_position)
+
+# --- CLASSE 2: DIÁLOGO DE PROGRESSO TEMÁTICO ---
+class ThemedProgressDialog(QDialog):
+    canceled = pyqtSignal()
+    def __init__(self, parent, title, message, theme_colors):
+        super().__init__(parent)
+        self.theme_colors = theme_colors if theme_colors is not None else {}
+        self.drag_position = None
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(True)
+        self._setup_ui(title, message)
+        self.apply_styles()
+
+    def _setup_ui(self, title, message):
+        self.setMinimumWidth(400)
+        container = QFrame(self); container.setObjectName("mainContainer")
+        main_layout = QVBoxLayout(container); main_layout.setContentsMargins(0, 0, 0, 0); main_layout.setSpacing(0)
+        self.header = QFrame(); self.header.setObjectName("header")
+        header_layout = QHBoxLayout(self.header); header_layout.setContentsMargins(20, 15, 10, 15)
+        title_label = QLabel(title); title_label.setObjectName("headerTitleLabel")
+        header_layout.addWidget(title_label)
+        main_layout.addWidget(self.header)
+        body = QWidget(); body_layout = QVBoxLayout(body); body_layout.setContentsMargins(25, 20, 25, 25); body_layout.setSpacing(15)
+        message_label = QLabel(message); message_label.setWordWrap(True); message_label.setObjectName("messageLabel")
+        self.progress_bar = QProgressBar(); self.progress_bar.setTextVisible(True); self.progress_bar.setAlignment(Qt.AlignCenter)
+        button_layout = QHBoxLayout(); button_layout.addStretch()
+        cancel_button = QPushButton("Cancelar"); cancel_button.setObjectName("secondaryButton"); cancel_button.setCursor(Qt.PointingHandCursor)
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_button)
+        body_layout.addWidget(message_label); body_layout.addWidget(self.progress_bar); body_layout.addLayout(button_layout)
+        main_layout.addWidget(body)
+        base_layout = QVBoxLayout(self); base_layout.addWidget(container)
+
+    def apply_styles(self):
+        colors = self.theme_colors
+        self.setStyleSheet(f""" #mainContainer {{ background-color: {colors.get('surface_color', '#fff')}; border-radius: 12px; border: 1px solid {colors.get('border_color', '#ccc')}; }} #header {{ border-bottom: 1px solid {colors.get('border_color', '#ccc')}; }} #headerTitleLabel {{ color: {colors.get('text_color', '#000')}; font-weight: bold; }} #messageLabel {{ color: {colors.get('text_secondary', '#333')}; font-size: 11pt; }} QPushButton#secondaryButton {{ font-weight: bold; padding: 10px 25px; border-radius: 8px; background-color: transparent; color: {colors.get('text_color', '#000')}; border: 1px solid {colors.get('border_color', '#ccc')}; }} QPushButton#secondaryButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }} QProgressBar {{ border: 1px solid {colors.get('border_color', '#ccc')}; border-radius: 8px; padding: 1px; text-align: center; background-color: {colors.get('bg_color', '#eee')}; color: {colors.get('text_color', '#000')}; }} QProgressBar::chunk {{ background-color: {colors.get('accent_color', '#007AFF')}; border-radius: 7px; }} """)
+    def setValue(self, value): self.progress_bar.setValue(value)
+    def reject(self): self.canceled.emit(); super().reject()
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton: self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton: self.move(event.globalPos() - self.drag_position)
+
 # ================================================================= #
 #       CLASSE WORKER PARA IMPORTAÇÃO DE CSV EM THREAD              #
 # ================================================================= #
@@ -284,32 +387,26 @@ class ClientesWindow(QWidget):
             self.dados_clientes_alterados.emit()
 
     def excluir_cliente(self, cliente_id):
-        confirmacao = QMessageBox.question(
-            self, "Confirmar Exclusão", "Tem certeza que deseja excluir este cliente?",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if confirmacao == QMessageBox.Yes:
+        dialog = AlertDialog(self, "Confirmar Exclusão", 
+                             "Tem certeza que deseja excluir este cliente?",
+                             alert_type='question', buttons=QMessageBox.Yes | QMessageBox.No, theme_colors=self.theme_colors)
+        
+        if dialog.exec_() == QMessageBox.Yes:
             if self.db.excluir_cliente(cliente_id):
-                QMessageBox.information(self, "Sucesso", "Cliente excluído.")
+                AlertDialog(self, "Sucesso", "Cliente excluído com sucesso.", alert_type='success', theme_colors=self.theme_colors).exec_()
                 self.atualizar_visualizacao_dados()
-                
-                # <<< EMITA O SINAL AQUI TAMBÉM! >>>
-                print("DEBUG: Cliente excluído. Emitindo sinal 'dados_clientes_alterados'.")
                 self.dados_clientes_alterados.emit()
             else:
-                QMessageBox.warning(self, "Erro", "Não foi possível excluir o cliente.")
+                AlertDialog(self, "Erro", "Não foi possível excluir o cliente.", alert_type='error', theme_colors=self.theme_colors).exec_()
     
     def exportar_csv(self):
         try:
-            arquivo, _ = QFileDialog.getSaveFileName(
-                self, "Salvar arquivo CSV", "clientes.csv",
-                "Arquivos CSV (*.csv);;Todos os arquivos (*)"
-            )
+            arquivo, _ = QFileDialog.getSaveFileName(self, "Salvar arquivo CSV", "clientes.csv", "Arquivos CSV (*.csv)")
             if not arquivo: return
             
             clientes = self.db.listar_clientes()
             if not clientes:
-                QMessageBox.warning(self, "Aviso", "Não há clientes para exportar.")
+                AlertDialog(self, "Exportar CSV", "Não há clientes cadastrados para exportar.", alert_type='info', theme_colors=self.theme_colors).exec_()
                 return
             
             with open(arquivo, 'w', newline='', encoding='utf-8') as csvfile:
@@ -317,31 +414,24 @@ class ClientesWindow(QWidget):
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
                 for cliente in clientes:
-                    writer.writerow({
-                        'id': cliente['id'], 'nome': cliente['nome'],
-                        'data_nascimento': cliente['data_nascimento'],
-                        'telefone': cliente['telefone'] or '', 'email': cliente['email'] or '',
-                        'endereco': cliente['endereco'] or ''
-                    })
+                    writer.writerow({k: cliente.get(k, '') for k in fieldnames})
             
-            QMessageBox.information(
-                self, "Sucesso", 
-                f"Dados exportados com sucesso!\nArquivo: {arquivo}\nTotal de clientes: {len(clientes)}"
-            )
+            AlertDialog(self, "Sucesso", f"Dados exportados com sucesso para:\n{arquivo}", alert_type='success', theme_colors=self.theme_colors).exec_()
+
         except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Erro ao exportar CSV: {str(e)}")
+            AlertDialog(self, "Erro", f"Erro ao exportar CSV: {str(e)}", alert_type='error', theme_colors=self.theme_colors).exec_()
     
     def importar_csv(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Importar Clientes CSV", "", "CSV Files (*.csv)")
         if not file_path: return
 
-        self.progress_dialog = QProgressDialog("Importando clientes...", "Cancelar", 0, 100, self)
-        self.progress_dialog.setWindowModality(Qt.WindowModal)
+        self.progress_dialog = ThemedProgressDialog(self, "Importando Clientes", "Aguarde enquanto os dados são processados...", self.theme_colors)
         
         self.import_thread = ClienteCsvImportWorker(self.db.db_path, file_path)
         self.import_thread.progress.connect(self.progress_dialog.setValue)
         self.import_thread.finished.connect(self.importacao_concluida)
         self.progress_dialog.canceled.connect(self.import_thread.terminate)
+        
         self.import_thread.start()
         self.progress_dialog.exec_()
 
@@ -349,17 +439,15 @@ class ClientesWindow(QWidget):
         self.progress_dialog.close()
         self.atualizar_visualizacao_dados()
 
-        # <<< EMITA O SINAL SE PELO MENOS UM CLIENTE FOI IMPORTADO >>>
         if importados > 0:
-            print("DEBUG: Importação CSV concluída. Emitindo sinal 'dados_clientes_alterados'.")
             self.dados_clientes_alterados.emit()
 
-        msg = f"Importação concluída!\n\nSucesso: {importados}\nFalhas: {erros}"
+        msg = f"Importação concluída!\n\n- Clientes importados: {importados}\n- Linhas com erro: {erros}"
         if erros > 0:
             msg += "\n\nPrimeiros erros:\n" + "\n".join(detalhes[:5])
-            QMessageBox.warning(self, "Importação com Erros", msg)
+            AlertDialog(self, "Importação com Erros", msg, alert_type='warning', theme_colors=self.theme_colors).exec_()
         else:
-            QMessageBox.information(self, "Importação Concluída", msg)
+            AlertDialog(self, "Importação Concluída", msg, alert_type='success', theme_colors=self.theme_colors).exec_()
 
 
 class FormularioCliente(QDialog):
@@ -507,26 +595,29 @@ class FormularioCliente(QDialog):
     def salvar_cliente(self):
         nome = self.nome_input.text().strip()
         if not nome:
-            QMessageBox.warning(self, "Erro", "O nome do cliente é obrigatório!")
+            AlertDialog(self, "Campo Obrigatório", "O nome do cliente é obrigatório!", alert_type='warning', theme_colors=self.theme_colors).exec_()
             return
         
-        data_nascimento = self.data_nascimento_input.date().toString("yyyy-MM-dd")
-        telefone = self.telefone_input.text().strip()
-        email = self.email_input.text().strip()
-        endereco = self.endereco_input.text().strip()
+        dados = {
+            'nome': nome,
+            'data_nascimento': self.data_nascimento_input.date().toString("yyyy-MM-dd"),
+            'telefone': self.telefone_input.text().strip(),
+            'email': self.email_input.text().strip(),
+            'endereco': self.endereco_input.text().strip()
+        }
         
         try:
             if self.cliente_id:
-                sucesso = self.db.atualizar_cliente(self.cliente_id, nome, data_nascimento, telefone, email, endereco)
+                sucesso = self.db.atualizar_cliente(self.cliente_id, **dados)
                 mensagem = "Cliente atualizado com sucesso!"
             else:
-                sucesso = self.db.adicionar_cliente(nome, data_nascimento, telefone, email, endereco)
+                sucesso = self.db.adicionar_cliente(**dados)
                 mensagem = "Cliente cadastrado com sucesso!"
             
             if sucesso:
-                QMessageBox.information(self, "Sucesso", mensagem)
+                AlertDialog(self, "Sucesso", mensagem, alert_type='success', theme_colors=self.theme_colors).exec_()
                 self.accept()
             else:
-                QMessageBox.warning(self, "Erro", "Não foi possível salvar o cliente.")
+                AlertDialog(self, "Erro", "Não foi possível salvar o cliente no banco de dados.", alert_type='error', theme_colors=self.theme_colors).exec_()
         except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Erro ao salvar cliente: {str(e)}")
+            AlertDialog(self, "Erro Crítico", f"Ocorreu um erro inesperado ao salvar:\n{str(e)}", alert_type='error', theme_colors=self.theme_colors).exec_()

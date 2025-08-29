@@ -1,14 +1,170 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
                              QLineEdit, QPushButton, QMessageBox, QWidget, 
-                             QFrame)
-from PyQt5.QtGui import QFont, QRegExpValidator, QPixmap
-from PyQt5.QtCore import Qt, QRegExp
+                             QFrame, QTextEdit)
+from PyQt5.QtGui import QFont, QRegExpValidator, QPixmap, QPainter, QPainterPath, QColor
+from PyQt5.QtCore import Qt, QRegExp, QSize, QTimer
 
 from .icon_manager import IconManager
 
-# --- As classes de widgets temáticos (ThemedLineEdit, etc.) permanecem as mesmas ---
-# (O código delas está correto e foi omitido aqui para focar na ProfileWindow)
+# --- INÍCIO DA ADIÇÃO: CLASSE AlertDialog E DEPENDÊNCIAS ---
+# Adicionamos a classe de diálogo customizada que você criou.
+# Ela será usada para exibir as mensagens de sucesso, erro e aviso.
 
+class AlertDialog(QDialog):
+    """Dialog customizado, integrado ao tema e visualmente aprimorado para alertas."""
+    
+    def __init__(self, parent, title, message, alert_type="info", theme_colors=None):
+        super().__init__(parent)
+        self.alert_type = alert_type
+        self.theme_colors = theme_colors or self._get_default_colors()
+        self.title_text = title
+        
+        self.setModal(True)
+        self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint) # Janela sem bordas padrão
+        self.setAttribute(Qt.WA_TranslucentBackground) # Para cantos arredondados
+
+        self._setup_alert_info()
+        self.setup_ui(message)
+
+        # Permitir arrastar a janela
+        self.drag_position = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton:
+            self.move(event.globalPos() - self.drag_position)
+            event.accept()
+            
+    def _get_default_colors(self):
+        """Fornece cores padrão caso o tema não seja passado."""
+        return {
+            'bg_color': "#ffffff", 'surface_color': "#f2f2f7", 'text_color': "#000000",
+            'border_color': "#d1d1d6", 'accent_color': "#007AFF"
+        }
+
+    def _setup_alert_info(self):
+        """Define ícone e cor com base no tipo de alerta."""
+        alerts = {
+            "critical": {"icon": "delete", "color": "#d73a49", "prefix": "Erro"},
+            "warning":  {"icon": "estoque_baixo", "color": "#ffc107", "prefix": "Atenção"},
+            # CORREÇÃO: Mapeando 'info' para um ícone e prefixo de 'Sucesso'
+            "info":     {"icon": "check", "color": "#28a745", "prefix": "Sucesso"}
+        }
+        self.alert_info = alerts.get(self.alert_type, alerts["info"])
+
+    def setup_ui(self, message):
+        container = QFrame(self)
+        container.setObjectName("alertDialogContainer")
+        
+        main_layout = QVBoxLayout(container)
+        main_layout.setContentsMargins(1, 1, 1, 1)
+        main_layout.setSpacing(0)
+
+        self.setLayout(QVBoxLayout())
+        self.layout().addWidget(container)
+        self.layout().setContentsMargins(0,0,0,0)
+
+        # Cabeçalho
+        header = QFrame()
+        header.setObjectName("alertHeader")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(15, 10, 15, 10)
+        
+        # Usamos o prefixo definido (Sucesso, Erro, etc.) como o título no cabeçalho
+        title_label = QLabel(self.alert_info['prefix'])
+        title_label.setObjectName("alertTitle")
+        
+        header_layout.addWidget(title_label, 1)
+
+        # Corpo
+        body = QFrame()
+        body.setObjectName("alertBody")
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(20, 15, 20, 20)
+        
+        # O título original (ex: "Campo obrigatório") vira um subtítulo no corpo
+        subtitle_label = QLabel(self.title_text)
+        subtitle_label.setObjectName("alertSubtitle")
+
+        message_label = QLabel(message)
+        message_label.setWordWrap(True)
+        message_label.setObjectName("alertMessage")
+        
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        ok_button = QPushButton("OK")
+        ok_button.setObjectName("okButton")
+        ok_button.clicked.connect(self.accept)
+        ok_button.setCursor(Qt.PointingHandCursor)
+        button_layout.addWidget(ok_button)
+
+        body_layout.addWidget(subtitle_label)
+        body_layout.addSpacing(5)
+        body_layout.addWidget(message_label)
+        body_layout.addSpacing(15)
+        body_layout.addLayout(button_layout)
+        
+        main_layout.addWidget(header)
+        main_layout.addWidget(body)
+
+        self.apply_style(self.alert_info['color'])
+
+    def apply_style(self, border_color):
+        style = f"""
+        #alertDialogContainer {{
+            background-color: {self.theme_colors['surface_color']};
+            border: 1px solid {border_color};
+            border-radius: 12px;
+        }}
+        #alertHeader {{
+            background-color: {self.theme_colors['surface_color']};
+            border-bottom: 1px solid {self.theme_colors['border_color']};
+            border-top-left-radius: 11px;
+            border-top-right-radius: 11px;
+        }}
+        #alertTitle {{
+            color: {self.theme_colors['text_color']};
+            font-size: 11pt;
+            font-weight: bold;
+        }}
+        #alertBody {{
+            background-color: {self.theme_colors['surface_color']};
+            border-bottom-left-radius: 11px;
+            border-bottom-right-radius: 11px;
+        }}
+        #alertSubtitle {{
+             color: {self.theme_colors['text_color']};
+             font-size: 12pt;
+             font-weight: bold;
+        }}
+        #alertMessage {{
+             color: {self.theme_colors['text_secondary']};
+             font-size: 10pt;
+        }}
+        #okButton {{
+            background-color: {border_color};
+            color: white;
+            font-weight: bold;
+            font-size: 10pt;
+            padding: 8px 25px;
+            border-radius: 6px;
+            border: none;
+            min-width: 90px;
+        }}
+        #okButton:hover {{
+            opacity: 0.9;
+        }}
+        """
+        self.setStyleSheet(style)
+        self.setMinimumWidth(400)
+# --- FIM DA ADIÇÃO ---
+
+
+# --- As classes de widgets temáticos (ThemedLineEdit, etc.) permanecem as mesmas ---
 class ThemedLineEdit(QLineEdit):
     """Campo de texto que se adapta ao tema."""
     def __init__(self, theme_colors, *args, **kwargs):
@@ -146,7 +302,6 @@ class ThemedAvatar(QWidget):
 
 class ProfileWindow(QDialog):
     """Janela de perfil profissional, frameless e adaptada ao tema."""
-    # --- CORREÇÃO: Construtor agora aceita o pixmap do logo ---
     def __init__(self, db, usuario, theme_colors, logo_pixmap=None):
         super().__init__()
         self.db = db
@@ -155,7 +310,6 @@ class ProfileWindow(QDialog):
         self.logo_pixmap = logo_pixmap
         self.drag_position = None
 
-        # --- CORREÇÃO: Janela sem borda e com fundo transparente para cantos arredondados ---
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
 
@@ -165,7 +319,6 @@ class ProfileWindow(QDialog):
         self.setFixedSize(480, 680)
         self.setModal(True)
         
-        # --- CORREÇÃO: Container principal para aplicar o estilo (background, bordas) ---
         container = QFrame(self)
         container.setObjectName("mainContainer")
 
@@ -176,7 +329,6 @@ class ProfileWindow(QDialog):
         self.header = self._create_header()
         main_layout.addWidget(self.header)
 
-        # Separador visual
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
         separator.setObjectName("separator")
@@ -184,7 +336,6 @@ class ProfileWindow(QDialog):
 
         main_layout.addWidget(self._create_content())
 
-        # Adiciona o container ao layout do QDialog
         base_layout = QVBoxLayout(self)
         base_layout.setContentsMargins(0, 0, 0, 0)
         base_layout.addWidget(container)
@@ -233,7 +384,6 @@ class ProfileWindow(QDialog):
         title_label = QLabel("Meu Perfil")
         title_label.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {self.theme_colors['text_color']};")
         
-        # Botão de ajuda (exemplo)
         help_button = QPushButton()
         help_button.setObjectName("controlButton")
         help_button.setFixedSize(30, 30)
@@ -259,17 +409,14 @@ class ProfileWindow(QDialog):
         layout.setContentsMargins(40, 25, 40, 30)
         layout.setSpacing(20)
 
-        # --- CORREÇÃO: Centralização do avatar ---
-        # Colocamos o avatar dentro de um layout horizontal com spacers para forçar a centralização
         avatar_h_layout = QHBoxLayout()
         avatar_h_layout.addStretch()
         avatar_h_layout.addWidget(ThemedAvatar(self.usuario, self.theme_colors))
         avatar_h_layout.addStretch()
         
-        # Agrupamos tudo relacionado ao avatar em um layout vertical
         avatar_area = QVBoxLayout()
         avatar_area.setSpacing(8)
-        avatar_area.addLayout(avatar_h_layout) # Adiciona o layout horizontal aqui
+        avatar_area.addLayout(avatar_h_layout)
         
         name_label = QLabel(self.usuario['nome'])
         name_label.setAlignment(Qt.AlignCenter)
@@ -283,7 +430,6 @@ class ProfileWindow(QDialog):
         avatar_area.addWidget(tipo_label)
         layout.addLayout(avatar_area)
         
-        # Formulário (sem alterações)
         self.name_edit = ThemedLineEdit(self.theme_colors, self.usuario['nome'])
         layout.addWidget(ThemedFieldGroup("Nome Completo", self.name_edit, self.theme_colors))
 
@@ -299,7 +445,6 @@ class ProfileWindow(QDialog):
 
         layout.addStretch()
 
-        # Botões (sem alterações)
         self.save_button = ThemedButton("Salvar Alterações", self.theme_colors, "primary", icon_name='save')
         self.save_button.clicked.connect(self.save_profile)
         
@@ -311,7 +456,6 @@ class ProfileWindow(QDialog):
         
         return content_widget
 
-    # --- CORREÇÃO: Métodos para arrastar a janela ---
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and self.header.underMouse():
             self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
@@ -322,7 +466,6 @@ class ProfileWindow(QDialog):
             self.move(event.globalPos() - self.drag_position)
             event.accept()
 
-    # Métodos save_profile, open_change_password e show_message permanecem os mesmos
     def save_profile(self):
         nome = self.name_edit.text().strip()
         email = self.email_edit.text().strip()
@@ -345,42 +488,23 @@ class ProfileWindow(QDialog):
             self.show_message("Erro", f"Erro ao atualizar perfil: {e}", "critical")
 
     def open_change_password(self):
-        """Abrir diálogo para alterar senha"""
         from ui.change_password_window import ChangePasswordWindow
-        
-        # --- CORREÇÃO APLICADA AQUI ---
-        # Passa o logo que a ProfileWindow já recebeu para a ChangePasswordWindow
         password_dialog = ChangePasswordWindow(self.db, self.usuario['id'], self.theme_colors, self.logo_pixmap)
         password_dialog.exec_()
-
+        
+    # --- CORREÇÃO APLICADA AQUI ---
+    # O método agora usa a classe AlertDialog para uma aparência consistente.
     def show_message(self, title, message, level="info"):
-        icon_map = {"info": QMessageBox.Information, "warning": QMessageBox.Warning, "critical": QMessageBox.Critical}
+        """Exibe uma mensagem usando o diálogo customizado AlertDialog."""
         
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle(title)
-        msg_box.setText(message)
-        msg_box.setIcon(icon_map.get(level, QMessageBox.Information))
-        
-        colors = self.theme_colors
-        msg_box.setStyleSheet(f"""
-            QMessageBox {{
-                background-color: {colors['surface_color']};
-                border-radius: 12px;
-            }}
-            QMessageBox QLabel {{
-                color: {colors['text_color']};
-                font-size: 15px;
-            }}
-            QPushButton {{
-                background-color: {colors['accent_color']};
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 10px 20px;
-                min-width: 90px;
-            }}
-            QPushButton:hover {{
-                background-color: #005bb5;
-            }}
-        """)
-        msg_box.exec_()
+        # Mapeia o nível da mensagem para o tipo de alerta do AlertDialog
+        alert_type_map = {
+            "info": "info",
+            "warning": "warning",
+            "critical": "critical"
+        }
+        alert_type = alert_type_map.get(level, "info")
+
+        # Cria e executa o diálogo personalizado, passando as cores do tema
+        alert_dialog = AlertDialog(self, title, message, alert_type=alert_type, theme_colors=self.theme_colors)
+        alert_dialog.exec_()
