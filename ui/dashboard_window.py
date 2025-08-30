@@ -254,32 +254,47 @@ class DashboardWindow(QWidget):
         # O group.setLayout(main_v_layout) já é feito automaticamente pelo construtor QVBoxLayout(group)
         return group
 
+    # Em dashboard_window.py, na classe DashboardWindow
+
+    # SUBSTITUA ESTE MÉTODO INTEIRO PELA VERSÃO ABAIXO
+
     def _create_kpi_group(self):
-        """Cria o QGroupBox para os KPIs e as contagens gerais."""
+        """Cria o QGroupBox para os KPIs em uma grade simétrica de 3x2."""
         group = QGroupBox("Indicadores Chave do Período")
         group_layout = QVBoxLayout(group)
         
-        # --- Grid dos KPIs ---
+        # --- Grade 3x2 para os KPIs ---
         grid_layout = QGridLayout()
         grid_layout.setSpacing(15)
+        
+        # Criação de todos os 6 cards
         self.card_faturamento = self._create_kpi_card("Faturamento Total", "R$ 0,00", 'fa5s.dollar-sign', '#28a745')
         self.card_lucro = self._create_kpi_card("Lucro Líquido", "R$ 0,00", 'fa5s.chart-line', '#007bff')
+        self.card_margem = self._create_kpi_card("Margem Média", "0.00%", 'fa5s.percentage', '#17a2b8') # Novo Card
         self.card_vendas = self._create_kpi_card("Nº de Vendas", "0", 'fa5s.shopping-cart', '#6f42c1')
         self.card_ticket = self._create_kpi_card("Ticket Médio", "R$ 0,00", 'fa5s.receipt', '#fd7e14')
+        self.card_perdas = self._create_kpi_card("Perdas e Prejuízos", "R$ 0,00", 'fa5s.arrow-down', '#dc3545')
+        
+        # Organização dos cards na grade 3x2
+        # Linha 1: Foco Financeiro
         grid_layout.addWidget(self.card_faturamento, 0, 0)
         grid_layout.addWidget(self.card_lucro, 0, 1)
+        grid_layout.addWidget(self.card_margem, 0, 2)
+        
+        # Linha 2: Foco Operacional
         grid_layout.addWidget(self.card_vendas, 1, 0)
         grid_layout.addWidget(self.card_ticket, 1, 1)
+        grid_layout.addWidget(self.card_perdas, 1, 2)
+        
         group_layout.addLayout(grid_layout)
 
-        # --- Separador ---
+        # --- Separador e Contagens Gerais (sem alterações) ---
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
         separator.setFrameShadow(QFrame.Sunken)
         separator.setObjectName("kpiSeparator")
         group_layout.addWidget(separator)
         
-        # --- Layout das Contagens Gerais ---
         counts_layout = QHBoxLayout()
         counts_layout.setSpacing(20)
         
@@ -294,7 +309,7 @@ class DashboardWindow(QWidget):
         
         group_layout.addLayout(counts_layout)
         return group
-
+    
     def _create_kpi_card(self, title, value, icon_name, icon_bg_color):
         """Cria um widget de card individual."""
         card = QFrame()
@@ -614,6 +629,16 @@ class DashboardWindow(QWidget):
             self.card_vendas.findChild(QLabel, "kpiValue").setText(str(num_vendas_valor))
             self.card_ticket.findChild(QLabel, "kpiValue").setText(f"R$ {ticket_medio:.2f}")
 
+            # --- INÍCIO DA MODIFICAÇÃO: ATUALIZAR O NOVO CARD ---
+            self.card_perdas.findChild(QLabel, "kpiValue").setText(f"R$ {dados.get('total_perdas', 0):.2f}")
+            # --- FIM DA MODIFICAÇÃO ---
+
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            # Adicione esta linha para preencher o novo card de margem
+            margem_valor = dados.get('margem_lucro_media', 0)
+            self.card_margem.findChild(QLabel, "kpiValue").setText(f"{margem_valor:.2f}%")
+            # --- FIM DA MODIFICAÇÃO ---
+
             # --- Atualizar Contagens Gerais ---
             self.lbl_total_produtos.setText(f"Produtos: <b>{dados.get('total_produtos', 0)}</b>")
             self.lbl_total_clientes.setText(f"Clientes: <b>{dados.get('total_clientes', 0)}</b>")
@@ -689,8 +714,12 @@ class DashboardWindow(QWidget):
         """Limpa a UI quando não há dados."""
         self.card_faturamento.findChild(QLabel, "kpiValue").setText("R$ 0,00")
         self.card_lucro.findChild(QLabel, "kpiValue").setText("R$ 0,00")
+        self.card_perdas.findChild(QLabel, "kpiValue").setText("R$ 0,00") # <-- Adicionado
         self.card_vendas.findChild(QLabel, "kpiValue").setText("0")
         self.card_ticket.findChild(QLabel, "kpiValue").setText("R$ 0,00")
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        self.card_margem.findChild(QLabel, "kpiValue").setText("0.00%") # Zera o novo card
+        # --- FIM DA MODIFICAÇÃO ---
 
         self.tabela_produtos.setRowCount(0)
         self.tabela_pagamentos.setRowCount(0)

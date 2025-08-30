@@ -308,13 +308,25 @@ class PromocoesWindow(QWidget):
         self.tabela.setRowCount(0)
         icon_color = self.theme_colors.get('text_color', '#000')
 
-        for row, promocao_row in enumerate(promocoes):
+        # Itera sobre as promoções sem usar 'enumerate'
+        for promocao_row in promocoes:
             promocao = dict(promocao_row)
-            self.tabela.insertRow(row)
 
+            # --- INÍCIO DA CORREÇÃO ---
+            # 1. Primeiro, verifica se o produto associado à promoção ainda existe.
             produto = self.db.obter_produto(promocao['produto_id'])
-            if not produto: continue
+            
+            # 2. Se o produto não existe (foi apagado), simplesmente pula para a próxima promoção.
+            #    Nenhuma linha em branco será criada.
+            if not produto:
+                continue
 
+            # 3. Se o produto existe, adicionamos uma nova linha e obtemos seu índice para preenchê-la.
+            row = self.tabela.rowCount()
+            self.tabela.insertRow(row)
+            # --- FIM DA CORREÇÃO ---
+
+            # O restante do código para preencher a linha permanece o mesmo.
             tipo_aplicacao = promocao.get('tipo_aplicacao', 'Ambos')
             if not produto.get('fracionado'): tipo_aplicacao = 'Embalagem'
 
@@ -352,20 +364,15 @@ class PromocoesWindow(QWidget):
             data_fim_promo = promocao.get('data_fim')
             data_validade_prod = produto.get('data_validade')
 
-            # --- INÍCIO DA CORREÇÃO DA FONTE ---
-            # Se a data de fim da promoção for a mesma da validade, colore a FONTE
             if data_fim_promo and data_validade_prod and data_fim_promo == data_validade_prod:
-                # Usa uma cor amarela brilhante para boa visibilidade no tema escuro
                 fim_item.setForeground(QColor("#FFD700")) 
                 font = QFont()
                 font.setBold(True)
                 fim_item.setFont(font)
                 fim_item.setToolTip("Promoção termina na data de validade do produto.")
-            # --- FIM DA CORREÇÃO DA FONTE ---
             
             self.tabela.setItem(row, 6, fim_item)
 
-            # --- INÍCIO DA CORREÇÃO DOS BOTÕES DE AÇÃO ---
             acoes_widget = QWidget()
             acoes_layout = QHBoxLayout(acoes_widget)
             acoes_layout.setContentsMargins(5, 2, 5, 2)
@@ -385,7 +392,6 @@ class PromocoesWindow(QWidget):
             acoes_layout.addWidget(excluir_btn)
             
             self.tabela.setCellWidget(row, 7, acoes_widget)
-            # --- FIM DA CORREÇÃO DOS BOTÕES DE AÇÃO ---
         
         self.tabela.verticalHeader().setDefaultSectionSize(55)
             

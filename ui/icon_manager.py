@@ -77,6 +77,7 @@ class IconManager:
         'vencimentos': 'fa5s.calendar-times',
         'break': 'fa5s.unlink', # Quebrar embalagem
         'check_stock': 'fa5s.box-open',
+        'thumb-down': 'fa5s.thumbs-down', # <--- ADICIONE ESTA LINHA
 
         # --- ÍCONES NOVOS PARA O FORMULÁRIO DE PRODUTO ---
         'barcode': 'fa5s.barcode',

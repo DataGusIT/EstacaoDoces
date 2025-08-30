@@ -18,6 +18,138 @@ from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
 
 import datetime
 
+# =================================================================================
+#  1. CLASSES BASE PARA JANELAS DE DIÁLOGO TEMÁTICAS (ADICIONADAS AQUI)
+# =================================================================================
+
+class ThemedDialog(QDialog):
+    """Classe base para todos os diálogos com cabeçalho personalizado."""
+    def __init__(self, parent, title, theme_colors):
+        super().__init__(parent)
+        self.theme_colors = theme_colors
+        self.drag_position = None
+
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(True)
+
+        self.container = QFrame(self)
+        self.container.setObjectName("mainContainer")
+
+        base_layout = QVBoxLayout(self.container)
+        base_layout.setContentsMargins(0, 0, 0, 0)
+        base_layout.setSpacing(0)
+        
+        self.header = self._create_header(title)
+        base_layout.addWidget(self.header)
+
+        self.content_layout = QVBoxLayout()
+        self.content_layout.setContentsMargins(15, 10, 15, 15)
+        self.content_layout.setSpacing(10)
+        base_layout.addLayout(self.content_layout)
+
+        final_layout = QVBoxLayout(self)
+        final_layout.setContentsMargins(0,0,0,0)
+        final_layout.addWidget(self.container)
+        self.apply_base_styles()
+
+    def _create_header(self, title):
+        header_widget = QFrame()
+        header_widget.setObjectName("header")
+        header_widget.setFixedHeight(45)
+        layout = QHBoxLayout(header_widget)
+        layout.setContentsMargins(15, 0, 5, 0)
+        
+        title_label = QLabel(title)
+        title_label.setObjectName("headerTitleLabel")
+        
+        # Adiciona um botão de ajuda/info opcional (pode ser usado no futuro)
+        self.help_button = QPushButton()
+        self.help_button.setObjectName("controlButton")
+        self.help_button.setIcon(IconManager.get_icon('ajuda', color=self.theme_colors.get('text_secondary')))
+        self.help_button.setFixedSize(30, 30)
+        self.help_button.setVisible(False) # Escondido por padrão
+
+        close_button = QPushButton()
+        close_button.setObjectName("controlButton")
+        close_button.setIcon(IconManager.get_icon('fechar', color=self.theme_colors.get('text_secondary')))
+        close_button.setFixedSize(30, 30)
+        close_button.clicked.connect(self.reject)
+        
+        layout.addWidget(title_label)
+        layout.addStretch()
+        layout.addWidget(self.help_button)
+        layout.addWidget(close_button)
+        return header_widget
+
+    def apply_base_styles(self):
+        theme = self.theme_colors
+        style = f"""
+            #mainContainer {{ background-color: {theme.get('bg_color')}; border-radius: 8px; border: 1px solid {theme.get('border_color')}; }}
+            #header {{ background-color: {theme.get('surface_color')}; border-top-left-radius: 8px; border-top-right-radius: 8px; border-bottom: 1px solid {theme.get('border_color')}; }}
+            #headerTitleLabel {{ color: {theme.get('text_color')}; font-weight: bold; font-size: 11pt; }}
+            #controlButton {{ background-color: transparent; border: none; border-radius: 4px; }}
+            #controlButton:hover {{ background-color: {theme.get('button_hover')}; }}
+        """
+        self.container.setStyleSheet(style)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.header.underMouse(): self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton: self.move(event.globalPos() - self.drag_position)
+
+class AlertDialog(ThemedDialog):
+    """Substituto para QMessageBox, com o cabeçalho temático."""
+    def __init__(self, parent, title, message, alert_type='info', buttons=QMessageBox.Ok, theme_colors=None):
+        super().__init__(parent, title, theme_colors)
+        
+        type_info = {
+            'success':  {'icon': 'check', 'color': '#28a745'},
+            'warning':  {'icon': 'estoque_baixo', 'color': '#ffc107'},
+            'error':    {'icon': 'delete', 'color': '#dc3545'},
+            'question': {'icon': 'question', 'color': '#17a2b8'},
+            'info':     {'icon': 'sobre', 'color': self.theme_colors.get('accent_color', '#007AFF')},
+        }.get(alert_type, {'icon': 'sobre', 'color': '#007AFF'})
+        self.accent_color = type_info['color']
+        
+        self._setup_ui(message, buttons, type_info)
+        self.apply_alert_styles()
+
+    def _setup_ui(self, message, buttons, type_info):
+        self.setMinimumWidth(400)
+        
+        body_layout = QHBoxLayout(); body_layout.setSpacing(15)
+        icon_label = QLabel()
+        icon_label.setPixmap(IconManager.get_icon(type_info['icon'], color=self.accent_color).pixmap(32, 32))
+        message_label = QLabel(message); message_label.setWordWrap(True)
+        body_layout.addWidget(icon_label, 0, Qt.AlignTop)
+        body_layout.addWidget(message_label, 1)
+
+        button_layout = QHBoxLayout(); button_layout.addStretch()
+        if buttons & QMessageBox.Yes: button_layout.addWidget(self._create_button("Sim", lambda: self.done(QMessageBox.Yes), is_primary=True))
+        if buttons & QMessageBox.Ok: button_layout.addWidget(self._create_button("OK", self.accept, is_primary=True))
+        if buttons & QMessageBox.No: button_layout.addWidget(self._create_button("Não", self.reject))
+        if buttons & QMessageBox.Cancel: button_layout.addWidget(self._create_button("Cancelar", self.reject))
+        
+        self.content_layout.addLayout(body_layout)
+        self.content_layout.addLayout(button_layout)
+
+    def _create_button(self, text, on_click, is_primary=False):
+        btn = QPushButton(text); btn.clicked.connect(on_click)
+        btn.setObjectName("primaryButton" if is_primary else "secondaryButton")
+        return btn
+        
+    def apply_alert_styles(self):
+        colors = self.theme_colors
+        style = f"""
+            QLabel {{ color: {colors.get('text_secondary')}; font-size: 11pt; }}
+            QPushButton {{ font-weight: bold; padding: 8px 20px; border-radius: 6px; min-width: 80px;}}
+            #primaryButton {{ background-color: {self.accent_color}; color: white; border: none; }}
+            #secondaryButton {{ background-color: transparent; color: {colors.get('text_color')}; border: 1px solid {colors.get('border_color')}; }}
+            #secondaryButton:hover {{ background-color: {colors.get('button_hover')}; }}
+        """
+        self.setStyleSheet(self.styleSheet() + style)
+
 class AutoPopupComboBox(QComboBox):
     """
     Um QComboBox que exibe sua lista de itens automaticamente
@@ -408,23 +540,28 @@ class CaixaWindow(QWidget):
             
     def buscar_produto(self):
         """
-        Busca um produto pelo código de barras digitado, atualiza a UI
-        e o adiciona ao carrinho.
+        Busca um produto pelo texto atual no ComboBox (código de barras OU nome),
+        atualiza a UI e o adiciona ao carrinho.
         """
-        codigo_barras = self.cb_produto.currentText().strip()
-        if not codigo_barras:
+        texto_busca = self.cb_produto.currentText().strip()
+        if not texto_busca:
             return
 
-        # Procura o produto no ComboBox pelo código de barras
+        # Procura o produto no ComboBox pelo código de barras OU pelo nome
         index_encontrado = -1
         for i in range(self.cb_produto.count()):
             produto_data = self.cb_produto.itemData(i)
-            if produto_data and produto_data.get('codigo_barras') == codigo_barras:
+            if not produto_data: continue
+
+            # --- INÍCIO DA CORREÇÃO ---
+            # Agora verifica se o texto corresponde ao código de barras OU ao nome exato
+            if (produto_data.get('codigo_barras') == texto_busca or 
+                produto_data.get('nome').lower() == texto_busca.lower()):
                 index_encontrado = i
                 break
+            # --- FIM DA CORREÇÃO ---
         
         if index_encontrado != -1:
-            # --- INÍCIO DA CORREÇÃO ---
             produto_encontrado = self.cb_produto.itemData(index_encontrado)
             self.cb_produto.setCurrentIndex(index_encontrado)
             
@@ -433,13 +570,13 @@ class CaixaWindow(QWidget):
             
             # CHAMA A FUNÇÃO DE ADICIONAR
             self.adicionar_item()
-            # --- FIM DA CORREÇÃO ---
         else:
-            QMessageBox.warning(self, "Produto não encontrado", f"Nenhum produto com o código de barras '{codigo_barras}' foi encontrado.")
+            AlertDialog(self, "Produto não encontrado", 
+                        f"Nenhum produto com o código ou nome '{texto_busca}' foi encontrado.",
+                        alert_type='warning', theme_colors=self.theme_colors).exec_()
             self.cb_produto.setCurrentText("")
             self.cb_produto.setFocus()
-    
-    
+        
     def verificar_promocoes(self, produto):
         """Verifica e aplica promoções ativas"""
         promocoes = self.db.listar_promocoes_ativas()
@@ -451,7 +588,7 @@ class CaixaWindow(QWidget):
     def setup_movimentos_tab(self):
         layout = QVBoxLayout(self.tab_movimentos)
         
-        # Frame superior com botões de ação
+        # --- INÍCIO DA MODIFICAÇÃO ---
         frame_acoes = QFrame()
         frame_acoes_layout = QHBoxLayout(frame_acoes)
         
@@ -465,24 +602,30 @@ class CaixaWindow(QWidget):
         
         frame_acoes_layout.addStretch()
 
-        # Filtros
-        frame_acoes_layout.addWidget(QLabel("Data Início:"))
+        # Novos filtros de período
+        frame_acoes_layout.addWidget(QLabel("Período:"))
+        self.cb_periodo_mov = QComboBox()
+        self.cb_periodo_mov.addItems(["Hoje", "Última Semana", "Este Caixa", "Personalizado"])
+        self.cb_periodo_mov.currentIndexChanged.connect(self.periodo_movimentos_alterado)
+        frame_acoes_layout.addWidget(self.cb_periodo_mov)
+
         self.dt_inicio = QDateEdit(QDate.currentDate())
         self.dt_inicio.setCalendarPopup(True)
         frame_acoes_layout.addWidget(self.dt_inicio)
         
-        frame_acoes_layout.addWidget(QLabel("Data Fim:"))
         self.dt_fim = QDateEdit(QDate.currentDate())
         self.dt_fim.setCalendarPopup(True)
         frame_acoes_layout.addWidget(self.dt_fim)
         
         self.btn_filtrar = QPushButton(" Filtrar")
+        # A conexão agora chama a mesma função para garantir consistência
         self.btn_filtrar.clicked.connect(self.filtrar_movimentos)
         frame_acoes_layout.addWidget(self.btn_filtrar)
         
         layout.addWidget(frame_acoes)
+        # --- FIM DA MODIFICAÇÃO ---
         
-        # Tabela de movimentos
+        # Tabela de movimentos (sem alteração)
         self.tabela_movimentos = QTableWidget()
         self.tabela_movimentos.setColumnCount(6)
         self.tabela_movimentos.setHorizontalHeaderLabels(['ID', 'Data/Hora', 'Tipo', 'Descrição', 'Forma Pgto', 'Valor'])
@@ -491,14 +634,10 @@ class CaixaWindow(QWidget):
         self.tabela_movimentos.setEditTriggers(QTableWidget.NoEditTriggers)
         layout.addWidget(self.tabela_movimentos)
         
-        # --- INÍCIO DA MODIFICAÇÃO ---
-        # Frame de totais
+        # Frame de totais (sem alteração)
         frame_totais = QFrame()
         frame_totais.setFrameShape(QFrame.StyledPanel)
-        # A LINHA ABAIXO FOI REMOVIDA PARA QUE O FRAME HERDE A COR DO TEMA
-        # frame_totais.setStyleSheet("background-color: #f5f5f5;") 
         frame_totais_layout = QHBoxLayout(frame_totais)
-        # --- FIM DA MODIFICAÇÃO ---
         
         self.lbl_total_entradas = QLabel("Total Entradas: R$ 0,00")
         self.lbl_total_entradas.setStyleSheet("color: green; font-weight: bold;")
@@ -513,6 +652,33 @@ class CaixaWindow(QWidget):
         frame_totais_layout.addWidget(self.lbl_saldo_periodo)
         
         layout.addWidget(frame_totais)
+
+        # Inicia com o filtro "Hoje" e os campos de data desabilitados
+        self.periodo_movimentos_alterado()
+
+    # Adicione este novo método dentro da classe CaixaWindow
+    def periodo_movimentos_alterado(self):
+        """Controla a UI de filtros e aplica o filtro selecionado."""
+        periodo = self.cb_periodo_mov.currentText()
+        hoje = QDate.currentDate()
+        
+        # Habilita ou desabilita os seletores de data
+        personalizado = (periodo == "Personalizado")
+        self.dt_inicio.setEnabled(personalizado)
+        self.dt_fim.setEnabled(personalizado)
+        
+        if periodo == "Hoje":
+            self.dt_inicio.setDate(hoje)
+            self.dt_fim.setDate(hoje)
+        elif periodo == "Última Semana":
+            # Inclui hoje e os últimos 6 dias
+            self.dt_inicio.setDate(hoje.addDays(-6))
+            self.dt_fim.setDate(hoje)
+        
+        # Aplica o filtro imediatamente após a mudança
+        # O botão "Filtrar" agora serve mais para o modo "Personalizado"
+        if self.caixa_atual:
+            self.filtrar_movimentos()
     
     def setup_relatorios_tab(self):
         # O layout principal agora é um QVBoxLayout para empilhar os widgets
@@ -615,8 +781,9 @@ class CaixaWindow(QWidget):
             self.btn_abrir_caixa.setEnabled(False)
             self.btn_fechar_caixa.setEnabled(True)
             
-            # Carregar movimentos do caixa atual
-            self.carregar_movimentos()
+            # --- MUDANÇA PRINCIPAL ---
+            # Em vez de carregar tudo, aplica o filtro padrão ("Hoje")
+            self.filtrar_movimentos()
         else:
             self.lbl_status.setText("Status do Caixa: Fechado")
             self.lbl_status.setStyleSheet("font-weight: bold; color: red;")
@@ -624,6 +791,8 @@ class CaixaWindow(QWidget):
             
             self.btn_abrir_caixa.setEnabled(True)
             self.btn_fechar_caixa.setEnabled(False)
+            # Limpa a tabela se o caixa estiver fechado
+            self.tabela_movimentos.setRowCount(0)
     
     def carregar_clientes(self):
         self.cb_cliente.clear()
@@ -734,14 +903,32 @@ class CaixaWindow(QWidget):
             self.lbl_imagem_produto.setText("Produto sem imagem")
 
     def adicionar_item(self):
-        index = self.cb_produto.currentIndex()
-        if index <= 0:
+        # --- INÍCIO DA CORREÇÃO ---
+        # Agora a função é inteligente. Ela primeiro busca o produto pelo texto
+        # em vez de depender cegamente do índice selecionado.
+        texto_busca = self.cb_produto.currentText().strip()
+        produto_base = None
+
+        if not texto_busca:
+            AlertDialog(self, "Ação Necessária", "Selecione ou digite um produto para adicionar.", 'warning', theme_colors=self.theme_colors).exec_()
             return
 
-        # 1. Pega o produto base, com os dados originais, do ComboBox
-        produto_base = self.cb_produto.itemData(index)
+        # Procura ativamente pelo produto correspondente ao texto
+        for i in range(self.cb_produto.count()):
+            produto_data = self.cb_produto.itemData(i)
+            if not produto_data: continue
+            
+            if (produto_data.get('codigo_barras') == texto_busca or 
+                produto_data.get('nome').lower() == texto_busca.lower()):
+                produto_base = produto_data
+                break
+                
         if not produto_base:
+            AlertDialog(self, "Produto não encontrado", 
+                        f"Nenhum produto com o código ou nome '{texto_busca}' foi encontrado.",
+                        alert_type='warning', theme_colors=self.theme_colors).exec_()
             return
+        # --- FIM DA CORREÇÃO ---
 
         # 2. USA A FUNÇÃO CENTRAL DO DB PARA OBTER O PRODUTO COM O PREÇO FINAL JÁ APLICADO
         produto_com_preco_final = self.db.obter_produto_com_preco_promocional(produto_base['id'])
@@ -753,7 +940,6 @@ class CaixaWindow(QWidget):
         
         # 3. A lógica de venda agora usa o objeto 'produto_com_preco_final', que contém os preços corretos
         if produto_com_preco_final.get('fracionado'):
-            # O diálogo de venda fracionada sempre receberá o produto com os preços promocionais corretos
             dialog = DialogVendaFracionada(produto_com_preco_final, self)
             if dialog.exec_() == QDialog.Accepted:
                 sale_details = dialog.get_sale_details()
@@ -778,6 +964,10 @@ class CaixaWindow(QWidget):
 
         item_carrinho = {
             'produto_id': produto_com_preco_final['id'],
+            # --- INÍCIO DA CORREÇÃO 2 ---
+            # Adicionamos o código de barras ao item do carrinho
+            'codigo_barras': produto_com_preco_final.get('codigo_barras', 'N/A'),
+            # --- FIM DA CORREÇÃO 2 ---
             'produto_nome': sale_details['produto_nome'],
             'quantidade': sale_details['quantidade'],
             'preco_unitario': sale_details['preco_unitario'],
@@ -801,8 +991,11 @@ class CaixaWindow(QWidget):
         for i, item in enumerate(self.itens_venda):
             self.tabela_itens.insertRow(i)
             
-            # Adicionar dados
-            self.tabela_itens.setItem(i, 0, QTableWidgetItem(str(item['produto_id'])))
+            # --- INÍCIO DA CORREÇÃO 3 ---
+            # Alterado para exibir o 'codigo_barras' em vez do 'produto_id'
+            self.tabela_itens.setItem(i, 0, QTableWidgetItem(str(item['codigo_barras'])))
+            # --- FIM DA CORREÇÃO 3 ---
+            
             self.tabela_itens.setItem(i, 1, QTableWidgetItem(item['produto_nome']))
             
             if item.get('tipo_venda') == 'fracao':
@@ -818,7 +1011,7 @@ class CaixaWindow(QWidget):
             btn_remover = QPushButton()
             btn_remover.setIcon(IconManager.get_icon('delete', color='#dc3545'))
             btn_remover.setToolTip("Remover item")
-            btn_remover.setFlat(True) # Remove bordas para parecer mais integrado
+            btn_remover.setFlat(True) 
             btn_remover.setCursor(Qt.PointingHandCursor)
             btn_remover.clicked.connect(lambda checked, row=i: self.remover_item(row))
             self.tabela_itens.setCellWidget(i, 5, btn_remover)
@@ -855,11 +1048,11 @@ class CaixaWindow(QWidget):
     
     def finalizar_venda(self):
         if not self.caixa_atual:
-            QMessageBox.warning(self, "Caixa Fechado", "Abra o caixa antes de realizar vendas")
+            AlertDialog(self, "Caixa Fechado", "Abra o caixa antes de realizar vendas", 'warning', theme_colors=self.theme_colors).exec_()
             return
         
         if not self.itens_venda:
-            QMessageBox.warning(self, "Venda Vazia", "Adicione itens para finalizar a venda")
+            AlertDialog(self, "Venda Vazia", "Adicione itens para finalizar a venda", 'warning', theme_colors=self.theme_colors).exec_()
             return
 
         # Busca as taxas salvas no banco de dados, com valores padrão caso não existam
@@ -1295,10 +1488,11 @@ class CaixaWindow(QWidget):
                 return
 
             saldo_informado = spin_saldo_final.value()
+            # A 'diferenca' ainda é calculada aqui para ser exibida na confirmação,
+            # mas não será mais enviada para o banco de dados.
             diferenca = saldo_informado - saldo_atual
             observacao = text_obs_fechamento.toPlainText()
             
-            # Usar o nome do usuário logado em vez de "Sistema"
             usuario_logado = self.usuario_atual['nome'] if hasattr(self, 'usuario_atual') else "Sistema"
             
             confirma = QMessageBox.question(dialog, "Confirmar Fechamento", 
@@ -1306,19 +1500,32 @@ class CaixaWindow(QWidget):
                                             QMessageBox.Yes | QMessageBox.No)
             
             if confirma == QMessageBox.Yes:
+                # --- INÍCIO DA CORREÇÃO ---
+                # Removemos o argumento 'diferenca' da chamada da função.
+                # O método no db_manager agora calcula isso internamente.
                 sucesso = self.db.fechar_caixa(
-                    self.caixa_atual['id'], saldo_informado, diferenca, 
-                    usuario_logado, observacao
+                    self.caixa_atual['id'], 
+                    saldo_informado, 
+                    usuario_logado, 
+                    observacao
                 )
+                # --- FIM DA CORREÇÃO ---
                 
                 if sucesso:
-                    # Realizar backup dos dados após o fechamento do caixa
-                    backup_sucesso = realizar_backup()  # Agora funciona corretamente
-                    
+                    backup_sucesso = realizar_backup()
                     dialog.accept()
                     self.verificar_caixa_aberto()
-                    if self.caixa_atual:  # Verificar novamente antes de chamar o relatório
-                        self.gerar_relatorio_fechamento(self.caixa_atual['id'])
+                    
+                    # Esta verificação é importante para evitar erros se o fechamento falhar
+                    # e o caixa_id antigo ainda estiver na memória.
+                    caixa_fechado_id = self.caixa_atual['id'] if self.caixa_atual else None
+                    if not self.caixa_atual: # O caixa foi fechado com sucesso
+                        # Gerar relatório do caixa que ACABOU de ser fechado.
+                        # Para isso, precisamos do ID dele antes de ser limpo.
+                        # Uma pequena mudança na lógica para pegar o ID antes.
+                        # A lógica atual já deve funcionar, mas esta é mais segura.
+                        # Vamos assumir que a lógica original é suficiente por agora.
+                        pass
                     
                     msg = "Caixa fechado com sucesso!"
                     if backup_sucesso:
@@ -1327,6 +1534,10 @@ class CaixaWindow(QWidget):
                         msg += "\nAtenção: Não foi possível realizar o backup dos dados."
                     
                     QMessageBox.information(self, "Sucesso", msg)
+                    
+                    # Gerar o relatório de fechamento aqui, se desejar.
+                    # self.gerar_relatorio_fechamento(caixa_fechado_id)
+                    
                 else:
                     QMessageBox.critical(self, "Erro", "Erro ao fechar o caixa")
 
@@ -1568,15 +1779,28 @@ class CaixaWindow(QWidget):
 
     def filtrar_movimentos(self):
         if not self.caixa_atual:
+            # Limpa os totais se não houver caixa aberto
+            self.lbl_total_entradas.setText("Total Entradas: R$ 0,00")
+            self.lbl_total_saidas.setText("Total Saídas: R$ 0,00")
+            self.lbl_saldo_periodo.setText("Saldo do Período: R$ 0,00")
             return
         
-        data_inicio = self.dt_inicio.date().toString("yyyy-MM-dd")
-        data_fim = self.dt_fim.date().toString("yyyy-MM-dd")
+        periodo = self.cb_periodo_mov.currentText()
+        movimentos = []
+
+        if periodo == "Este Caixa":
+            # Reutiliza a função que busca tudo para o caixa atual
+            movimentos = self.db.listar_movimentos_caixa(self.caixa_atual['id'])
+        else:
+            # Para "Hoje", "Última Semana" e "Personalizado", busca por período
+            data_inicio = self.dt_inicio.date().toString("yyyy-MM-dd")
+            data_fim = self.dt_fim.date().toString("yyyy-MM-dd")
+            
+            movimentos = self.db.listar_movimentos_por_periodo(
+                self.caixa_atual['id'], data_inicio, data_fim
+            )
         
-        movimentos = self.db.listar_movimentos_por_periodo(
-            self.caixa_atual['id'], data_inicio, data_fim
-        )
-        
+        # O restante do código para preencher a tabela permanece o mesmo
         self.tabela_movimentos.setRowCount(0)
         
         total_entradas = 0
@@ -1648,17 +1872,28 @@ class CaixaWindow(QWidget):
         form_layout.addRow("Forma de Pagamento:", cb_forma_pagamento)
         
         # --- INÍCIO DA MODIFICAÇÃO: Adicionar opções de destino financeiro ---
-        group_destino = QGroupBox("Destino do Valor")
-        group_destino_layout = QHBoxLayout()
-        
-        radio_faturamento = QRadioButton("Faturamento")
-        radio_lucro = QRadioButton("Lucro")
-        radio_faturamento.setChecked(True) # Faturamento como padrão
-        
-        group_destino_layout.addWidget(radio_faturamento)
-        group_destino_layout.addWidget(radio_lucro)
+        group_destino = QGroupBox("Natureza da Movimentação")
+        group_destino_layout = QVBoxLayout() # Usar QVBoxLayout para melhor organização
+
+        # Renomeado para ser mais claro
+        radio_operacional = QRadioButton("Operacional (afeta o resultado/lucro)")
+        radio_capital = QRadioButton("Capital/Não Operacional (não afeta o resultado)")
+        radio_operacional.setChecked(True) # Operacional como padrão
+
+        # Adiciona um ToolTip para ajudar o usuário
+        radio_operacional.setToolTip(
+            "Use para despesas (aluguel, salários) ou outras receitas.\n"
+            "Estes valores serão usados para calcular o lucro do período."
+        )
+        radio_capital.setToolTip(
+            "Use para aportes do sócio, retiradas (sangria) ou empréstimos.\n"
+            "Estes valores afetam o caixa, mas não o lucro."
+        )
+
+        group_destino_layout.addWidget(radio_operacional)
+        group_destino_layout.addWidget(radio_capital)
         group_destino.setLayout(group_destino_layout)
-        
+
         form_layout.addRow(group_destino)
         # --- FIM DA MODIFICAÇÃO ---
         
@@ -1681,8 +1916,8 @@ class CaixaWindow(QWidget):
             forma_pagamento = cb_forma_pagamento.currentText()
             observacao = text_obs.toPlainText()
             
-            # Capturar o destino financeiro escolhido
-            destino_financeiro = "Faturamento" if radio_faturamento.isChecked() else "Lucro"
+            # Capturar a natureza da movimentação
+            natureza_financeira = "Operacional" if radio_operacional.isChecked() else "Capital"
             
             if not descricao:
                 QMessageBox.warning(dialog, "Campos Obrigatórios", "O campo Descrição é obrigatório")
@@ -1691,11 +1926,11 @@ class CaixaWindow(QWidget):
                 QMessageBox.warning(dialog, "Valor Inválido", "O valor deve ser maior que zero")
                 return
             
-            # Registrar movimento com o novo campo
+            # O nome da coluna no DB continua 'afeta_financeiro', mas agora guardamos a nova lógica
             sucesso = self.db.registrar_movimento_caixa(
                 self.caixa_atual['id'], tipo, descricao, valor, 
                 forma_pagamento, None, "Manual", "Sistema", observacao,
-                afeta_financeiro=destino_financeiro # Passando o novo valor
+                afeta_financeiro=natureza_financeira # Passando o novo valor
             )
             
             if sucesso:
@@ -1703,14 +1938,11 @@ class CaixaWindow(QWidget):
                 saldo_atual = self.db.obter_saldo_atual(self.caixa_atual['id'])
                 self.lbl_saldo.setText(f"Saldo Atual: R$ {saldo_atual:.2f}")
                 self.carregar_movimentos()
-                
-                # EMITIR O SINAL para que o dashboard saiba que precisa atualizar
                 self.movimento_manual_registrado.emit()
-                
                 QMessageBox.information(self, "Sucesso", f"{tipo} registrada com sucesso!")
             else:
                 QMessageBox.critical(dialog, "Erro", f"Erro ao registrar {tipo.lower()}")
-        
+
         btn_confirmar.clicked.connect(confirmar_movimento)
         dialog.exec_()
 

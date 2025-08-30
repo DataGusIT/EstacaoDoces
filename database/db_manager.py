@@ -275,6 +275,8 @@ class DatabaseManager:
     
     # --- MÉTODOS PARA OTIMIZAÇÃO DA TELA DE ESTOQUE (NOVOS E MODIFICADOS) ---
 
+    # Em db_manager.py, substitua esta função inteira:
+
     def _construir_clausula_where_e_params(self, filtros):
         """
         Helper privado para construir a cláusula WHERE e a lista de parâmetros dinamicamente.
@@ -290,7 +292,6 @@ class DatabaseManager:
             params.extend([termo, termo, termo])
 
         # Filtro por categoria
-        # O currentData do combo pode vir como None ou uma string vazia se "Todas" for selecionado
         if filtros.get('categoria') and filtros['categoria'] != "todas":
             where_clauses.append("p.categoria = ?")
             params.append(filtros['categoria'])
@@ -298,15 +299,19 @@ class DatabaseManager:
         # Filtro por nível de estoque
         nivel_estoque = filtros.get('estoque')
         if nivel_estoque and nivel_estoque != "todos":
-            # A mesma lógica de cálculo de estoque total que você tinha, mas em SQL
-            estoque_calculado_sql = "(CASE WHEN p.fracionado = 1 THEN (p.quantidade * p.qtd_por_embalagem + p.estoque_fracionado) ELSE p.quantidade END)"
-            
+            # --- INÍCIO DA CORREÇÃO ---
+            # A lógica foi simplificada. Para o filtro de nível de estoque (baixo, médio, alto),
+            # sempre comparamos a quantidade principal do produto (p.quantidade),
+            # que representa as embalagens para produtos fracionados. Isso alinha o
+            # comportamento do filtro com a regra de negócio de que o estoque mínimo
+            # é definido em termos de embalagens.
             if nivel_estoque == "baixo":
-                where_clauses.append(f"{estoque_calculado_sql} <= p.estoque_minimo AND p.estoque_minimo > 0")
+                where_clauses.append("p.quantidade <= p.estoque_minimo AND p.estoque_minimo > 0")
             elif nivel_estoque == "medio":
-                where_clauses.append(f"{estoque_calculado_sql} > p.estoque_minimo AND {estoque_calculado_sql} <= (p.estoque_minimo * 2)")
+                where_clauses.append("p.quantidade > p.estoque_minimo AND p.quantidade <= (p.estoque_minimo * 2)")
             elif nivel_estoque == "alto":
-                where_clauses.append(f"{estoque_calculado_sql} > (p.estoque_minimo * 2)")
+                where_clauses.append("p.quantidade > (p.estoque_minimo * 2)")
+            # --- FIM DA CORREÇÃO ---
 
         # Filtro por data de vencimento
         filtro_vencimento = filtros.get('vencimento')
@@ -562,6 +567,16 @@ class DatabaseManager:
         FROM produtos 
         WHERE categoria IS NOT NULL AND categoria != ''
         ORDER BY categoria
+        ''')
+        return [row[0] for row in self.cursor.fetchall()]
+    
+    def listar_localizacoes_unicas(self):
+        """Retorna uma lista de localizações únicas dos produtos."""
+        self.cursor.execute('''
+        SELECT DISTINCT localizacao 
+        FROM produtos 
+        WHERE localizacao IS NOT NULL AND localizacao != ''
+        ORDER BY localizacao
         ''')
         return [row[0] for row in self.cursor.fetchall()]
 
@@ -1300,74 +1315,60 @@ class DatabaseManager:
     # Métodos para Caixas
     def abrir_caixa(self, saldo_inicial, operador, observacao=""):
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            if not self.ensure_connection(): raise Exception("Falha na conexão")
             
             # Verificar se já existe um caixa aberto
-            cursor.execute("SELECT id FROM caixas WHERE status = 'Aberto'")
-            if cursor.fetchone():
-                conn.close()
-                return False
+            self.cursor.execute("SELECT id FROM caixas WHERE status = 'Aberto'")
+            if self.cursor.fetchone():
+                return False, "Já existe um caixa aberto."
             
             # Registrar abertura de caixa
-            cursor.execute("""
+            self.cursor.execute("""
                 INSERT INTO caixas (saldo_inicial, operador, observacao)
                 VALUES (?, ?, ?)
             """, (saldo_inicial, operador, observacao))
-            
-            caixa_id = cursor.lastrowid
+            caixa_id = self.cursor.lastrowid
             
             # Registrar movimento de entrada do saldo inicial
             if saldo_inicial > 0:
-                cursor.execute("""
-                    INSERT INTO movimentos_caixa 
-                    (caixa_id, tipo, descricao, valor, forma_pagamento, operador)
-                    VALUES (?, 'Entrada', 'Saldo Inicial', ?, 'Dinheiro', ?)
-                """, (caixa_id, saldo_inicial, operador))
+                self.registrar_movimento_caixa(
+                    caixa_id, 'Entrada', 'Saldo Inicial', saldo_inicial, 'Dinheiro', operador=operador
+                )
             
-            conn.commit()
-            conn.close()
-            
-            return caixa_id
+            self.conn.commit()
+            return True, caixa_id
         except Exception as e:
             print(f"Erro ao abrir caixa: {e}")
-            return False
-    
-    def fechar_caixa(self, caixa_id, saldo_final_informado, diferenca, operador, observacao=""):
+            self.conn.rollback()
+            return False, str(e)
+
+    def fechar_caixa(self, caixa_id, saldo_final_informado, operador, observacao=""):
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            if not self.ensure_connection(): raise Exception("Falha na conexão")
             
             # Calcular saldo final do sistema
-            cursor.execute("""
-                SELECT 
-                    SUM(CASE WHEN tipo = 'Entrada' THEN valor ELSE -valor END) 
-                FROM movimentos_caixa 
-                WHERE caixa_id = ?
+            self.cursor.execute("""
+                SELECT SUM(CASE WHEN tipo = 'Entrada' THEN valor ELSE -valor END) 
+                FROM movimentos_caixa WHERE caixa_id = ?
             """, (caixa_id,))
-            
-            saldo_final_sistema = cursor.fetchone()[0] or 0
+            saldo_final_sistema = self.cursor.fetchone()[0] or 0
+            diferenca = saldo_final_informado - saldo_final_sistema
             
             # Atualizar registro do caixa
-            cursor.execute("""
+            self.cursor.execute("""
                 UPDATE caixas SET 
-                data_fechamento = CURRENT_TIMESTAMP,
-                saldo_final_sistema = ?,
-                saldo_final_informado = ?,
-                diferenca = ?,
-                status = 'Fechado',
-                observacao = ?
+                data_fechamento = CURRENT_TIMESTAMP, saldo_final_sistema = ?,
+                saldo_final_informado = ?, diferenca = ?, status = 'Fechado', observacao = ?
                 WHERE id = ?
             """, (saldo_final_sistema, saldo_final_informado, diferenca, observacao, caixa_id))
             
-            conn.commit()
-            conn.close()
-            
+            self.conn.commit()
             return True
         except Exception as e:
             print(f"Erro ao fechar caixa: {e}")
+            self.conn.rollback()
             return False
-    
+
     def buscar_produto_por_codigo_barras(self, codigo_barras):
         query = "SELECT * FROM produtos WHERE codigo_barras = ?"
         self.cursor.execute(query, (codigo_barras,))
@@ -1381,67 +1382,44 @@ class DatabaseManager:
     
     def obter_caixa_aberto(self):
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT * FROM caixas WHERE status = 'Aberto'
-            """)
-            
-            caixa = cursor.fetchone()
-            conn.close()
-            
-            if caixa:
-                return dict(caixa)
-            else:
-                return None
+            if not self.ensure_connection(): return None
+            self.cursor.execute("SELECT * FROM caixas WHERE status = 'Aberto'")
+            caixa = self.cursor.fetchone()
+            return dict(caixa) if caixa else None
         except Exception as e:
             print(f"Erro ao buscar caixa aberto: {e}")
             return None
-    
+
     def obter_saldo_atual(self, caixa_id):
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT 
-                    SUM(CASE WHEN tipo = 'Entrada' THEN valor ELSE -valor END) 
-                FROM movimentos_caixa 
-                WHERE caixa_id = ?
+            if not self.ensure_connection(): return 0.0
+            self.cursor.execute("""
+                SELECT SUM(CASE WHEN tipo = 'Entrada' THEN valor ELSE -valor END) 
+                FROM movimentos_caixa WHERE caixa_id = ?
             """, (caixa_id,))
-            
-            saldo = cursor.fetchone()[0] or 0
-            conn.close()
-            
+            saldo = self.cursor.fetchone()[0] or 0
             return float(saldo)
         except Exception as e:
             print(f"Erro ao obter saldo: {e}")
             return 0.0
     
     def registrar_movimento_caixa(self, caixa_id, tipo, descricao, valor, forma_pagamento="Dinheiro",
-                              referencia_id=None, tipo_referencia=None, operador="Sistema", observacao="",
-                              afeta_financeiro='Faturamento'): # <<< NOVO PARÂMETRO AQUI
+                          referencia_id=None, tipo_referencia=None, operador="Sistema", observacao="",
+                          afeta_financeiro='Operacional'):
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
+            # A conexão já deve estar garantida pela função que chama esta
+            self.cursor.execute("""
                 INSERT INTO movimentos_caixa 
                 (caixa_id, tipo, descricao, valor, forma_pagamento, referencia_id, tipo_referencia, operador, observacao, afeta_financeiro)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (caixa_id, tipo, descricao, valor, forma_pagamento, referencia_id, 
-                    tipo_referencia, operador, observacao, afeta_financeiro)) # <<< ADICIONADO AQUI
-            
-            movimento_id = cursor.lastrowid
-            conn.commit()
-            conn.close()
-            
-            return movimento_id
+                    tipo_referencia, operador, observacao, afeta_financeiro))
+            # REMOVEMOS O COMMIT DAQUI - Ele será feito pela função principal que controla a transação
+            return self.cursor.lastrowid
         except Exception as e:
             print(f"Erro ao registrar movimento: {e}")
-            return False
+            # Lançar a exceção permite que a transação externa faça o rollback
+            raise e
     
     def listar_movimentos_caixa(self, caixa_id):
         try:
@@ -1471,13 +1449,17 @@ class DatabaseManager:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
+            # --- INÍCIO DA CORREÇÃO ---
+            # Adicionado 'localtime' na cláusula WHERE para que o filtro
+            # também considere o fuso horário local.
             cursor.execute("""
                 SELECT id, datetime(data_hora, 'localtime') as data_hora, tipo, descricao, 
-                       valor, forma_pagamento, referencia_id, tipo_referencia
+                    valor, forma_pagamento, referencia_id, tipo_referencia
                 FROM movimentos_caixa 
-                WHERE caixa_id = ? AND date(data_hora) BETWEEN ? AND ?
+                WHERE caixa_id = ? AND date(data_hora, 'localtime') BETWEEN ? AND ?
                 ORDER BY data_hora DESC
             """, (caixa_id, data_inicio, data_fim))
+            # --- FIM DA CORREÇÃO ---
             
             movimentos = [dict(row) for row in cursor.fetchall()]
             conn.close()
@@ -1655,54 +1637,92 @@ class DatabaseManager:
             return None
     
     def registrar_venda(self, cliente_id, valor_total, desconto=0, forma_pagamento="Dinheiro", 
-                       parcelas=1, observacao="", status="Concluída", operador="Sistema"):
+                   parcelas=1, observacao="", status="Concluída", operador="Sistema"):
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
+            if not self.ensure_connection(): raise Exception("Falha na conexão")
+            self.cursor.execute("""
                 INSERT INTO vendas 
                 (cliente_id, valor_total, desconto, forma_pagamento, parcelas, observacao, status, operador)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (cliente_id, valor_total, desconto, forma_pagamento, parcelas, 
-                 observacao, status, operador))
-            
-            venda_id = cursor.lastrowid
-            conn.commit()
-            conn.close()
-            
-            return venda_id
+                observacao, status, operador))
+            # O commit será feito pela lógica de negócio principal (ex: finalizar_venda)
+            return self.cursor.lastrowid
         except Exception as e:
             print(f"Erro ao registrar venda: {e}")
-            return False
+            raise e
     
     def registrar_item_venda(self, venda_id, produto_id, quantidade, preco_unitario, subtotal, vendido_como):
-        """
-        Registra um item na tabela itens_venda, incluindo COMO ele foi vendido.
-        """
         try:
-            # Conexão local para segurança de thread, se aplicável
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
+            self.cursor.execute("""
                 INSERT INTO itens_venda 
                 (venda_id, produto_id, quantidade, preco_unitario, subtotal, vendido_como)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (venda_id, produto_id, quantidade, preco_unitario, subtotal, vendido_como))
-            
-            conn.commit()
-            conn.close()
+            # O commit será feito pela lógica de negócio principal
             return True
-            
         except Exception as e:
             print(f"Erro ao registrar item de venda: {e}")
-            return False
+            raise e
+    
+    def registrar_perda_produto(self, produto_id, motivo="Vencimento", operador="Sistema"):
+        """
+        Zera o estoque de um produto e registra o valor de custo como uma perda.
+        Retorna (True, "Mensagem") em caso de sucesso ou (False, "Mensagem") em caso de erro.
+        """
+        try:
+            if not self.ensure_connection():
+                raise Exception("Sem conexão com o banco de dados.")
+
+            produto = self.obter_produto(produto_id)
+            if not produto:
+                return False, "Produto não encontrado."
+
+            quantidade_perdida = produto['quantidade']
+            custo_unitario = produto['preco_compra'] or 0
+            valor_perda = quantidade_perdida * custo_unitario
+
+            if valor_perda <= 0:
+                # Apenas zera o estoque se não houver custo para registrar
+                self.cursor.execute("UPDATE produtos SET quantidade = 0, estoque_fracionado = 0 WHERE id = ?", (produto_id,))
+                self.conn.commit()
+                return True, "Estoque zerado com sucesso (sem valor de perda registrado)."
+
+            caixa_aberto = self.obter_caixa_aberto()
+            if not caixa_aberto:
+                return False, "Nenhum caixa aberto para registrar a movimentação de perda."
+
+            self.begin_transaction()
+
+            # 1. Zera o estoque do produto
+            self.cursor.execute("UPDATE produtos SET quantidade = 0, estoque_fracionado = 0 WHERE id = ?", (produto_id,))
+
+            # 2. Registra a saída no caixa como uma 'Perda'
+            self.registrar_movimento_caixa(
+                caixa_id=caixa_aberto['id'],
+                tipo='Saída',
+                descricao=f"Perda por {motivo}: {produto['nome']}",
+                valor=valor_perda,
+                forma_pagamento='N/A',
+                referencia_id=produto_id,
+                tipo_referencia='Perda Estoque',
+                operador=operador,
+                # --- AQUI ESTÁ A CHAVE ---
+                afeta_financeiro='Perda' 
+            )
+            
+            self.commit_transaction()
+            return True, f"Baixa de {quantidade_perdida} unidades registrada como perda de R$ {valor_perda:.2f}."
+
+        except Exception as e:
+            self.rollback_transaction()
+            print(f"Erro ao registrar perda de produto: {e}")
+            return False, f"Erro ao registrar perda: {e}"
     
     def obter_dados_dashboard(self, data_inicio, data_fim):
         """
-        VERSÃO FINAL E CORRIGIDA: Usa a coluna 'vendido_como' para calcular o lucro
-        de forma precisa, resolvendo o problema de lucro negativo.
+        VERSÃO COM LÓGICA FINANCEIRA CORRIGIDA: Interpreta corretamente
+        movimentos operacionais vs. de capital para um cálculo preciso de lucro.
         """
         try:
             if not self.ensure_connection():
@@ -1710,30 +1730,25 @@ class DatabaseManager:
 
             cursor = self.conn.cursor()
 
+            # 1. LUCRO DAS VENDAS (Custo da Mercadoria Vendida)
+            # Esta parte já está correta e muito bem implementada!
             cursor.execute("""
                 SELECT id FROM vendas
                 WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
             """, (data_inicio, data_fim))
             venda_ids_rows = cursor.fetchall()
             venda_ids = tuple(row['id'] for row in venda_ids_rows) if venda_ids_rows else ()
-
-            num_vendas_periodo = 0
-            lucro_de_vendas = 0
             
+            lucro_de_vendas = 0
             if venda_ids:
                 query_in_ids = f"IN {venda_ids}" if len(venda_ids) > 1 else f"= {venda_ids[0]}"
-                num_vendas_periodo = len(venda_ids)
-
-                # --- INÍCIO DA CORREÇÃO DEFINITIVA DO CÁLCULO DE LUCRO ---
                 cursor.execute(f"""
                     SELECT SUM(
                         i.subtotal - (
                             i.quantidade *
                             CASE
-                                -- Se o item foi vendido como 'Fração', o custo é o da unidade.
                                 WHEN i.vendido_como = 'Fração' THEN
                                     COALESCE(p.preco_compra, 0) / p.qtd_por_embalagem
-                                -- Caso contrário (vendido como 'Embalagem'), o custo é o da embalagem inteira.
                                 ELSE
                                     COALESCE(p.preco_compra, 0)
                             END
@@ -1744,27 +1759,38 @@ class DatabaseManager:
                     WHERE i.venda_id {query_in_ids}
                     AND p.preco_compra IS NOT NULL AND p.preco_compra > 0 AND p.qtd_por_embalagem > 0
                 """)
-                # --- FIM DA CORREÇÃO DEFINITIVA ---
                 lucro_resultado = cursor.fetchone()
                 lucro_de_vendas = lucro_resultado['lucro'] if lucro_resultado and lucro_resultado['lucro'] is not None else 0
 
-            # ... [ O restante da função permanece EXATAMENTE O MESMO ] ...
-            # (faturamento, movimentos financeiros, contagens, etc.)
-
-            # --- DADOS FINANCEIROS (FATURAMENTO E LUCRO LÍQUIDO) DA TABELA MOVIMENTOS_CAIXA ---
+            # --- LÓGICA FINANCEIRA COM PERDAS ---
             cursor.execute("""
                 SELECT
-                    SUM(CASE WHEN tipo = 'Entrada' AND afeta_financeiro = 'Faturamento' THEN valor ELSE 0 END) as entradas_faturamento,
-                    SUM(CASE WHEN tipo = 'Saída' AND afeta_financeiro = 'Faturamento' THEN valor ELSE 0 END) as saidas_faturamento,
-                    SUM(CASE WHEN tipo = 'Entrada' AND afeta_financeiro = 'Lucro' THEN valor ELSE 0 END) as entradas_lucro,
-                    SUM(CASE WHEN tipo = 'Saída' AND afeta_financeiro = 'Lucro' THEN valor ELSE 0 END) as saidas_lucro
+                    SUM(CASE WHEN tipo = 'Entrada' AND tipo_referencia = 'Venda' THEN valor ELSE 0 END) as faturamento_vendas,
+                    SUM(CASE WHEN tipo = 'Entrada' AND tipo_referencia = 'Manual' AND afeta_financeiro = 'Operacional' THEN valor ELSE 0 END) as outras_receitas,
+                    SUM(CASE WHEN tipo = 'Saída' AND tipo_referencia = 'Manual' AND afeta_financeiro = 'Operacional' THEN valor ELSE 0 END) as despesas_operacionais,
+                    
+                    -- ---> NOVA LINHA PARA CALCULAR PERDAS <---
+                    SUM(CASE WHEN afeta_financeiro = 'Perda' THEN valor ELSE 0 END) as total_perdas
+
                 FROM movimentos_caixa
                 WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
             """, (data_inicio, data_fim))
 
             movimentos_financeiros = cursor.fetchone()
-            faturamento_periodo = (movimentos_financeiros['entradas_faturamento'] or 0) - (movimentos_financeiros['saidas_faturamento'] or 0)
-            lucro_periodo = lucro_de_vendas + (movimentos_financeiros['entradas_lucro'] or 0) - (movimentos_financeiros['saidas_lucro'] or 0)
+            
+            faturamento_vendas = movimentos_financeiros['faturamento_vendas'] or 0
+            outras_receitas = movimentos_financeiros['outras_receitas'] or 0
+            despesas_operacionais = movimentos_financeiros['despesas_operacionais'] or 0
+            total_perdas = movimentos_financeiros['total_perdas'] or 0 # <--- NOVO VALOR
+
+            # CÁLCULO FINAL CORRETO
+            faturamento_total_periodo = faturamento_vendas + outras_receitas
+            total_perdas = movimentos_financeiros['total_perdas'] or 0
+            lucro_liquido_periodo = lucro_de_vendas + outras_receitas - despesas_operacionais - total_perdas
+
+            # --- INÍCIO DA MODIFICAÇÃO: CÁLCULO DA MARGEM MÉDIA ---
+            margem_media = (lucro_liquido_periodo / faturamento_total_periodo * 100) if faturamento_total_periodo > 0 else 0
+            # --- FIM DA MODIFICAÇÃO ---
 
             # --- DADOS PARA GRÁFICOS E CONTAGENS GERAIS ---
             cursor.execute("SELECT date(data_hora, 'localtime') as data, SUM(valor_total) as valor FROM vendas WHERE date(data_hora, 'localtime') BETWEEN ? AND ? GROUP BY data ORDER BY data", (data_inicio, data_fim))
@@ -1800,9 +1826,11 @@ class DatabaseManager:
                 melhores_clientes = [dict(row) for row in cursor.fetchall()]
 
             resultado = {
-                'faturamento': faturamento_periodo,
-                'num_vendas': num_vendas_periodo,
-                'lucro': lucro_periodo,
+                'faturamento': faturamento_total_periodo,
+                'lucro': lucro_liquido_periodo,
+                'total_perdas': total_perdas, # <--- ADICIONE ESTA LINHA
+                'margem_lucro_media': margem_media, # <--- ADICIONE ESTA LINHA
+                'num_vendas': len(venda_ids),
                 'produtos': produtos_mais_vendidos,
                 'pagamentos': formas_pagamento,
                 'clientes': melhores_clientes,
@@ -1822,6 +1850,7 @@ class DatabaseManager:
             print(f"Erro detalhado ao obter dados para dashboard: {e}")
             self.registrar_log('ERROR', 'SISTEMA', 'DB_DASHBOARD_FETCH', str(e))
             return None
+    
     
     # --- Métodos para Configurações do Sistema ---
 

@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdi
                            QPushButton, QTableWidget, QTableWidgetItem, QFormLayout,
                            QDateEdit, QComboBox, QMessageBox, QHeaderView, QSpinBox,
                            QDoubleSpinBox, QDialog, QFrame, QToolButton, QGroupBox,
-                           QFileDialog, QCheckBox, QProgressDialog, QGridLayout, QProgressBar)
+                           QFileDialog, QCheckBox, QProgressDialog, QGridLayout, QProgressBar, QCompleter)
 from PyQt5.QtCore import Qt, QDate, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QIcon, QColor, QBrush, QPixmap
 import os
@@ -424,7 +424,7 @@ class EstoqueWindow(QWidget):
         """Atualiza o tema da janela, dos ícones e do cabeçalho da tabela."""
         self.theme_colors = theme_colors
         
-        # CORREÇÃO 1: Estilo do cabeçalho agora usa 'surface_color' para ser distinto do fundo.
+        # Estilo do cabeçalho (já existente)
         header_style = f"""
             QHeaderView::section {{
                 background-color: {self.theme_colors.get('surface_color', '#e0e0e0')};
@@ -436,24 +436,64 @@ class EstoqueWindow(QWidget):
         """
         self.tabela.horizontalHeader().setStyleSheet(header_style)
         
+        # --- INÍCIO DA MODIFICAÇÃO: Adicionar estilo para os botões inferiores ---
+        button_style = f"""
+            #primaryActionButton {{
+                background-color: {self.theme_colors.get('accent_color', '#007bff')};
+                color: white;
+                border: none;
+                padding: 10px 15px;
+                border-radius: 6px;
+                font-weight: bold;
+            }}
+            #primaryActionButton:hover {{
+                background-color: #0069d9; /* Cor de hover fixa para o botão azul */
+            }}
+            
+            #secondaryActionButton {{
+                background-color: {self.theme_colors.get('surface_color', '#ffffff')};
+                color: {self.theme_colors.get('text_color', '#000000')};
+                border: 1px solid {self.theme_colors.get('border_color', '#cccccc')};
+                padding: 10px 15px;
+                border-radius: 6px;
+                font-weight: bold;
+            }}
+            #secondaryActionButton:hover {{
+                background-color: {self.theme_colors.get('button_hover', '#f0f0f0')};
+            }}
+        """
+        # Aplica o estilo aos botões específicos
+        self.add_button.setStyleSheet(button_style)
+        self.relatorio_btn.setStyleSheet(button_style)
+        self.relatorio_estoque_btn.setStyleSheet(button_style)
+        self.exportar_csv_btn.setStyleSheet(button_style)
+        self.importar_csv_btn.setStyleSheet(button_style)
+        # --- FIM DA MODIFICAÇÃO ---
+
         self.update_button_icons()
-        self.atualizar_visualizacao_dados() # Recarrega para aplicar cores nos ícones da tabela
+        self.atualizar_visualizacao_dados()
     
     def update_button_icons(self):
         """Atualiza todos os ícones da interface para refletir o novo tema."""
         text_color = self.theme_colors.get('text_color', '#000')
         
+        # Ícones dos filtros (já corretos)
         self.search_button.setIcon(IconManager.get_icon('search', text_color))
         self.aplicar_filtro_btn.setIcon(IconManager.get_icon('filter', text_color))
         self.limpar_filtro_btn.setIcon(IconManager.get_icon('clear', text_color))
         self.prev_page_btn.setIcon(IconManager.get_icon('angle-left', text_color))
         self.next_page_btn.setIcon(IconManager.get_icon('angle-right', text_color))
 
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        # Botão primário: ícone sempre branco
         self.add_button.setIcon(IconManager.get_icon('add', 'white'))
-        self.relatorio_btn.setIcon(IconManager.get_icon('report', 'white'))
-        self.relatorio_estoque_btn.setIcon(IconManager.get_icon('report', 'white'))
-        self.exportar_csv_btn.setIcon(IconManager.get_icon('export', 'white'))
-        self.importar_csv_btn.setIcon(IconManager.get_icon('import', 'white'))
+        
+        # Botões secundários: ícones usam a cor de texto principal do tema
+        self.relatorio_btn.setIcon(IconManager.get_icon('report', text_color))
+        self.relatorio_estoque_btn.setIcon(IconManager.get_icon('report', text_color))
+        self.exportar_csv_btn.setIcon(IconManager.get_icon('export', text_color))
+        self.importar_csv_btn.setIcon(IconManager.get_icon('import', text_color))
+        # --- FIM DA MODIFICAÇÃO ---
     
     def initUI(self):
         layout = QVBoxLayout(self)
@@ -563,17 +603,23 @@ class EstoqueWindow(QWidget):
         self.add_button.setObjectName("primaryActionButton") 
         self.add_button.clicked.connect(self.abrir_formulario_produto)
 
+        # --- INÍCIO DA MODIFICAÇÃO ---
         self.relatorio_btn = QPushButton(" Relatório de Vencimentos")
+        self.relatorio_btn.setObjectName("secondaryActionButton") # Adicionado
         self.relatorio_btn.clicked.connect(self.relatorio_vencimentos)
 
         self.relatorio_estoque_btn = QPushButton(" Relatório de Estoque Baixo")
+        self.relatorio_estoque_btn.setObjectName("secondaryActionButton") # Adicionado
         self.relatorio_estoque_btn.clicked.connect(self.relatorio_estoque_baixo)
         
         self.exportar_csv_btn = QPushButton(" Exportar CSV")
+        self.exportar_csv_btn.setObjectName("secondaryActionButton") # Adicionado
         self.exportar_csv_btn.clicked.connect(self.exportar_csv)
 
         self.importar_csv_btn = QPushButton(" Importar CSV")
+        self.importar_csv_btn.setObjectName("secondaryActionButton") # Adicionado
         self.importar_csv_btn.clicked.connect(self.importar_csv)
+        # --- FIM DA MODIFICAÇÃO ---
 
         action_layout.addWidget(self.add_button)
         action_layout.addWidget(self.relatorio_btn)
@@ -581,6 +627,8 @@ class EstoqueWindow(QWidget):
         action_layout.addWidget(self.exportar_csv_btn)
         action_layout.addWidget(self.importar_csv_btn)
         layout.addLayout(action_layout)
+        
+        # A chamada para update_button_icons() permanece aqui
         self.update_button_icons()
 
     def ir_pagina_anterior(self):
@@ -672,19 +720,29 @@ class EstoqueWindow(QWidget):
         icon_color = self.theme_colors.get('text_color', '#000')
         hoje = datetime.now().date()
 
-        # ===== INÍCIO DA CORREÇÃO 1: Mover a função helper para fora do loop =====
+        # --- INÍCIO DA MODIFICAÇÃO 1: Lógica para detectar o tema ---
+        # Vamos determinar se o tema é escuro para definir a cor do ícone de baixa.
+        # Uma forma simples é verificar a luminosidade da cor de fundo.
+        try:
+            bg_color_hex = self.theme_colors.get('bg_color', '#ffffff')
+            color = QColor(bg_color_hex)
+            # Fórmula padrão de luminância
+            luminance = (0.299 * color.red() + 0.587 * color.green() + 0.114 * color.blue()) / 255
+            is_dark_theme = luminance < 0.5
+        except Exception:
+            is_dark_theme = True # Padrão seguro para temas escuros
+        
+        dar_baixa_icon_color = '#ffffff' if is_dark_theme else '#000000'
+        icon_color = self.theme_colors.get('text_color', '#000000')
+        # --- FIM DA MODIFICAÇÃO 1 ---
+
         def get_value(key, default=""):
-            """
-            Obtém um valor de um objeto sqlite3.Row de forma segura,
-            verificando se a chave (nome da coluna) existe antes de acessá-la.
-            """
-            # sqlite3.Row pode ser acessado como um dicionário
             return produto[key] if key in produto.keys() else default
-        # ===== FIM DA CORREÇÃO 1 =====
 
         for row, produto in enumerate(produtos):
             self.tabela.insertRow(row)
             
+            # Preenchimento das colunas (seu código original aqui está bom)
             self.tabela.setItem(row, 0, QTableWidgetItem(get_value('codigo_barras', '')))
             
             nome_produto = get_value('nome', 'Produto Desconhecido')
@@ -710,15 +768,9 @@ class EstoqueWindow(QWidget):
             
             estoque_minimo = get_value('estoque_minimo', 0)
             
-            # ===== INÍCIO DA CORREÇÃO 2: Lógica do Alerta =====
-            # A variável para o alerta deve SEMPRE usar a quantidade principal (embalagens),
-            # pois o estoque mínimo é definido com base nela.
-            estoque_atual_para_alerta = quantidade
-            
-            if estoque_minimo > 0 and estoque_atual_para_alerta <= estoque_minimo:
+            if estoque_minimo > 0 and quantidade <= estoque_minimo:
                 quantidade_item.setForeground(QBrush(QColor('red')))
                 quantidade_item.setToolTip(quantidade_item.toolTip() + "\nESTOQUE ABAIXO DO MÍNIMO!")
-            # ===== FIM DA CORREÇÃO 2 =====
 
             self.tabela.setItem(row, 3, quantidade_item)
             
@@ -734,10 +786,16 @@ class EstoqueWindow(QWidget):
             
             validade_str = get_value('data_validade', '')
             validade_item = QTableWidgetItem(validade_str)
+            
+            # --- LÓGICA DE VALIDADE E BOTÕES (COM A CORREÇÃO) ---
+            
+            dias_para_vencer = 999 # Valor padrão que não ativa nenhuma condição
             if validade_str:
                 try:
                     data_validade = datetime.strptime(validade_str, "%Y-%m-%d").date()
                     dias_para_vencer = (data_validade - hoje).days
+                    
+                    # Aplica cores com base nos dias para vencer
                     if dias_para_vencer <= 0:
                         validade_item.setForeground(QBrush(QColor('darkred')))
                         validade_item.setToolTip("Produto VENCIDO!")
@@ -747,35 +805,87 @@ class EstoqueWindow(QWidget):
                     elif dias_para_vencer <= 30:
                         validade_item.setForeground(QBrush(QColor('orange')))
                         validade_item.setToolTip(f"Vence em {dias_para_vencer} dias!")
-                except (ValueError, TypeError): pass
+
+                except ValueError as e:
+                    # Melhoria: não falhar silenciosamente. Imprime um erro no console se a data for inválida.
+                    print(f"AVISO: Data em formato inválido para o produto '{nome_produto}': {validade_str}. Erro: {e}")
+
             self.tabela.setItem(row, 8, validade_item)
 
             self.tabela.setItem(row, 9, QTableWidgetItem(get_value('localizacao', '')))
             self.tabela.setItem(row, 10, QTableWidgetItem(get_value('fornecedor_nome', "N/A")))
             
-            # O restante da função (ações, etc.) permanece o mesmo...
             acoes_widget = QWidget()
             acoes_layout = QHBoxLayout(acoes_widget)
             acoes_layout.setContentsMargins(0, 0, 0, 0)
             acoes_layout.setSpacing(5)
             
+            # Estilo Padrão para os botões (sem borda, com hover)
+            hover_color = self.theme_colors.get('button_hover', '#555555')
+            
             editar_btn = QPushButton(IconManager.get_icon('edit', icon_color), "")
             editar_btn.setToolTip("Editar Produto")
-            editar_btn.setFixedSize(30, 30)
-            editar_btn.clicked.connect(lambda _, p_id=get_value('id'): self.abrir_formulario_produto(p_id))
             
             excluir_btn = QPushButton(IconManager.get_icon('delete', icon_color), "")
             excluir_btn.setToolTip("Excluir Produto")
-            excluir_btn.setFixedSize(30, 30)
+
+            # --- INÍCIO DA CORREÇÃO ---
+            # As conexões dos sinais de clique que estavam faltando foram readicionadas aqui.
+            editar_btn.clicked.connect(lambda _, p_id=get_value('id'): self.abrir_formulario_produto(p_id))
             excluir_btn.clicked.connect(lambda _, p_id=get_value('id'): self.excluir_produto(p_id))
+            # --- FIM DA CORREÇÃO ---
+
+            # Aplica o estilo "flat" e o cursor de mão a todos os botões
+            for btn in [editar_btn, excluir_btn]:
+                btn.setFixedSize(30, 30)
+                btn.setFlat(True)
+                btn.setCursor(Qt.PointingHandCursor)
+                btn.setStyleSheet(f"""
+                    QPushButton {{ border-radius: 4px; }}
+                    QPushButton:hover {{ background-color: {hover_color}; }}
+                """)
             
             acoes_layout.addWidget(editar_btn)
             acoes_layout.addWidget(excluir_btn)
             
-            if is_fracionado and quantidade > 0:
+            # Lógica para o botão de Dar Baixa (já existente, agora com o novo estilo)
+            validade_str = get_value('data_validade', '')
+            dias_para_vencer = 999
+            if validade_str:
+                try:
+                    data_validade = datetime.strptime(validade_str, "%Y-%m-%d").date()
+                    dias_para_vencer = (data_validade - hoje).days
+                except ValueError:
+                    pass
+            
+            produto_tem_estoque = get_value('quantidade', 0) > 0 or get_value('estoque_fracionado', 0) > 0
+            
+            if dias_para_vencer <= 0 and produto_tem_estoque:
+                # Usamos a cor do ícone que definimos no início do método
+                dar_baixa_btn = QPushButton(IconManager.get_icon('thumb-down', dar_baixa_icon_color), "")
+                dar_baixa_btn.setToolTip("Dar Baixa por Vencimento (Registrar Perda)")
+                dar_baixa_btn.setFixedSize(30, 30)
+                dar_baixa_btn.setFlat(True)
+                dar_baixa_btn.setCursor(Qt.PointingHandCursor)
+                # Damos um hover vermelho para indicar uma ação de "perigo"
+                dar_baixa_btn.setStyleSheet("""
+                    QPushButton { border-radius: 4px; }
+                    QPushButton:hover { background-color: #dc3545; }
+                """)
+                dar_baixa_btn.clicked.connect(lambda _, p_id=get_value('id'): self.dar_baixa_produto(p_id))
+                acoes_layout.addWidget(dar_baixa_btn)
+            
+            # Lógica para o botão de Quebrar Embalagem (já existente, agora com o novo estilo)
+            if bool(get_value('fracionado', False)) and get_value('quantidade', 0) > 0:
                 quebrar_btn = QPushButton(IconManager.get_icon('break', icon_color), "")
                 quebrar_btn.setToolTip("Quebrar embalagem em unidades")
                 quebrar_btn.setFixedSize(30, 30)
+                quebrar_btn.setFlat(True)
+                quebrar_btn.setCursor(Qt.PointingHandCursor)
+                quebrar_btn.setStyleSheet(f"""
+                    QPushButton {{ border-radius: 4px; }}
+                    QPushButton:hover {{ background-color: {hover_color}; }}
+                """)
                 quebrar_btn.clicked.connect(lambda _, p_id=get_value('id'): self.abrir_dialog_quebrar_embalagem(p_id))
                 acoes_layout.addWidget(quebrar_btn)
             
@@ -797,6 +907,36 @@ class EstoqueWindow(QWidget):
             self.carregar_dados()
             print("DEBUG: Embalagem quebrada. Emitindo sinal 'dados_produtos_alterados'.")
             self.dados_produtos_alterados.emit()
+    
+
+    # Agora, adicione o novo método dar_baixa_produto na classe EstoqueWindow
+
+    def dar_baixa_produto(self, produto_id):
+        """Abre um diálogo de confirmação para registrar um produto como perda."""
+        produto = self.db.obter_produto(produto_id)
+        if not produto:
+            AlertDialog(self, "Erro", "Produto não encontrado.", alert_type='error', theme_colors=self.theme_colors).exec_()
+            return
+
+        valor_perda = (produto['quantidade'] or 0) * (produto['preco_compra'] or 0)
+        
+        mensagem = (f"Você está prestes a dar baixa no produto '{produto['nome']}'.\n"
+                    f"O estoque será zerado e será registrada uma perda de R$ {valor_perda:.2f}.\n\n"
+                    "Esta ação não pode ser desfeita. Deseja continuar?")
+
+        dialog = AlertDialog(self, "Confirmar Baixa por Perda", mensagem,
+                            alert_type='question', buttons=QMessageBox.Yes | QMessageBox.No, theme_colors=self.theme_colors)
+        
+        if dialog.exec_() == QMessageBox.Yes:
+            sucesso, msg_retorno = self.db.registrar_perda_produto(produto_id, operador="Usuário do Estoque")
+            
+            if sucesso:
+                AlertDialog(self, "Sucesso", msg_retorno, alert_type='success', theme_colors=self.theme_colors).exec_()
+                self.atualizar_visualizacao_dados()
+                # Emitir sinal para o dashboard atualizar
+                self.dados_produtos_alterados.emit()
+            else:
+                AlertDialog(self, "Erro", msg_retorno, alert_type='error', theme_colors=self.theme_colors).exec_()
 
     # Dentro da classe EstoqueWindow, em estoque_window.py
 
@@ -1302,7 +1442,6 @@ class FormularioProduto(QDialog):
         self.imagem_path = None
         self.drag_position = None
 
-        # Tornar a janela sem borda
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
 
@@ -1401,8 +1540,13 @@ class FormularioProduto(QDialog):
         self.descricao_input = QLineEdit()
         self.categoria_combo = QComboBox(); self.categoria_combo.setEditable(True); self.carregar_categorias()
         self.fornecedor_combo = QComboBox(); self.carregar_fornecedores()
-        self.localizacao_input = QLineEdit()
-        
+         
+        # --- MUDANÇA 1: Localização agora é um ComboBox editável ---
+        self.localizacao_input = QComboBox()
+        self.localizacao_input.setEditable(True)
+        self.carregar_localizacoes()
+        # --- FIM DA MUDANÇA 1 ---
+
         info_form_layout.addRow("Código de Barras:", self._create_input_with_icon('barcode', self.codigo_barras_input))
         info_form_layout.addRow("Nome do Produto:", self._create_input_with_icon('box', self.nome_input))
         info_form_layout.addRow("Descrição:", self._create_input_with_icon('comment-alt', self.descricao_input))
@@ -1559,6 +1703,31 @@ class FormularioProduto(QDialog):
             #primaryActionButton:hover {{
                 background-color: #0069d9;
             }}
+             /* ESTILO PARA O DROPDOWN (POPUP) DO QCOMBOBOX */
+            QComboBox QAbstractItemView {{
+                background-color: {theme.get('surface_color', '#333')};
+                color: {theme.get('text_color', '#fff')};
+                border: 1px solid {theme.get('border_color', '#555')};
+                selection-background-color: {theme.get('accent_color', '#007aff')};
+                selection-color: white;
+                outline: 0px; /* Remove a borda pontilhada de foco */
+            }}
+
+            /* ESTILO PARA A BARRA DE ROLAGEM DENTRO DO DROPDOWN */
+            QComboBox QScrollBar:vertical {{
+                border: none;
+                background: {theme.get('surface_color', '#333')};
+                width: 10px;
+                margin: 0px 0px 0px 0px;
+            }}
+            QComboBox QScrollBar::handle:vertical {{
+                background: {theme.get('border_color', '#555')};
+                min-height: 20px;
+                border-radius: 5px;
+            }}
+            QComboBox QScrollBar::add-line:vertical, QComboBox QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
         """
         self.setStyleSheet(style)
         
@@ -1592,6 +1761,22 @@ class FormularioProduto(QDialog):
         fornecedores = self.db.listar_fornecedores()
         for fornecedor in fornecedores:
             self.fornecedor_combo.addItem(fornecedor['empresa'], fornecedor['id'])
+    
+    # --- MUDANÇA 3: Novo método para carregar e autocompletar localizações ---
+    def carregar_localizacoes(self):
+        """Carrega as localizações e configura o autocompletar."""
+        self.localizacao_input.clear()
+        self.localizacao_input.addItem("") # Item vazio para o placeholder
+        
+        localizacoes = self.db.listar_localizacoes_unicas()
+        self.localizacao_input.addItems(localizacoes)
+        
+        # Configura o autocompletar
+        completer = QCompleter(localizacoes, self)
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchContains)
+        self.localizacao_input.setCompleter(completer)
+    # --- FIM DA MUDANÇA 3 ---
 
     def calcular_preco_venda(self):
         preco_compra = self.preco_compra_input.value()
@@ -1621,7 +1806,10 @@ class FormularioProduto(QDialog):
         self.preco_venda_input.setValue(self.produto['preco_venda'])
         if self.produto['data_validade']:
             self.data_validade_input.setDate(QDate.fromString(self.produto['data_validade'], "yyyy-MM-dd"))
-        self.localizacao_input.setText(self.produto['localizacao'] or "")
+         # --- MUDANÇA 4: Atualizar a forma de carregar a localização ---
+        if self.produto['localizacao']:
+            self.localizacao_input.setCurrentText(self.produto['localizacao'])
+        # --- FIM DA MUDANÇA 4 ---
         
         if self.produto['fornecedor_id']:
             index = self.fornecedor_combo.findData(self.produto['fornecedor_id'])
@@ -1666,7 +1854,7 @@ class FormularioProduto(QDialog):
             'margem_lucro': self.margem_lucro_input.value(),
             'preco_venda': self.preco_venda_input.value(),
             'data_validade': self.data_validade_input.date().toString("yyyy-MM-dd"),
-            'localizacao': self.localizacao_input.text().strip(),
+            'localizacao': self.localizacao_input.currentText().strip(),
             'imagem_path': self.imagem_path,
             'fracionado': self.fracionado_group.isChecked(),
             'unidade_medida': self.unidade_medida_input.text().strip() if self.fracionado_group.isChecked() else 'unidade',

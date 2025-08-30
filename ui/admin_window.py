@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (QDialog, QTabWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QWidget, QMessageBox, 
                              QTableWidget, QTableWidgetItem, QHeaderView, QFormLayout,
                              QSpinBox, QDoubleSpinBox, QLineEdit, QComboBox, QDateEdit,
-                             QInputDialog,QFileDialog, QGroupBox)
+                             QInputDialog,QFileDialog, QGroupBox, QFrame)
 from PyQt5.QtCore import Qt, QDate, pyqtSignal, QSettings, QTimer
 from PyQt5.QtGui import QColor, QIcon, QFont, QPixmap
 import hashlib
@@ -135,19 +135,129 @@ class ThemedInputDialog(QDialog):
         if self.drag_position and event.buttons() == Qt.LeftButton: self.move(event.globalPos() - self.drag_position)
 
 
-class AdminWindow(QDialog):
+# ===================================================================
+#       NOVA CLASSE BASE PARA DIÁLOGOS TEMÁTICOS
+# ===================================================================
+class ThemedDialog(QDialog):
+    """
+    Uma classe base para todos os diálogos que terão um cabeçalho
+    customizado e temático, sem a barra de título padrão do Windows.
+    """
+    def __init__(self, parent, title, theme_colors, logo_pixmap=None):
+        super().__init__(parent)
+        self.theme_colors = theme_colors
+        self.drag_position = None
+
+        # Remove a barra de título padrão e permite fundo transparente
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(True)
+
+        # --- Estrutura Principal ---
+        # Container geral para aplicar bordas e cantos arredondados
+        self.container = QFrame(self)
+        self.container.setObjectName("mainContainer")
+
+        base_layout = QVBoxLayout(self.container)
+        base_layout.setContentsMargins(0, 0, 0, 0)
+        base_layout.setSpacing(0)
+        
+        # 1. Cabeçalho
+        self.header = self._create_header(title, logo_pixmap)
+        base_layout.addWidget(self.header)
+
+        # 2. Conteúdo (um layout que as classes filhas irão preencher)
+        self.content_layout = QVBoxLayout()
+        self.content_layout.setContentsMargins(15, 10, 15, 15)
+        self.content_layout.setSpacing(10)
+        base_layout.addLayout(self.content_layout)
+
+        # Layout final que contém o container principal
+        final_layout = QVBoxLayout(self)
+        final_layout.setContentsMargins(0,0,0,0)
+        final_layout.addWidget(self.container)
+    
+    def _create_header(self, title, logo_pixmap):
+        """Cria o widget de cabeçalho temático."""
+        header_widget = QFrame()
+        header_widget.setObjectName("header")
+        header_widget.setFixedHeight(45)
+        
+        layout = QHBoxLayout(header_widget)
+        layout.setContentsMargins(15, 0, 5, 0)
+        
+        if logo_pixmap:
+            logo_label = QLabel()
+            logo_label.setPixmap(logo_pixmap.scaled(20, 20, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            layout.addWidget(logo_label)
+
+        title_label = QLabel(title)
+        title_label.setObjectName("headerTitleLabel")
+        
+        close_button = QPushButton()
+        close_button.setObjectName("controlButton")
+        close_button.setIcon(IconManager.get_icon('fechar', color=self.theme_colors.get('text_secondary')))
+        close_button.setFixedSize(30, 30)
+        close_button.clicked.connect(self.reject)
+        
+        layout.addWidget(title_label)
+        layout.addStretch()
+        layout.addWidget(close_button)
+        return header_widget
+
+    def apply_base_styles(self):
+        """Aplica os estilos essenciais para a janela base."""
+        theme = self.theme_colors
+        style = f"""
+            #mainContainer {{
+                background-color: {theme.get('bg_color', '#fff')};
+                border-radius: 8px;
+                border: 1px solid {theme.get('border_color', '#555')};
+            }}
+            #header {{
+                background-color: {theme.get('surface_color', '#333')};
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                border-bottom: 1px solid {theme.get('border_color', '#555')};
+            }}
+            #headerTitleLabel {{
+                color: {theme.get('text_color', '#fff')};
+                font-weight: bold;
+                font-size: 11pt;
+            }}
+            #controlButton {{
+                background-color: transparent; border: none; border-radius: 4px;
+            }}
+            #controlButton:hover {{
+                background-color: {theme.get('button_hover', '#555')};
+            }}
+        """
+        self.container.setStyleSheet(style)
+
+    # Métodos para arrastar a janela
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.header.underMouse():
+            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton:
+            self.move(event.globalPos() - self.drag_position)
+            event.accept()
+
+class AdminWindow(ThemedDialog): # <--- MUDANÇA 1: Herda da nova classe
     logo_alterado = pyqtSignal()
 
     def __init__(self, db_manager, usuario, theme_colors, parent=None):
-        super().__init__(parent)
+        # --- MUDANÇA 2: Passa os parâmetros para o construtor da classe base ---
+        super().__init__(parent, "Painel de Administração", theme_colors)
+        
         self.db = db_manager
         self.usuario = usuario
-        self.theme_colors = theme_colors
         self.local_settings = QSettings("SuaEmpresa", "SeuERP")
         
         if self.usuario.get('tipo') != 'admin':
             self.db.registrar_log('WARNING', self.usuario.get('login'), 'ACESSO_ADMIN', 'Tentativa de acesso não autorizado.')
-            # Ação corrigida: Usa AlertDialog
             QTimer.singleShot(0, self.show_access_denied_and_close)
             return
         
@@ -164,9 +274,7 @@ class AdminWindow(QDialog):
         """Inicializa a interface do usuário (sem estilos fixos)."""
         self.setWindowTitle("Painel de Administração")
         self.setMinimumSize(900, 700)
-        
-        main_layout = QVBoxLayout(self)
-        
+                
         title_label = QLabel("Painel de Administração")
         title_label.setObjectName("titleLabel") # Para estilização
         
@@ -190,27 +298,35 @@ class AdminWindow(QDialog):
         buttons_layout.addStretch()
         buttons_layout.addWidget(self.close_button)
         
-        main_layout.addWidget(title_label)
-        main_layout.addWidget(self.tab_widget)
-        main_layout.addLayout(buttons_layout)
+        # Adiciona os widgets principais ao layout de conteúdo da classe base
+        self.content_layout.addWidget(self.tab_widget)
+        self.content_layout.addLayout(buttons_layout)
 
     def apply_styles(self):
         """Aplica a folha de estilo QSS baseada no tema."""
+        
+        # PASSO 1: Chama o método da classe pai (ThemedDialog) para estilizar
+        # o container principal, o cabeçalho e os botões de controle.
+        self.apply_base_styles()
+
+        # PASSO 2: Define os estilos específicos APENAS para o conteúdo desta janela
+        # (abas, tabelas, botões internos, etc.).
         colors = self.theme_colors
+        
+        # Usamos self.setStyleSheet() para adicionar o novo estilo.
+        # O estilo da classe base já foi aplicado ao self.container, então não será sobrescrito.
         self.setStyleSheet(f"""
-            QDialog {{
-                background-color: {colors['bg_color']};
-                color: {colors['text_color']};
-            }}
-            #titleLabel {{
-                font-size: 18pt;
-                font-weight: bold;
-                color: {colors['text_color']};
-                margin-bottom: 10px;
-            }}
+            /* --- ESTILOS GERAIS PARA A JANELA ADMIN (HERDADOS) --- */
+            /*
+            * A cor de fundo principal e as bordas já foram definidas por apply_base_styles().
+            * Aqui, definimos estilos para os widgets DENTRO da janela.
+            */
+
+            /* --- ABAS (TABS) --- */
             QTabWidget::pane {{
                 border: 1px solid {colors['border_color']};
                 border-top: none;
+                background-color: {colors['bg_color']}; /* Fundo da área da aba */
             }}
             QTabBar::tab {{
                 background: transparent;
@@ -220,13 +336,15 @@ class AdminWindow(QDialog):
                 border-bottom: none;
             }}
             QTabBar::tab:selected {{
-                background: {colors['surface_color']};
+                background: {colors['bg_color']}; /* A aba selecionada tem o fundo da janela */
                 color: {colors['accent_color']};
                 border: 1px solid {colors['border_color']};
-                border-bottom: 1px solid {colors['surface_color']};
+                border-bottom: 1px solid {colors['bg_color']}; /* Esconde a borda inferior */
                 border-top-left-radius: 6px;
                 border-top-right-radius: 6px;
             }}
+
+            /* --- TABELAS --- */
             QTableWidget {{
                 background-color: {colors['surface_color']};
                 color: {colors['text_color']};
@@ -235,12 +353,14 @@ class AdminWindow(QDialog):
                 alternate-background-color: {colors['button_hover']};
             }}
             QHeaderView::section {{
-                background-color: {colors['menu_color'] if colors.get('menu_color') else colors['surface_color']};
+                background-color: {colors.get('menu_color', colors['surface_color'])};
                 color: {colors['text_color']};
                 padding: 5px;
                 border: 1px solid {colors['border_color']};
                 font-weight: bold;
             }}
+
+            /* --- CAMPOS DE FORMULÁRIO --- */
             QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit {{
                 background-color: {colors['surface_color']};
                 color: {colors['text_color']};
@@ -248,6 +368,23 @@ class AdminWindow(QDialog):
                 padding: 8px;
                 border-radius: 6px;
             }}
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus {{
+                border-color: {colors['accent_color']};
+            }}
+            QGroupBox {{
+                color: {colors['text_secondary']};
+                border: 1px solid {colors['border_color']};
+                border-radius: 6px;
+                margin-top: 10px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 5px;
+                left: 10px;
+            }}
+
+            /* --- BOTÕES --- */
             QPushButton {{
                 background-color: {colors['surface_color']};
                 color: {colors['text_color']};
@@ -258,6 +395,7 @@ class AdminWindow(QDialog):
             }}
             QPushButton:hover {{
                 border-color: {colors['accent_color']};
+                background-color: {colors['button_hover']};
             }}
             #primaryButton {{
                 background-color: {colors['accent_color']};
@@ -265,7 +403,7 @@ class AdminWindow(QDialog):
                 border: none;
             }}
             #primaryButton:hover {{
-                background-color: #005bb5;
+                background-color: #005bb5; /* Cor de hover fixa mais escura */
             }}
         """)
 

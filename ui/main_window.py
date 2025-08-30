@@ -1587,49 +1587,49 @@ class ConfigDialog(QDialog):
     def __init__(self, settings, theme_colors, parent=None):
         super().__init__(parent)
         self.settings = settings
-        self.theme_colors = theme_colors  # Recebe as cores do tema!
+        self.theme_colors = theme_colors
         
         self.initUI()
-        self.apply_styles() # Aplica o estilo baseado no tema
+        self.apply_styles()
+        # --- INÍCIO DA MODIFICAÇÃO 1 ---
+        # Conecta o checkbox a uma função para habilitar/desabilitar os campos de email
+        self.enable_notifications_check.toggled.connect(self.toggle_email_fields)
+        # Chama a função uma vez para definir o estado inicial correto
+        self.toggle_email_fields(self.enable_notifications_check.isChecked())
+        # --- FIM DA MODIFICAÇÃO 1 ---
 
     def initUI(self):
         self.setWindowTitle("Configurações")
         self.setMinimumWidth(550)
         self.setObjectName("configDialog")
         
-        # Layout principal
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(15, 15, 15, 15)
         main_layout.setSpacing(20)
 
-        # --- Título ---
         title_label = QLabel("Configurações do Sistema")
         title_label.setFont(QFont("Segoe UI", 16, QFont.Bold))
         title_label.setObjectName("dialogTitle")
         title_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(title_label)
 
-        # --- Grupo de Aparência ---
         appearance_group = QGroupBox("Aparência")
         appearance_group.setFont(QFont("Segoe UI", 10, QFont.Bold))
         appearance_layout = QFormLayout(appearance_group)
         appearance_layout.setLabelAlignment(Qt.AlignLeft)
         appearance_layout.setSpacing(10)
         
-        # Tema
         self.tema_combo = QComboBox()
-        self.tema_combo.addItem(IconManager.get_icon('estoque', color=self.theme_colors['text_color']), "Tema Claro", "light")
-        self.tema_combo.addItem(IconManager.get_icon('estoque', color=self.theme_colors['text_color']), "Tema Escuro", "dark")
+        self.tema_combo.addItem(IconManager.get_icon('estoque', color=self.theme_colors.get('text_color', '#000')), "Tema Claro", "light")
+        self.tema_combo.addItem(IconManager.get_icon('estoque', color=self.theme_colors.get('text_color', '#000')), "Tema Escuro", "dark")
         current_theme = self.settings.get_theme()
         index = self.tema_combo.findData(current_theme)
         if index != -1:
             self.tema_combo.setCurrentIndex(index)
         
         appearance_layout.addRow(self.create_label_with_icon("Tema:", "config"), self.tema_combo)
-        
         main_layout.addWidget(appearance_group)
 
-        # --- Grupo de Notificações ---
         notification_group = QGroupBox("Notificações por E-mail")
         notification_group.setFont(QFont("Segoe UI", 10, QFont.Bold))
         notification_layout = QVBoxLayout(notification_group)
@@ -1639,7 +1639,6 @@ class ConfigDialog(QDialog):
         self.enable_notifications_check.setChecked(self.settings.get_notification_enabled())
         notification_layout.addWidget(self.enable_notifications_check)
 
-        # Container para o horário
         time_form_layout = QFormLayout()
         self.time_edit = QTimeEdit()
         self.time_edit.setDisplayFormat("HH:mm")
@@ -1648,20 +1647,27 @@ class ConfigDialog(QDialog):
         time_form_layout.addRow(self.create_label_with_icon("Horário de Envio:", "vencimentos"), self.time_edit)
         notification_layout.addLayout(time_form_layout)
 
-        # Container para SMTP
         smtp_form_layout = QFormLayout()
         smtp_config = self.settings.get_smtp_config()
-        self.smtp_host_edit = QLineEdit(smtp_config['host'])
-        self.smtp_port_edit = QSpinBox()
-        self.smtp_port_edit.setRange(1, 65535)
-        self.smtp_port_edit.setValue(smtp_config['port'])
-        self.smtp_user_edit = QLineEdit(smtp_config['user'])
-        self.smtp_pass_edit = QLineEdit(smtp_config['password'])
-        self.smtp_pass_edit.setEchoMode(QLineEdit.Password)
-        self.smtp_recipient_edit = QLineEdit(smtp_config['recipient'])
         
-        smtp_form_layout.addRow("Servidor SMTP:", self.smtp_host_edit)
-        smtp_form_layout.addRow("Porta:", self.smtp_port_edit)
+        # --- INÍCIO DA MODIFICAÇÃO 2 ---
+        # Os campos de host e porta foram removidos da interface
+        # self.smtp_host_edit = QLineEdit(smtp_config['host'])
+        # self.smtp_port_edit = QSpinBox()
+        # ...
+        # --- FIM DA MODIFICAÇÃO 2 ---
+        
+        self.smtp_user_edit = QLineEdit(smtp_config.get('user', ''))
+        self.smtp_pass_edit = QLineEdit(smtp_config.get('password', ''))
+        self.smtp_pass_edit.setEchoMode(QLineEdit.Password)
+        self.smtp_recipient_edit = QLineEdit(smtp_config.get('recipient', ''))
+        
+        # --- INÍCIO DA MODIFICAÇÃO 3 ---
+        # As linhas que adicionavam os campos de host e porta ao layout foram removidas
+        # smtp_form_layout.addRow("Servidor SMTP:", self.smtp_host_edit)
+        # smtp_form_layout.addRow("Porta:", self.smtp_port_edit)
+        # --- FIM DA MODIFICAÇÃO 3 ---
+        
         smtp_form_layout.addRow("Usuário (e-mail):", self.smtp_user_edit)
         smtp_form_layout.addRow("Senha:", self.smtp_pass_edit)
         smtp_form_layout.addRow(self.create_label_with_icon("Enviar para:", "send"), self.smtp_recipient_edit)
@@ -1670,13 +1676,12 @@ class ConfigDialog(QDialog):
         main_layout.addWidget(notification_group)
         main_layout.addStretch()
 
-        # --- Botões ---
         button_layout = QHBoxLayout()
         button_layout.addStretch()
 
         self.cancelar_btn = QPushButton("Cancelar")
         self.cancelar_btn.setObjectName("cancelButton")
-        self.cancelar_btn.setIcon(IconManager.get_icon('cancel', color=self.theme_colors['text_color']))
+        self.cancelar_btn.setIcon(IconManager.get_icon('cancel', color=self.theme_colors.get('text_color', '#000')))
         self.cancelar_btn.clicked.connect(self.reject)
         
         self.salvar_btn = QPushButton("Salvar Alterações")
@@ -1688,8 +1693,17 @@ class ConfigDialog(QDialog):
         button_layout.addWidget(self.salvar_btn)
         main_layout.addLayout(button_layout)
     
+    # --- INÍCIO DA MODIFICAÇÃO 4 ---
+    # Nova função para controlar a visibilidade dos campos de e-mail
+    def toggle_email_fields(self, enabled):
+        """Habilita ou desabilita os campos de e-mail com base no estado do checkbox."""
+        self.time_edit.setEnabled(enabled)
+        self.smtp_user_edit.setEnabled(enabled)
+        self.smtp_pass_edit.setEnabled(enabled)
+        self.smtp_recipient_edit.setEnabled(enabled)
+    # --- FIM DA MODIFICAÇÃO 4 ---
+
     def create_label_with_icon(self, text, icon_name):
-        """Cria um QHBoxLayout com um ícone e um texto para usar como label."""
         widget = QWidget()
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1709,89 +1723,60 @@ class ConfigDialog(QDialog):
         return widget
 
     def apply_styles(self):
-        """Aplica o estilo dinâmico com base nas cores do tema."""
         theme = self.theme_colors
         style = f"""
-            #configDialog {{
-                background-color: {theme['bg_color']};
-            }}
-            #dialogTitle {{
-                color: {theme['text_color']};
-                margin-bottom: 10px;
-            }}
+            #configDialog {{ background-color: {theme.get('bg_color', '#fff')}; }}
+            #dialogTitle {{ color: {theme.get('text_color', '#000')}; margin-bottom: 10px; }}
             QGroupBox {{
-                color: {theme['text_color']};
-                border: 1px solid {theme['border_color']};
-                border-radius: 8px;
-                margin-top: 10px;
-                padding: 10px;
+                color: {theme.get('text_color', '#000')};
+                border: 1px solid {theme.get('border_color', '#ccc')};
+                border-radius: 8px; margin-top: 10px; padding: 10px;
             }}
             QGroupBox::title {{
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 5px 5px 10px;
-                color: {theme['accent_color']};
+                subcontrol-origin: margin; subcontrol-position: top left;
+                padding: 0 5px 5px 10px; color: {theme.get('accent_color', '#007aff')};
             }}
-            QLabel, QCheckBox {{
-                color: {theme['text_color']};
-                font-size: 10pt;
-            }}
+            QLabel, QCheckBox {{ color: {theme.get('text_color', '#000')}; font-size: 10pt; }}
             QLineEdit, QComboBox, QSpinBox, QTimeEdit {{
-                background-color: {theme['surface_color']};
-                color: {theme['text_color']};
-                border: 1px solid {theme['border_color']};
-                border-radius: 4px;
-                padding: 6px;
-                font-size: 10pt;
+                background-color: {theme.get('surface_color', '#eee')};
+                color: {theme.get('text_color', '#000')};
+                border: 1px solid {theme.get('border_color', '#ccc')};
+                border-radius: 4px; padding: 6px; font-size: 10pt;
             }}
-            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QTimeEdit:focus {{
-                border: 1px solid {theme['accent_color']};
-            }}
-            /* Botão de Salvar (Ação Primária) */
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QTimeEdit:focus {{ border: 1px solid {theme.get('accent_color', '#007aff')}; }}
             #saveButton {{
-                background-color: {theme['accent_color']};
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
+                background-color: {theme.get('accent_color', '#007aff')}; color: white;
+                border: none; padding: 8px 16px; border-radius: 4px; font-weight: bold;
             }}
-            #saveButton:hover {{
-                background-color: #0069d9; /* Um pouco mais escuro no hover */
-            }}
-            /* Botão de Cancelar (Ação Secundária) */
+            #saveButton:hover {{ background-color: #0069d9; }}
             #cancelButton {{
-                background-color: transparent;
-                color: {theme['text_color']};
-                border: 1px solid {theme['border_color']};
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
+                background-color: transparent; color: {theme.get('text_color', '#000')};
+                border: 1px solid {theme.get('border_color', '#ccc')};
+                padding: 8px 16px; border-radius: 4px; font-weight: bold;
             }}
-            #cancelButton:hover {{
-                background-color: {theme['button_hover']};
-                border-color: {theme['text_color']};
-            }}
+            #cancelButton:hover {{ background-color: {theme.get('button_hover', '#ddd')}; border-color: {theme.get('text_color', '#000')}; }}
         """
         self.setStyleSheet(style)
 
     def salvar_configuracoes(self):
-        """Salva TODAS as configurações."""
-        # Salva configurações de tema
         tema = self.tema_combo.currentData()
         self.settings.set_theme(tema)
 
-        # Salva as configurações de notificação
         self.settings.set_notification_enabled(self.enable_notifications_check.isChecked())
         self.settings.set_notification_time(self.time_edit.time().toString("HH:mm"))
 
+        # --- INÍCIO DA MODIFICAÇÃO 5 ---
+        # Ao salvar, os valores de host e porta são definidos de forma fixa (hardcoded),
+        # garantindo que o sistema sempre saiba como se conectar.
         new_smtp_config = {
-            "host": self.smtp_host_edit.text(),
-            "port": self.smtp_port_edit.value(),
+            "host": "smtp.gmail.com",
+            "port": 587,
             "user": self.smtp_user_edit.text(),
             "password": self.smtp_pass_edit.text(),
             "recipient": self.smtp_recipient_edit.text()
         }
+        # --- FIM DA MODIFICAÇÃO 5 ---
+        
         self.settings.set_smtp_config(new_smtp_config)
         
         self.accept()

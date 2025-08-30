@@ -1,25 +1,30 @@
-# Arquivo: ui/user_dialog_window.py (VERSÃO CORRIGIDA E APRIMORADA)
-
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                              QPushButton, QFormLayout, QComboBox, QGroupBox, 
                              QRadioButton, QCheckBox)
 from PyQt5.QtCore import Qt
 import hashlib
 
-# Importa o AlertDialog que já definimos em outros arquivos
-# Certifique-se que o caminho do import esteja correto para sua estrutura
-from .admin_window import AlertDialog 
+# --- INÍCIO DA MODIFICAÇÃO 1: Importar a classe base ---
+# Importamos a classe ThemedDialog que criamos no arquivo da janela de admin.
+# Certifique-se que o caminho do import esteja correto para sua estrutura.
+from .admin_window import ThemedDialog, AlertDialog 
 from .icon_manager import IconManager
+# --- FIM DA MODIFICAÇÃO 1 ---
 
-class UserDialogWindow(QDialog):
-    """Diálogo aprimorado para adicionar ou editar usuários."""
+class UserDialogWindow(ThemedDialog):
+# --- FIM DA MODIFICAÇÃO 2 ---
+    """Diálogo aprimorado para adicionar ou editar usuários, com cabeçalho temático."""
     
     def __init__(self, db_manager, theme_colors, usuario_id=None, parent=None):
-        super().__init__(parent)
-        self.db = db_manager
-        self.theme_colors = theme_colors
-        self.usuario_id = usuario_id
         self.is_edit_mode = usuario_id is not None
+        title = "Editar Usuário" if self.is_edit_mode else "Adicionar Novo Usuário"
+        
+        # --- INÍCIO DA MODIFICAÇÃO 3: Chamar o construtor da classe base ---
+        super().__init__(parent, title, theme_colors)
+        # --- FIM DA MODIFICAÇÃO 3 ---
+        
+        self.db = db_manager
+        self.usuario_id = usuario_id
         
         self.init_ui()
         self.apply_styles()
@@ -28,10 +33,11 @@ class UserDialogWindow(QDialog):
             self.carregar_dados_usuario()
     
     def init_ui(self):
-        self.setWindowTitle("Adicionar Novo Usuário" if not self.is_edit_mode else "Editar Usuário")
         self.setMinimumWidth(450)
         
-        main_layout = QVBoxLayout(self)
+        # --- INÍCIO DA MODIFICAÇÃO 4: Usar o self.content_layout da classe base ---
+        # Não criamos mais um layout principal. Adicionamos tudo ao layout de conteúdo já existente.
+        
         form_group = QGroupBox("Dados do Usuário")
         form_layout = QFormLayout(form_group)
         form_layout.setLabelAlignment(Qt.AlignRight)
@@ -40,23 +46,21 @@ class UserDialogWindow(QDialog):
         self.login_edit = QLineEdit()
         self.email_edit = QLineEdit()
         self.tipo_combo = QComboBox()
-        self.tipo_combo.addItems(["Comum", "Admin"]) # Corrigido para "Admin" para consistência
+        self.tipo_combo.addItems(["Comum", "Admin"])
         
         form_layout.addRow("Nome Completo:", self.nome_edit)
         form_layout.addRow("Nome de Usuário (login):", self.login_edit)
         form_layout.addRow("E-mail:", self.email_edit)
         form_layout.addRow("Tipo de Conta:", self.tipo_combo)
 
-        # --- CORREÇÃO 1: ADICIONANDO O CAMPO DE STATUS ---
         status_group = QGroupBox("Status")
         status_layout = QHBoxLayout(status_group)
         self.ativo_radio = QRadioButton("Ativo")
         self.inativo_radio = QRadioButton("Inativo")
-        self.ativo_radio.setChecked(True) # Padrão
+        self.ativo_radio.setChecked(True)
         status_layout.addWidget(self.ativo_radio)
         status_layout.addWidget(self.inativo_radio)
         form_layout.addRow(status_group)
-        # --- FIM DA CORREÇÃO 1 ---
         
         senha_group = QGroupBox("Senha" if not self.is_edit_mode else "Alterar Senha")
         senha_layout = QFormLayout(senha_group)
@@ -82,25 +86,67 @@ class UserDialogWindow(QDialog):
         buttons_layout.addWidget(self.cancel_button)
         buttons_layout.addWidget(self.save_button)
         
-        main_layout.addWidget(form_group)
-        main_layout.addWidget(senha_group)
-        main_layout.addLayout(buttons_layout)
+        # Adiciona os widgets ao layout de conteúdo da classe base
+        self.content_layout.addWidget(form_group)
+        self.content_layout.addWidget(senha_group)
+        self.content_layout.addLayout(buttons_layout)
+        # --- FIM DA MODIFICAÇÃO 4 ---
 
     def apply_styles(self):
+        # --- INÍCIO DA MODIFICAÇÃO 5: Simplificar o método de estilos ---
+        # Primeiro, aplicamos o estilo da janela (cabeçalho, borda, etc.)
+        self.apply_base_styles()
+        
+        # Depois, adicionamos os estilos específicos dos widgets deste formulário
         colors = self.theme_colors
-        self.setStyleSheet(f"""
-            QDialog {{ background-color: {colors['bg_color']}; color: {colors['text_color']}; }}
-            QGroupBox, QLabel, QRadioButton, QCheckBox {{ color: {colors['text_color']}; }}
-            QLineEdit, QComboBox {{ background-color: {colors['surface_color']}; color: {colors['text_color']}; border: 1px solid {colors['border_color']}; padding: 8px; border-radius: 6px; }}
-            QLineEdit:focus, QComboBox:focus {{ border: 1px solid {colors['accent_color']}; }}
-            QGroupBox {{ border: 1px solid {colors['border_color']}; border-radius: 6px; margin-top: 10px; padding: 10px; }}
-            QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left; padding: 0 5px; left: 10px; }}
-            QPushButton {{ background-color: {colors['surface_color']}; color: {colors['text_color']}; border: 1px solid {colors['border_color']}; padding: 8px 16px; border-radius: 6px; font-weight: bold; }}
-            QPushButton:hover {{ border-color: {colors['accent_color']}; }}
-            #primaryButton {{ background-color: {colors['accent_color']}; color: white; border: none; }}
-        """)
+        specific_style = f"""
+            QGroupBox, QLabel, QRadioButton, QCheckBox {{ 
+                color: {colors['text_color']}; 
+            }}
+            QLineEdit, QComboBox {{ 
+                background-color: {colors['surface_color']}; 
+                color: {colors['text_color']}; 
+                border: 1px solid {colors['border_color']}; 
+                padding: 8px; 
+                border-radius: 6px; 
+            }}
+            QLineEdit:focus, QComboBox:focus {{ 
+                border: 1px solid {colors['accent_color']}; 
+            }}
+            QGroupBox {{ 
+                border: 1px solid {colors['border_color']}; 
+                border-radius: 6px; 
+                margin-top: 10px; 
+                padding: 10px; 
+            }}
+            QGroupBox::title {{ 
+                subcontrol-origin: margin; 
+                subcontrol-position: top left; 
+                padding: 0 5px; 
+                left: 10px; 
+            }}
+            QPushButton {{ 
+                background-color: {colors['surface_color']}; 
+                color: {colors['text_color']}; 
+                border: 1px solid {colors['border_color']}; 
+                padding: 8px 16px; 
+                border-radius: 6px; 
+                font-weight: bold; 
+            }}
+            QPushButton:hover {{ 
+                border-color: {colors['accent_color']}; 
+            }}
+            #primaryButton {{ 
+                background-color: {colors['accent_color']}; 
+                color: white; 
+                border: none; 
+            }}
+        """
+        self.setStyleSheet(self.styleSheet() + specific_style)
+        
         self.save_button.setIcon(IconManager.get_icon('save', 'white'))
         self.cancel_button.setIcon(IconManager.get_icon('cancel', colors['text_color']))
+        # --- FIM DA MODIFICAÇÃO 5 ---
 
     def toggle_senha_fields(self, checked):
         self.senha_edit.setEnabled(checked)
