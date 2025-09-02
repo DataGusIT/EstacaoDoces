@@ -216,139 +216,138 @@ class FornecedorCsvImportWorker(QThread):
         self.finished.emit(importados, erros, detalhes_erros)
 
 class FornecedorWindow(QWidget):
-    # Adicione 'settings' ao construtor
+    dados_fornecedores_alterados = pyqtSignal()
+    
     def __init__(self, db, theme_colors, settings):
         super().__init__()
-        self.theme_colors = theme_colors 
         self.db = db
-        self.settings = settings # Armazene o objeto de configurações
-        # Estado da Paginação
+        self.theme_colors = theme_colors
+        self.settings = settings
         self.pagina_atual = 1
-        self.itens_por_pagina = 50
+        self.itens_por_pagina = 100
         self.total_paginas = 1
-        
+
         self.initUI()
-        self.atualizar_visualizacao_dados()
+        self.set_theme(self.theme_colors)
+        # A chamada carregar_dados() é feita dentro de set_theme, então não é necessária aqui.
+
+    # ================================================================= #
+    #       CORREÇÃO PRINCIPAL 1: MÉTODO set_theme REFEITO              #
+    # ================================================================= #
+    def set_theme(self, theme_colors):
+        """
+        Atualiza as cores do tema e aplica um stylesheet completo para toda a janela,
+        incluindo componentes aninhados como labels e scrollbars.
+        """
+        self.theme_colors = theme_colors
         self.update_button_icons()
-        self.carregar_dados()
-        
-    # NOVO MÉTODO: Centraliza a estilização dos botões (copiado da outra classe)
-    def _get_button_style(self, style_type):
-        """Retorna uma string de estilo CSS para um tipo de botão específico."""
-        base_style = """
-            QPushButton {{
-                color: {text_color};
-                background-color: {bg_color};
-                border: none;
-                padding: 8px 12px;
-                border-radius: 4px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {hover_color};
-            }}
-            QPushButton:pressed {{
-                background-color: {pressed_color};
-            }}
-        """
-        styles = {
-            "add":      ("white", "#28a745", "#218838", "#1e7e34"),  # Verde (Sucesso)
-            "report":   ("white", "#007bff", "#0069d9", "#0062cc"),  # Azul (Informativo)
-            "data":     ("white", "#17a2b8", "#138496", "#117a8b"),  # Azul-petróleo (Import/Export)
-            "edit":     ("black", "#ffc107", "#e0a800", "#d39e00"),  # Amarelo (Aviso/Edição)
-            "delete":   ("white", "#dc3545", "#c82333", "#bd2130"),  # Vermelho (Perigo/Exclusão)
-            "action":   ("white", "#fd7e14", "#e67311", "#da6d10")   # Laranja (Ação especial)
-        }
-        text, bg, hover, pressed = styles.get(style_type, ("black", "#f0f0f0", "#e0e0e0", "#d0d0d0"))
-        return base_style.format(text_color=text, bg_color=bg, hover_color=hover, pressed_color=pressed)
-    
-    def _get_flat_button_style(self):
-        """Retorna uma string de estilo CSS para botões 'flat' (transparentes)."""
-        text_color = self.theme_colors.get('text_color', '#000000')
-        border_color = self.theme_colors.get('border_color', '#cccccc')
-        hover_color = self.theme_colors.get('highlight_color', 'rgba(128, 128, 128, 0.2)')
-        
+
         style = f"""
-            QPushButton {{
+            /* Estilo geral da janela e dos labels */
+            QWidget, QLabel {{
                 background-color: transparent;
-                color: {text_color};
-                border: 1px solid {border_color};
-                padding: 8px 12px;
-                border-radius: 4px;
+                color: {self.theme_colors.get('text_color', '#000')};
+            }}
+
+            /* --- CORREÇÃO: Estilo específico para o label de paginação --- */
+            #paginationLabel {{
+                font-size: 10pt;
+            }}
+
+            /* Cabeçalho da tabela */
+            QHeaderView::section {{
+                background-color: {self.theme_colors.get('surface_color', '#e0e0e0')};
+                color: {self.theme_colors.get('text_color', '#000')};
+                padding: 4px;
+                border: 1px solid {self.theme_colors.get('border_color', '#c0c0c0')};
                 font-weight: bold;
             }}
-            QPushButton:hover {{
-                background-color: {hover_color};
-                border: 1px solid {text_color};
+
+            /* --- CORREÇÃO: Estilo para a barra de rolagem da tabela --- */
+            QTableWidget QScrollBar:vertical {{
+                border: none;
+                background: {self.theme_colors.get('surface_color', '#f0f0f0')};
+                width: 12px;
+                margin: 0px 0px 0px 0px;
             }}
-            QPushButton:pressed {{
-                background-color: {border_color};
+            QTableWidget QScrollBar::handle:vertical {{
+                background: {self.theme_colors.get('border_color', '#cccccc')};
+                min-height: 20px;
+                border-radius: 6px;
             }}
+            QTableWidget QScrollBar::handle:vertical:hover {{
+                background: {self.theme_colors.get('accent_color', '#007bff')};
+            }}
+            QTableWidget QScrollBar::add-line, QTableWidget QScrollBar::sub-line {{
+                height: 0px;
+                width: 0px;
+            }}
+
+            /* Botões de ação */
+            #primaryActionButton {{
+                background-color: {self.theme_colors.get('accent_color', '#007bff')};
+                color: white; border: none; padding: 10px 15px;
+                border-radius: 6px; font-weight: bold;
+            }}
+            #primaryActionButton:hover {{ background-color: #0069d9; }}
         """
-        return style
-    
-    def apply_styles(self):
-        """Aplica todos os estilos aos widgets da janela."""
-        # Botão primário (colorido)
-        self.add_button.setStyleSheet(self._get_button_style("add"))
+        self.setStyleSheet(style)
         
-        # Botões de ação secundários (transparentes/flat)
+        # O estilo dos botões secundários é aplicado diretamente para garantir a atualização
         flat_style = self._get_flat_button_style()
         self.importar_csv_btn.setStyleSheet(flat_style)
         self.exportar_csv_btn.setStyleSheet(flat_style)
         self.verificar_estoque_btn.setStyleSheet(flat_style)
 
-        # Atualiza ícones para a cor do tema
-        self.update_button_icons()
-
-    def set_theme(self, theme_colors):
-        """Atualiza as cores do tema e os ícones."""
-        self.theme_colors = theme_colors
-        self.update_button_icons()
-        # Recarrega a tabela para que os ícones internos sejam atualizados
+        # Recarrega os dados para que os ícones internos da tabela (editar/excluir) sejam redesenhados com a cor certa
         self.carregar_dados()
+        
+    def _get_flat_button_style(self):
+        """Retorna uma string de estilo CSS para botões secundários."""
+        return f"""
+            QPushButton {{
+                background-color: {self.theme_colors.get('surface_color', '#fff')};
+                color: {self.theme_colors.get('text_color', '#000')};
+                border: 1px solid {self.theme_colors.get('border_color', '#ccc')};
+                padding: 10px 15px;
+                border-radius: 6px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {self.theme_colors.get('button_hover', '#eee')};
+                border-color: {self.theme_colors.get('accent_color', '#007aff')};
+            }}
+        """
 
     def update_button_icons(self):
         """Atualiza apenas os ícones dos botões."""
         icon_color = self.theme_colors.get('text_color', '#000')
-
         self.search_button.setIcon(IconManager.get_icon('search', icon_color))
-        
-        # O botão primário sempre terá um ícone branco
         self.add_button.setIcon(IconManager.get_icon('add', 'white'))
-        
-        # Os ícones dos botões flat seguem a cor do texto do tema
         self.importar_csv_btn.setIcon(IconManager.get_icon('import', icon_color))
         self.exportar_csv_btn.setIcon(IconManager.get_icon('export', icon_color))
         self.verificar_estoque_btn.setIcon(IconManager.get_icon('check_stock', icon_color))
-        
-        # Ícones de paginação
         self.prev_page_btn.setIcon(IconManager.get_icon('angle-left', icon_color))
         self.next_page_btn.setIcon(IconManager.get_icon('angle-right', icon_color))
     
     def initUI(self):
         layout = QVBoxLayout(self)
-        titulo = QLabel("Cadastro de Fornecedores")
-        titulo.setFont(QFont("Arial", 14, QFont.Bold))
-        layout.addWidget(titulo)
-
-        search_group = QGroupBox("Pesquisa e Filtros") # Renomear o grupo
+        
+        search_group = QGroupBox("Pesquisa e Filtros")
         search_layout = QHBoxLayout(search_group)
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Pesquisar por empresa, representante ou email...")
         self.search_input.returnPressed.connect(self.pesquisar_fornecedores)
         
-        # --- INÍCIO DA MODIFICAÇÃO: Adicionar Filtro de Frequência ---
         self.frequencia_filter_combo = QComboBox()
         self.frequencia_filter_combo.addItems(["Todas as Frequências", "Alta", "Média", "Baixa"])
         self.frequencia_filter_combo.currentIndexChanged.connect(self.pesquisar_fornecedores)
-        # --- FIM DA MODIFICAÇÃO ---
 
         self.search_button = QPushButton()
         self.search_button.setToolTip("Buscar Fornecedor")
         self.search_button.clicked.connect(self.pesquisar_fornecedores)
-        search_layout.addWidget(self.search_input, 2) # Dá mais espaço para o texto
-        search_layout.addWidget(self.frequencia_filter_combo, 1) # Adiciona o novo combobox
+        search_layout.addWidget(self.search_input, 2)
+        search_layout.addWidget(self.frequencia_filter_combo, 1)
         search_layout.addWidget(self.search_button)
         layout.addWidget(search_group)
 
@@ -359,14 +358,18 @@ class FornecedorWindow(QWidget):
         self.tabela.verticalHeader().setVisible(False)
         layout.addWidget(self.tabela)
 
-        # Controles de Paginação
         paginacao_layout = QHBoxLayout()
-        self.prev_page_btn = QPushButton(IconManager.get_icon('angle-left'), " Anterior")
+        self.prev_page_btn = QPushButton(" Anterior")
         self.prev_page_btn.clicked.connect(self.ir_pagina_anterior)
+        
+        # --- CORREÇÃO: Adicionando objectName para estilização ---
         self.page_label = QLabel(f"Página {self.pagina_atual} de {self.total_paginas}")
-        self.next_page_btn = QPushButton(IconManager.get_icon('angle-right'), "Próxima")
+        self.page_label.setObjectName("paginationLabel")
+
+        self.next_page_btn = QPushButton("Próxima ")
         self.next_page_btn.setLayoutDirection(Qt.RightToLeft)
         self.next_page_btn.clicked.connect(self.ir_proxima_pagina)
+        
         paginacao_layout.addWidget(self.prev_page_btn)
         paginacao_layout.addStretch()
         paginacao_layout.addWidget(self.page_label)
@@ -599,25 +602,23 @@ class FornecedorWindow(QWidget):
 
 
 class DialogEstoqueBaixo(QDialog):
-    # 1. Construtor modificado para aceitar theme_colors e o objeto 'settings' principal
     def __init__(self, db, produtos_por_fornecedor, theme_colors, settings, parent=None):
         super().__init__(parent)
         self.db = db
         self.produtos_por_fornecedor = produtos_por_fornecedor
         self.theme_colors = theme_colors
-        self.settings = settings  # Armazena o objeto de configurações principal
+        self.settings = settings
 
         self.initUI()
-        self.apply_styles()
+        self.apply_styles() # Aplica os estilos na inicialização
         self.popular_tabela_fornecedores()
 
     def initUI(self):
         self.setWindowTitle("Notificar Fornecedores sobre Estoque Baixo")
-        self.setMinimumSize(900, 750) # Aumentar o tamanho da janela
+        self.setMinimumSize(900, 750)
         
         layout = QVBoxLayout(self)
         
-        # --- SEÇÃO DE SELEÇÃO DE FORNECEDORES ---
         fornecedores_group = QGroupBox("1. Selecione os Fornecedores para Notificar")
         fornecedores_layout = QVBoxLayout(fornecedores_group)
         
@@ -633,7 +634,6 @@ class DialogEstoqueBaixo(QDialog):
         fornecedores_layout.addWidget(self.tabela_fornecedores)
         layout.addWidget(fornecedores_group)
 
-        # --- SEÇÃO DO MODELO DE EMAIL ---
         template_group = QGroupBox("2. Escreva a Mensagem")
         template_layout = QVBoxLayout(template_group)
         
@@ -643,7 +643,6 @@ class DialogEstoqueBaixo(QDialog):
         self.assunto_email = QLineEdit("Solicitação de Reposição de Estoque")
 
         self.corpo_email = QTextEdit()
-        # Modelo de email padrão e útil
         template_padrao = """Prezado(a) {fornecedor_nome},
 
 Espero que esta mensagem o(a) encontre bem.
@@ -667,7 +666,6 @@ Atenciosamente,
         template_layout.addWidget(self.corpo_email)
         layout.addWidget(template_group)
 
-        # --- SEÇÃO DE CREDENCIAIS (SIMPLIFICADA) ---
         email_group = QGroupBox("3. Suas Credenciais de Envio")
         email_layout = QFormLayout(email_group)
         
@@ -677,7 +675,6 @@ Atenciosamente,
         self.email_senha.setEchoMode(QLineEdit.Password)
         self.email_senha.setPlaceholderText("Sua senha de e-mail ou 'senha de app'")
         
-        # Carrega o e-mail salvo das configurações, se houver
         smtp_config = self.settings.get_smtp_config()
         if smtp_config and smtp_config.get('user'):
             self.email_usuario.setText(smtp_config['user'])
@@ -687,13 +684,12 @@ Atenciosamente,
         
         layout.addWidget(email_group)
 
-        # --- BOTÕES DE AÇÃO ---
         button_layout = QHBoxLayout()
-        self.enviar_emails_btn = QPushButton(IconManager.get_icon('send', 'white'), " Enviar Emails Selecionados")
+        self.enviar_emails_btn = QPushButton(" Enviar Emails Selecionados")
         self.enviar_emails_btn.setObjectName("primaryButton")
         self.enviar_emails_btn.clicked.connect(self.enviar_emails)
 
-        self.fechar_btn = QPushButton(IconManager.get_icon('cancel', self.theme_colors['text_color']), " Fechar")
+        self.fechar_btn = QPushButton(" Fechar")
         self.fechar_btn.setObjectName("secondaryButton")
         self.fechar_btn.clicked.connect(self.accept)
 
@@ -701,6 +697,60 @@ Atenciosamente,
         button_layout.addWidget(self.fechar_btn)
         button_layout.addWidget(self.enviar_emails_btn)
         layout.addLayout(button_layout)
+
+    # ================================================================= #
+    #       CORREÇÃO PRINCIPAL 2: MÉTODO apply_styles REFEITO           #
+    # ================================================================= #
+    def apply_styles(self):
+        """Aplica uma folha de estilos completa para o diálogo, incluindo scrollbars."""
+        colors = self.theme_colors
+        self.setStyleSheet(f"""
+            QDialog {{ background-color: {colors['bg_color']}; }}
+            QGroupBox, QLabel, QCheckBox {{ color: {colors['text_color']}; }}
+            QGroupBox {{ font-weight: bold; border: 1px solid {colors['border_color']}; border-radius: 6px; margin-top: 10px; }}
+            QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left; padding: 0 5px; left: 10px; }}
+            QLineEdit, QTextEdit, QTableWidget {{ 
+                background-color: {colors['surface_color']}; 
+                color: {colors['text_color']}; 
+                border: 1px solid {colors['border_color']}; 
+                padding: 6px; 
+                border-radius: 4px; 
+            }}
+            QHeaderView::section {{ 
+                background-color: {colors.get('menu_color', colors['surface_color'])}; 
+                padding: 5px; border: 1px solid {colors['border_color']}; 
+                font-weight: bold; 
+            }}
+            QLineEdit:focus, QTextEdit:focus {{ border: 1px solid {colors['accent_color']}; }}
+            
+            /* --- CORREÇÃO: Estilo para as scrollbars da tabela e da caixa de texto --- */
+            QTableWidget QScrollBar:vertical, QTextEdit QScrollBar:vertical {{
+                border: none;
+                background: {colors.get('surface_color', '#f0f0f0')};
+                width: 12px;
+            }}
+            QTableWidget QScrollBar::handle:vertical, QTextEdit QScrollBar::handle:vertical {{
+                background: {colors.get('border_color', '#cccccc')};
+                min-height: 20px;
+                border-radius: 6px;
+            }}
+            QTableWidget QScrollBar::handle:vertical:hover, QTextEdit QScrollBar::handle:vertical:hover {{
+                background: {colors.get('accent_color', '#007bff')};
+            }}
+            QTableWidget QScrollBar::add-line, QTableWidget QScrollBar::sub-line,
+            QTextEdit QScrollBar::add-line, QTextEdit QScrollBar::sub-line {{
+                height: 0px; width: 0px;
+            }}
+            /* --- FIM DA CORREÇÃO --- */
+
+            #primaryButton {{ background-color: {colors['accent_color']}; color: white; border: none; padding: 8px 16px; border-radius: 4px; font-weight: bold; }}
+            #primaryButton:hover {{ background-color: #005bb5; }}
+            #secondaryButton {{ background-color: {colors['surface_color']}; color: {colors['text_color']}; border: 1px solid {colors['border_color']}; padding: 8px 16px; border-radius: 4px; font-weight: bold; }}
+            #secondaryButton:hover {{ border-color: {colors['accent_color']}; }}
+        """)
+        # Atualiza os ícones dos botões
+        self.enviar_emails_btn.setIcon(IconManager.get_icon('send', 'white'))
+        self.fechar_btn.setIcon(IconManager.get_icon('cancel', self.theme_colors['text_color']))
 
     def popular_tabela_fornecedores(self):
         self.tabela_fornecedores.setRowCount(0)
@@ -780,23 +830,6 @@ Atenciosamente,
         except Exception as e:
             progress.close()
             AlertDialog(self, "Erro de Conexão", f"Não foi possível conectar ou enviar e-mails:\n{e}", alert_type='error', theme_colors=self.theme_colors).exec_()
-
-    def apply_styles(self):
-        # O mesmo estilo do FormularioFornecedor para consistência
-        colors = self.theme_colors
-        self.setStyleSheet(f"""
-            QDialog {{ background-color: {colors['bg_color']}; }}
-            QGroupBox, QLabel, QSpinBox, QCheckBox {{ color: {colors['text_color']}; }}
-            QGroupBox {{ font-weight: bold; border: 1px solid {colors['border_color']}; border-radius: 6px; margin-top: 10px; }}
-            QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left; padding: 0 5px; left: 10px; }}
-            QLineEdit, QSpinBox, QTextEdit, QTableWidget {{ background-color: {colors['surface_color']}; color: {colors['text_color']}; border: 1px solid {colors['border_color']}; padding: 6px; border-radius: 4px; }}
-            QHeaderView::section {{ background-color: {colors.get('menu_color', colors['surface_color'])}; padding: 5px; border: 1px solid {colors['border_color']}; font-weight: bold; }}
-            QLineEdit:focus, QSpinBox:focus, QTextEdit:focus {{ border: 1px solid {colors['accent_color']}; }}
-            #primaryButton {{ background-color: {colors['accent_color']}; color: white; border: none; padding: 8px 16px; border-radius: 4px; font-weight: bold; }}
-            #primaryButton:hover {{ background-color: #005bb5; }}
-            #secondaryButton {{ background-color: {colors['surface_color']}; color: {colors['text_color']}; border: 1px solid {colors['border_color']}; padding: 8px 16px; border-radius: 4px; font-weight: bold; }}
-            #secondaryButton:hover {{ border-color: {colors['accent_color']}; }}
-        """)
     
     def obter_email_fornecedor(self, fornecedor_nome):
         # Este método permanece o mesmo

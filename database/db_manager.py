@@ -1421,53 +1421,25 @@ class DatabaseManager:
             # Lançar a exceção permite que a transação externa faça o rollback
             raise e
     
-    def listar_movimentos_caixa(self, caixa_id):
-        try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT id, datetime(data_hora, 'localtime') as data_hora, tipo, descricao, 
-                       valor, forma_pagamento, referencia_id, tipo_referencia
-                FROM movimentos_caixa 
-                WHERE caixa_id = ?
-                ORDER BY data_hora DESC
-            """, (caixa_id,))
-            
-            movimentos = [dict(row) for row in cursor.fetchall()]
-            conn.close()
-            
-            return movimentos
-        except Exception as e:
-            print(f"Erro ao listar movimentos: {e}")
-            return []
-    
     def listar_movimentos_por_periodo(self, caixa_id, data_inicio, data_fim):
+        """
+        CORRIGIDO: Também utiliza a conexão principal (self.cursor) para garantir
+        consistência dos dados lidos.
+        """
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
-            # --- INÍCIO DA CORREÇÃO ---
-            # Adicionado 'localtime' na cláusula WHERE para que o filtro
-            # também considere o fuso horário local.
-            cursor.execute("""
+            self.cursor.execute("""
                 SELECT id, datetime(data_hora, 'localtime') as data_hora, tipo, descricao, 
                     valor, forma_pagamento, referencia_id, tipo_referencia
                 FROM movimentos_caixa 
                 WHERE caixa_id = ? AND date(data_hora, 'localtime') BETWEEN ? AND ?
                 ORDER BY data_hora DESC
             """, (caixa_id, data_inicio, data_fim))
-            # --- FIM DA CORREÇÃO ---
             
-            movimentos = [dict(row) for row in cursor.fetchall()]
-            conn.close()
-            
-            return movimentos
+            return [dict(row) for row in self.cursor.fetchall()]
         except Exception as e:
             print(f"Erro ao listar movimentos por período: {e}")
             return []
+
     
     def obter_detalhes_caixa(self, caixa_id):
         try:

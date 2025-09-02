@@ -258,12 +258,27 @@ def on_login_success(usuario):
     # 2. Passe theme_colors para a função de verificação
     QTimer.singleShot(500, lambda: verificar_produtos_alertas(window, db, theme_colors))
 
+
 if __name__ == "__main__":
     # Iniciar aplicação
     app = QApplication(sys.argv)
-    app.setStyle("Fusion")  # Estilo consistente entre plataformas
+    app.setStyle("Fusion")
+
+    # ================================================================= #
+    #       CORREÇÃO APLICADA AQUI                                      #
+    # ================================================================= #
     
-    # Configurar diretórios necessários
+    # 1. Define o caminho para o seu ícone.
+    #    Como a função setup_directories() já define 'ASSETS_DIR', podemos usá-lo.
+    #    Note que seu caminho é 'assets/img/Logo.png' e não 'Logo2.png'
+    logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'img', 'Logo.png')
+    
+    # 2. Cria o ícone e o define para a aplicação inteira.
+    app.setWindowIcon(QIcon(logo_path))
+
+    # --- FIM DA CORREÇÃO ---
+
+    # Configurar diretórios necessários (seu código original continua aqui)
     app_dirs = setup_directories()
     
     # Definir variáveis de ambiente para que outros módulos usem os caminhos corretos
@@ -276,16 +291,14 @@ if __name__ == "__main__":
         # Aplicar configurações (agora usando o diretório correto)
         settings = Settings()
         
-        # ========================================================== #
-        # ## CORREÇÃO PRINCIPAL - PARTE 1: CRIAR O DICIONÁRIO DE TEMA ##
-        # ========================================================== #
-        # ANTES de criar qualquer janela, pegue as cores do tema
+        # ... (O resto do seu código permanece exatamente o mesmo) ...
+        
         is_dark = settings.get_theme() == 'dark'
         if is_dark:
             theme_colors = {
                 'bg_color': "#1c2128", 'surface_color': "#22272e", 'menu_color': "#22272e",
                 'text_color': "#cdd9e5", 'text_secondary': "#768390", 'border_color': "#373e47",
-                'button_hover': "#373e47", 'accent_color': "#007AFF"
+                'button_hover': "#373e4g", 'accent_color': "#007AFF"
             }
         else:
             theme_colors = {
@@ -294,14 +307,11 @@ if __name__ == "__main__":
                 'button_hover': "#e5e5ea", 'accent_color': "#007AFF"
             }
         
-        # Aplicar o tema ao QApplication (você já fazia isso, está correto)
         settings.apply_theme(app)
         
-        # Definir fonte global
         font = QFont("Arial", settings.get_font_size())
         app.setFont(font)
         
-        # Splash Screen (procurar no diretório correto)
         splash_path = os.path.join(app_dirs['assets'], 'splash.png')
         splash_pixmap = QPixmap(splash_path)
         if not splash_pixmap.isNull():
@@ -311,29 +321,18 @@ if __name__ == "__main__":
         else:
             splash = None
         
-        # Criar conexão com o banco de dados (usando o diretório correto)
         db = DatabaseManager()
-        session = SessionManager()  # Criar gerenciador de sessão
+        session = SessionManager()
         
-        # Mostrar login após a splash screen
         if splash:
             QTimer.singleShot(1500, splash.close)
         
-        # ================================================================= #
-        # ## CORREÇÃO PRINCIPAL - PARTE 2: PASSAR OS ARGUMENTOS CORRETOS ##
-        # ================================================================= #
-        # Exibir tela de login, agora passando 'settings' e 'theme_colors'
         login_window = LoginWindow(db, theme_colors)
-        
-        # Conectar o sinal de login bem-sucedido
         login_window.login_success_signal.connect(on_login_success)
         
-        # Mostrar janela de login
         if login_window.exec_() != QDialog.Accepted:
-            # Se o usuário fechou a janela de login sem fazer login
             sys.exit(0)
         
-        # Executar o loop de eventos
         sys.exit(app.exec_())
     
     except Exception as e:

@@ -367,18 +367,18 @@ class CsvImportWorker(QThread):
             return datetime.strptime(data_str, "%Y-%m-%d").strftime("%Y-%m-%d")
         except: return None
     
+# Substitua a classe EstoqueWindow inteira em seu arquivo.
 class EstoqueWindow(QWidget):
     dados_produtos_alterados = pyqtSignal()
-    def __init__(self, db, theme_colors, logo_pixmap=None): # <--- ADICIONE logo_pixmap=None AQUI
+    def __init__(self, db, theme_colors, logo_pixmap=None): 
         super().__init__()
         self.db = db
         self.theme_colors = theme_colors
-        self.logo_pixmap = logo_pixmap # <--- ADICIONE ESTA LINHA para guardar o logo
+        self.logo_pixmap = logo_pixmap
         self.pagina_atual = 1
         self.itens_por_pagina = 100 
         self.total_paginas = 1
 
-        # --- CONFIGURAÇÕES DO RELATÓRIO (ADICIONADAS) ---
         self.logo_path = "assets/img/GestorX (2).png"
         self.company_info = {
             "nome": "Estação Doces",
@@ -386,46 +386,43 @@ class EstoqueWindow(QWidget):
             "contato": "Telefone: (11) 99999-8888 | Email: contato@estacaodoces.com"
         }
 
-        # CORREÇÃO: Chamada única para initUI e para o carregamento de dados
         self.initUI()
         self.set_theme(self.theme_colors) 
         self.atualizar_visualizacao_dados()
 
-    def _get_button_style(self, style_type):
-        """Retorna uma string de estilo CSS para um tipo de botão específico."""
-        base_style = """
-            QPushButton {{
-                color: {text_color};
-                background-color: {bg_color};
-                border: none;
-                padding: 8px 12px;
-                border-radius: 4px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {hover_color};
-            }}
-            QPushButton:pressed {{
-                background-color: {pressed_color};
-            }}
-        """
-        styles = {
-            "add":      ("white", "#28a745", "#218838", "#1e7e34"),  # Verde (Sucesso)
-            "report":   ("white", "#007bff", "#0069d9", "#0062cc"),  # Azul (Informativo)
-            "data":     ("white", "#17a2b8", "#138496", "#117a8b"),  # Azul-petróleo (Import/Export)
-            "edit":     ("black", "#ffc107", "#e0a800", "#d39e00"),  # Amarelo (Aviso/Edição)
-            "delete":   ("white", "#dc3545", "#c82333", "#bd2130"),  # Vermelho (Perigo/Exclusão)
-            "action":   ("white", "#fd7e14", "#e67311", "#da6d10")   # Laranja (Ação especial)
-        }
-        text, bg, hover, pressed = styles.get(style_type, ("black", "#f0f0f0", "#e0e0e0", "#d0d0d0"))
-        return base_style.format(text_color=text, bg_color=bg, hover_color=hover, pressed_color=pressed)
-    
+    # ================================================================= #
+    #       CORREÇÃO PRINCIPAL: MÉTODO set_theme REFEITO                #
+    # ================================================================= #
     def set_theme(self, theme_colors):
-        """Atualiza o tema da janela, dos ícones e do cabeçalho da tabela."""
+        """
+        Aplica um stylesheet completo e unificado para toda a janela de estoque,
+        garantindo que todos os componentes, incluindo labels e scrollbars, sejam atualizados.
+        """
         self.theme_colors = theme_colors
         
-        # Estilo do cabeçalho (já existente)
-        header_style = f"""
+        # Atualiza os ícones de todos os botões primeiro
+        self.update_button_icons()
+        
+        # Estilo unificado para toda a janela
+        style = f"""
+            /* Estilo geral para a janela */
+            QWidget {{
+                background-color: {self.theme_colors.get('bg_color', '#ffffff')};
+            }}
+
+            /* --- CORREÇÃO 1: Estilo para os labels dentro dos grupos de filtro e paginação --- */
+            QGroupBox QLabel, #paginationLabel {{
+                color: {self.theme_colors.get('text_color', '#000000')};
+                background: transparent; /* Garante fundo transparente */
+                font-size: 10pt;
+            }}
+
+            /* Legenda de cores para os alertas de estoque/vencimento */
+            #legendaEstoqueBaixo {{ color: #dc3545; }} /* Vermelho */
+            #legendaVence30 {{ color: #fd7e14; }} /* Laranja */
+            #legendaVence15 {{ color: #dc3545; }} /* Vermelho */
+
+            /* Estilo para o cabeçalho da tabela */
             QHeaderView::section {{
                 background-color: {self.theme_colors.get('surface_color', '#e0e0e0')};
                 color: {self.theme_colors.get('text_color', '#000000')};
@@ -433,11 +430,43 @@ class EstoqueWindow(QWidget):
                 border: 1px solid {self.theme_colors.get('border_color', '#c0c0c0')};
                 font-weight: bold;
             }}
-        """
-        self.tabela.horizontalHeader().setStyleSheet(header_style)
-        
-        # --- INÍCIO DA MODIFICAÇÃO: Adicionar estilo para os botões inferiores ---
-        button_style = f"""
+
+            /* --- CORREÇÃO 2: Estilo para as barras de rolagem da tabela --- */
+            QTableWidget QScrollBar:vertical {{
+                border: none;
+                background: {self.theme_colors.get('surface_color', '#f0f0f0')};
+                width: 12px;
+                margin: 0px 0px 0px 0px;
+            }}
+            QTableWidget QScrollBar::handle:vertical {{
+                background: {self.theme_colors.get('border_color', '#cccccc')};
+                min-height: 20px;
+                border-radius: 6px;
+            }}
+            QTableWidget QScrollBar::handle:vertical:hover {{
+                background: {self.theme_colors.get('accent_color', '#007bff')};
+            }}
+            QTableWidget QScrollBar:horizontal {{
+                border: none;
+                background: {self.theme_colors.get('surface_color', '#f0f0f0')};
+                height: 12px;
+                margin: 0px 0px 0px 0px;
+            }}
+            QTableWidget QScrollBar::handle:horizontal {{
+                background: {self.theme_colors.get('border_color', '#cccccc')};
+                min-width: 20px;
+                border-radius: 6px;
+            }}
+            QTableWidget QScrollBar::handle:horizontal:hover {{
+                background: {self.theme_colors.get('accent_color', '#007bff')};
+            }}
+            QTableWidget QScrollBar::add-line, QTableWidget QScrollBar::sub-line {{
+                height: 0px;
+                width: 0px;
+            }}
+            /* --- FIM DA CORREÇÃO 2 --- */
+
+            /* Estilo para os botões de ação inferiores */
             #primaryActionButton {{
                 background-color: {self.theme_colors.get('accent_color', '#007bff')};
                 color: white;
@@ -447,7 +476,7 @@ class EstoqueWindow(QWidget):
                 font-weight: bold;
             }}
             #primaryActionButton:hover {{
-                background-color: #0069d9; /* Cor de hover fixa para o botão azul */
+                background-color: #0069d9;
             }}
             
             #secondaryActionButton {{
@@ -462,45 +491,27 @@ class EstoqueWindow(QWidget):
                 background-color: {self.theme_colors.get('button_hover', '#f0f0f0')};
             }}
         """
-        # Aplica o estilo aos botões específicos
-        self.add_button.setStyleSheet(button_style)
-        self.relatorio_btn.setStyleSheet(button_style)
-        self.relatorio_estoque_btn.setStyleSheet(button_style)
-        self.exportar_csv_btn.setStyleSheet(button_style)
-        self.importar_csv_btn.setStyleSheet(button_style)
-        # --- FIM DA MODIFICAÇÃO ---
-
-        self.update_button_icons()
+        self.setStyleSheet(style)
         self.atualizar_visualizacao_dados()
     
     def update_button_icons(self):
         """Atualiza todos os ícones da interface para refletir o novo tema."""
         text_color = self.theme_colors.get('text_color', '#000')
         
-        # Ícones dos filtros (já corretos)
         self.search_button.setIcon(IconManager.get_icon('search', text_color))
         self.aplicar_filtro_btn.setIcon(IconManager.get_icon('filter', text_color))
         self.limpar_filtro_btn.setIcon(IconManager.get_icon('clear', text_color))
         self.prev_page_btn.setIcon(IconManager.get_icon('angle-left', text_color))
         self.next_page_btn.setIcon(IconManager.get_icon('angle-right', text_color))
-
-        # --- INÍCIO DA MODIFICAÇÃO ---
-        # Botão primário: ícone sempre branco
-        self.add_button.setIcon(IconManager.get_icon('add', 'white'))
         
-        # Botões secundários: ícones usam a cor de texto principal do tema
+        self.add_button.setIcon(IconManager.get_icon('add', 'white'))
         self.relatorio_btn.setIcon(IconManager.get_icon('report', text_color))
         self.relatorio_estoque_btn.setIcon(IconManager.get_icon('report', text_color))
         self.exportar_csv_btn.setIcon(IconManager.get_icon('export', text_color))
         self.importar_csv_btn.setIcon(IconManager.get_icon('import', text_color))
-        # --- FIM DA MODIFICAÇÃO ---
-    
+
     def initUI(self):
         layout = QVBoxLayout(self)
-    
-        titulo = QLabel("Controle de Estoque")
-        titulo.setFont(QFont("Arial", 14, QFont.Bold))
-        layout.addWidget(titulo)
         
         search_group = QGroupBox("Pesquisa e Filtros")
         search_layout = QVBoxLayout(search_group)
@@ -554,20 +565,18 @@ class EstoqueWindow(QWidget):
         layout.addWidget(search_group)
         
         legenda_layout = QHBoxLayout()
-        estoque_baixo_label = QLabel("Estoque Baixo")
-        estoque_baixo_label.setStyleSheet("color: red;")
+        # --- CORREÇÃO: Adicionando objectName para estilização ---
+        estoque_baixo_label = QLabel("Estoque Baixo"); estoque_baixo_label.setObjectName("legendaEstoqueBaixo")
+        vencimento_30_label = QLabel("Vence em 30 dias"); vencimento_30_label.setObjectName("legendaVence30")
+        vencimento_15_label = QLabel("Vence em 15 dias"); vencimento_15_label.setObjectName("legendaVence15")
+        
         legenda_layout.addWidget(estoque_baixo_label)
-        vencimento_30_label = QLabel("Vence em 30 dias")
-        vencimento_30_label.setStyleSheet("color: orange;")
         legenda_layout.addWidget(vencimento_30_label)
-        vencimento_15_label = QLabel("Vence em 15 dias")
-        vencimento_15_label.setStyleSheet("color: red;")
         legenda_layout.addWidget(vencimento_15_label)
         legenda_layout.addStretch()
         layout.addLayout(legenda_layout)
         
         self.tabela = QTableWidget()
-        # CORREÇÃO 3: Reduzido o número de colunas e removido "ID" dos cabeçalhos
         self.tabela.setColumnCount(12)
         self.tabela.setHorizontalHeaderLabels([
             "Código de Barras", "Nome", "Categoria", "Estoque Detalhado", "Estoque Mín.", 
@@ -584,8 +593,10 @@ class EstoqueWindow(QWidget):
         self.prev_page_btn = QPushButton(" Anterior")
         self.prev_page_btn.clicked.connect(self.ir_pagina_anterior)
         
+        # --- CORREÇÃO: Adicionando objectName para estilização ---
         self.page_label = QLabel(f"Página {self.pagina_atual} de {self.total_paginas}")
-        
+        self.page_label.setObjectName("paginationLabel")
+
         self.next_page_btn = QPushButton("Próxima")
         self.next_page_btn.setLayoutDirection(Qt.RightToLeft)
         self.next_page_btn.clicked.connect(self.ir_proxima_pagina)
@@ -598,28 +609,25 @@ class EstoqueWindow(QWidget):
         layout.addLayout(paginacao_layout)
         
         action_layout = QHBoxLayout()
-    
         self.add_button = QPushButton(" Adicionar Produto")
         self.add_button.setObjectName("primaryActionButton") 
         self.add_button.clicked.connect(self.abrir_formulario_produto)
 
-        # --- INÍCIO DA MODIFICAÇÃO ---
         self.relatorio_btn = QPushButton(" Relatório de Vencimentos")
-        self.relatorio_btn.setObjectName("secondaryActionButton") # Adicionado
+        self.relatorio_btn.setObjectName("secondaryActionButton")
         self.relatorio_btn.clicked.connect(self.relatorio_vencimentos)
 
         self.relatorio_estoque_btn = QPushButton(" Relatório de Estoque Baixo")
-        self.relatorio_estoque_btn.setObjectName("secondaryActionButton") # Adicionado
+        self.relatorio_estoque_btn.setObjectName("secondaryActionButton")
         self.relatorio_estoque_btn.clicked.connect(self.relatorio_estoque_baixo)
         
         self.exportar_csv_btn = QPushButton(" Exportar CSV")
-        self.exportar_csv_btn.setObjectName("secondaryActionButton") # Adicionado
+        self.exportar_csv_btn.setObjectName("secondaryActionButton")
         self.exportar_csv_btn.clicked.connect(self.exportar_csv)
 
         self.importar_csv_btn = QPushButton(" Importar CSV")
-        self.importar_csv_btn.setObjectName("secondaryActionButton") # Adicionado
+        self.importar_csv_btn.setObjectName("secondaryActionButton")
         self.importar_csv_btn.clicked.connect(self.importar_csv)
-        # --- FIM DA MODIFICAÇÃO ---
 
         action_layout.addWidget(self.add_button)
         action_layout.addWidget(self.relatorio_btn)
@@ -628,9 +636,10 @@ class EstoqueWindow(QWidget):
         action_layout.addWidget(self.importar_csv_btn)
         layout.addLayout(action_layout)
         
-        # A chamada para update_button_icons() permanece aqui
         self.update_button_icons()
 
+    # O resto da classe EstoqueWindow continua exatamente igual ao que você já tinha.
+    # ... (cole todos os outros métodos de EstoqueWindow aqui, sem nenhuma alteração) ...
     def ir_pagina_anterior(self):
         if self.pagina_atual > 1:
             self.pagina_atual -= 1
@@ -720,21 +729,16 @@ class EstoqueWindow(QWidget):
         icon_color = self.theme_colors.get('text_color', '#000')
         hoje = datetime.now().date()
 
-        # --- INÍCIO DA MODIFICAÇÃO 1: Lógica para detectar o tema ---
-        # Vamos determinar se o tema é escuro para definir a cor do ícone de baixa.
-        # Uma forma simples é verificar a luminosidade da cor de fundo.
         try:
             bg_color_hex = self.theme_colors.get('bg_color', '#ffffff')
             color = QColor(bg_color_hex)
-            # Fórmula padrão de luminância
             luminance = (0.299 * color.red() + 0.587 * color.green() + 0.114 * color.blue()) / 255
             is_dark_theme = luminance < 0.5
         except Exception:
-            is_dark_theme = True # Padrão seguro para temas escuros
+            is_dark_theme = True 
         
         dar_baixa_icon_color = '#ffffff' if is_dark_theme else '#000000'
         icon_color = self.theme_colors.get('text_color', '#000000')
-        # --- FIM DA MODIFICAÇÃO 1 ---
 
         def get_value(key, default=""):
             return produto[key] if key in produto.keys() else default
@@ -742,7 +746,6 @@ class EstoqueWindow(QWidget):
         for row, produto in enumerate(produtos):
             self.tabela.insertRow(row)
             
-            # Preenchimento das colunas (seu código original aqui está bom)
             self.tabela.setItem(row, 0, QTableWidgetItem(get_value('codigo_barras', '')))
             
             nome_produto = get_value('nome', 'Produto Desconhecido')
@@ -787,15 +790,12 @@ class EstoqueWindow(QWidget):
             validade_str = get_value('data_validade', '')
             validade_item = QTableWidgetItem(validade_str)
             
-            # --- LÓGICA DE VALIDADE E BOTÕES (COM A CORREÇÃO) ---
-            
-            dias_para_vencer = 999 # Valor padrão que não ativa nenhuma condição
+            dias_para_vencer = 999 
             if validade_str:
                 try:
                     data_validade = datetime.strptime(validade_str, "%Y-%m-%d").date()
                     dias_para_vencer = (data_validade - hoje).days
                     
-                    # Aplica cores com base nos dias para vencer
                     if dias_para_vencer <= 0:
                         validade_item.setForeground(QBrush(QColor('darkred')))
                         validade_item.setToolTip("Produto VENCIDO!")
@@ -807,7 +807,6 @@ class EstoqueWindow(QWidget):
                         validade_item.setToolTip(f"Vence em {dias_para_vencer} dias!")
 
                 except ValueError as e:
-                    # Melhoria: não falhar silenciosamente. Imprime um erro no console se a data for inválida.
                     print(f"AVISO: Data em formato inválido para o produto '{nome_produto}': {validade_str}. Erro: {e}")
 
             self.tabela.setItem(row, 8, validade_item)
@@ -820,7 +819,6 @@ class EstoqueWindow(QWidget):
             acoes_layout.setContentsMargins(0, 0, 0, 0)
             acoes_layout.setSpacing(5)
             
-            # Estilo Padrão para os botões (sem borda, com hover)
             hover_color = self.theme_colors.get('button_hover', '#555555')
             
             editar_btn = QPushButton(IconManager.get_icon('edit', icon_color), "")
@@ -829,13 +827,9 @@ class EstoqueWindow(QWidget):
             excluir_btn = QPushButton(IconManager.get_icon('delete', icon_color), "")
             excluir_btn.setToolTip("Excluir Produto")
 
-            # --- INÍCIO DA CORREÇÃO ---
-            # As conexões dos sinais de clique que estavam faltando foram readicionadas aqui.
             editar_btn.clicked.connect(lambda _, p_id=get_value('id'): self.abrir_formulario_produto(p_id))
             excluir_btn.clicked.connect(lambda _, p_id=get_value('id'): self.excluir_produto(p_id))
-            # --- FIM DA CORREÇÃO ---
 
-            # Aplica o estilo "flat" e o cursor de mão a todos os botões
             for btn in [editar_btn, excluir_btn]:
                 btn.setFixedSize(30, 30)
                 btn.setFlat(True)
@@ -848,7 +842,6 @@ class EstoqueWindow(QWidget):
             acoes_layout.addWidget(editar_btn)
             acoes_layout.addWidget(excluir_btn)
             
-            # Lógica para o botão de Dar Baixa (já existente, agora com o novo estilo)
             validade_str = get_value('data_validade', '')
             dias_para_vencer = 999
             if validade_str:
@@ -861,13 +854,11 @@ class EstoqueWindow(QWidget):
             produto_tem_estoque = get_value('quantidade', 0) > 0 or get_value('estoque_fracionado', 0) > 0
             
             if dias_para_vencer <= 0 and produto_tem_estoque:
-                # Usamos a cor do ícone que definimos no início do método
                 dar_baixa_btn = QPushButton(IconManager.get_icon('thumb-down', dar_baixa_icon_color), "")
                 dar_baixa_btn.setToolTip("Dar Baixa por Vencimento (Registrar Perda)")
                 dar_baixa_btn.setFixedSize(30, 30)
                 dar_baixa_btn.setFlat(True)
                 dar_baixa_btn.setCursor(Qt.PointingHandCursor)
-                # Damos um hover vermelho para indicar uma ação de "perigo"
                 dar_baixa_btn.setStyleSheet("""
                     QPushButton { border-radius: 4px; }
                     QPushButton:hover { background-color: #dc3545; }
@@ -875,7 +866,6 @@ class EstoqueWindow(QWidget):
                 dar_baixa_btn.clicked.connect(lambda _, p_id=get_value('id'): self.dar_baixa_produto(p_id))
                 acoes_layout.addWidget(dar_baixa_btn)
             
-            # Lógica para o botão de Quebrar Embalagem (já existente, agora com o novo estilo)
             if bool(get_value('fracionado', False)) and get_value('quantidade', 0) > 0:
                 quebrar_btn = QPushButton(IconManager.get_icon('break', icon_color), "")
                 quebrar_btn.setToolTip("Quebrar embalagem em unidades")
@@ -891,16 +881,12 @@ class EstoqueWindow(QWidget):
             
             self.tabela.setCellWidget(row, 11, acoes_widget)
 
-    # Dentro da classe EstoqueWindow, em estoque_window.py
-
     def abrir_dialog_quebrar_embalagem(self, produto_id):
         produto_info = self.db.obter_info_estoque_fracionado(produto_id)
         if not produto_info or not produto_info['fracionado']:
             QMessageBox.warning(self, "Erro", "Este produto não é fracionado!")
             return
         
-        # --- CORREÇÃO APLICADA AQUI ---
-        # Passamos o logo_pixmap para o construtor do diálogo.
         dialog = DialogQuebrarEmbalagem(self.db, produto_info, self.theme_colors, self.logo_pixmap)
         
         if dialog.exec_() == QDialog.Accepted:
@@ -908,11 +894,7 @@ class EstoqueWindow(QWidget):
             print("DEBUG: Embalagem quebrada. Emitindo sinal 'dados_produtos_alterados'.")
             self.dados_produtos_alterados.emit()
     
-
-    # Agora, adicione o novo método dar_baixa_produto na classe EstoqueWindow
-
     def dar_baixa_produto(self, produto_id):
-        """Abre um diálogo de confirmação para registrar um produto como perda."""
         produto = self.db.obter_produto(produto_id)
         if not produto:
             AlertDialog(self, "Erro", "Produto não encontrado.", alert_type='error', theme_colors=self.theme_colors).exec_()
@@ -933,50 +915,34 @@ class EstoqueWindow(QWidget):
             if sucesso:
                 AlertDialog(self, "Sucesso", msg_retorno, alert_type='success', theme_colors=self.theme_colors).exec_()
                 self.atualizar_visualizacao_dados()
-                # Emitir sinal para o dashboard atualizar
                 self.dados_produtos_alterados.emit()
             else:
                 AlertDialog(self, "Erro", msg_retorno, alert_type='error', theme_colors=self.theme_colors).exec_()
 
-    # Dentro da classe EstoqueWindow, em estoque_window.py
-
     def abrir_formulario_produto(self, produto_id=None):
-        # --- CORREÇÃO APLICADA AQUI ---
-        # Em vez de chamar um método que não existe,
-        # usamos o logo que foi passado no construtor.
         dialog = FormularioProduto(self.db, produto_id, self.theme_colors, self.logo_pixmap)
-        
         dialog.showMaximized() 
 
         if dialog.exec_() == QDialog.Accepted:
             self.carregar_dados()
             self.atualizar_categorias_filtro()
-            
             print("DEBUG: Formulário de produto salvo. Emitindo sinal 'dados_produtos_alterados'.")
             self.dados_produtos_alterados.emit()
     
     def excluir_produto(self, produto_id):
-        # Chamada corrigida
         dialog = AlertDialog(self, "Confirmar Exclusão", 
                                 "Tem certeza que deseja excluir este produto?\nEsta ação não pode ser desfeita.",
                                 alert_type='question', buttons=QMessageBox.Yes | QMessageBox.No, theme_colors=self.theme_colors)
         
         if dialog.exec_() == QMessageBox.Yes:
             if self.db.excluir_produto(produto_id):
-                # Chamada corrigida
                 AlertDialog(self, "Sucesso", "Produto excluído com sucesso!", alert_type='success', theme_colors=self.theme_colors).exec_()
                 self.carregar_dados()
                 self.dados_produtos_alterados.emit()
             else:
-                # Chamada corrigida
                 AlertDialog(self, "Erro", "Não foi possível excluir o produto.", alert_type='error', theme_colors=self.theme_colors).exec_()
     
-    # ===================================================================== #
-    #       NOVAS FUNÇÕES DE RELATÓRIO (AVANÇADAS E PROFISSIONAIS)        #
-    # ===================================================================== #
-
     def _criar_kpi_boxes(self, kpi_data, doc_width):
-        """Cria uma tabela formatada como caixas de KPI."""
         styles = getSampleStyleSheet()
         style_label = ParagraphStyle('kpi_label', parent=styles['Normal'], fontSize=9, textColor=colors.dimgrey, alignment=TA_LEFT)
         style_value = ParagraphStyle('kpi_value', parent=styles['Normal'], fontSize=16, fontName='Helvetica-Bold', alignment=TA_LEFT)
@@ -984,23 +950,15 @@ class EstoqueWindow(QWidget):
         data = []
         for kpi in kpi_data:
             p_label = Paragraph(kpi['label'], style_label)
-            
-            # --- INÍCIO DA CORREÇÃO ---
-            # Verifica se o valor já é um Parágrafo ou se é uma string.
             kpi_value = kpi['value']
             if isinstance(kpi_value, Paragraph):
-                # Se já for um Parágrafo, apenas o utiliza.
                 p_value = kpi_value
-                # Garante que o estilo do parágrafo existente seja ajustado, se necessário
                 p_value.style.alignment = TA_LEFT 
             else:
-                # Se for uma string (ou outro tipo), cria um novo Parágrafo.
                 p_value = Paragraph(str(kpi_value), style_value)
-            # --- FIM DA CORREÇÃO ---
             
             data.append([p_label, p_value])
         
-        # Transpõe os dados para que os labels fiquem em cima dos valores
         tabela_data = [list(i) for i in zip(*data)]
 
         kpi_table = Table(tabela_data, colWidths=[doc_width / len(kpi_data)] * len(kpi_data))
@@ -1016,9 +974,7 @@ class EstoqueWindow(QWidget):
         return kpi_table
 
     def _gerar_pdf_com_template(self, file_path, report_title, elementos):
-        """Gera um PDF com um cabeçalho e rodapé profissional e estruturado."""
         try:
-            # Define as margens que serão usadas no documento
             left_margin = 2*cm
             right_margin = 2*cm
             top_margin = 3*cm
@@ -1027,27 +983,22 @@ class EstoqueWindow(QWidget):
             def header_footer(canvas, doc):
                 canvas.saveState()
                 
-                # --- CABEÇALHO ---
                 if os.path.exists(self.logo_path):
                     canvas.drawImage(self.logo_path, doc.leftMargin, doc.height + doc.topMargin,
                                      width=120, height=45, preserveAspectRatio=True, mask='auto')
                 
-                # Informações da Empresa (Direita)
                 canvas.setFont('Helvetica', 9)
                 canvas.drawRightString(doc.width + doc.leftMargin, doc.height + doc.topMargin + 20, self.company_info['nome'])
                 canvas.drawRightString(doc.width + doc.leftMargin, doc.height + doc.topMargin + 5, self.company_info['endereco'])
                 canvas.drawRightString(doc.width + doc.leftMargin, doc.height + doc.topMargin - 10, self.company_info['contato'])
 
-                # Linha separadora
                 canvas.setStrokeColorRGB(0.9, 0.9, 0.9)
                 canvas.line(doc.leftMargin, doc.height + doc.topMargin - 20, doc.width + doc.leftMargin, doc.height + doc.topMargin - 20)
                 
-                # --- RODAPÉ ---
                 canvas.setFont('Helvetica-Oblique', 8)
                 canvas.drawRightString(doc.width + doc.leftMargin, doc.bottomMargin - 20, f"Página {canvas.getPageNumber()} | {report_title}")
                 canvas.restoreState()
 
-            # Cria o documento usando as margens definidas
             doc = SimpleDocTemplate(
                 file_path,
                 pagesize=A4,
@@ -1059,23 +1010,19 @@ class EstoqueWindow(QWidget):
             
             doc.build(elementos, onFirstPage=header_footer, onLaterPages=header_footer)
             
-             # --- CORREÇÃO APLICADA AQUI ---
             AlertDialog(self, "Sucesso", f"Relatório salvo com sucesso em:\n{file_path}", 
                         alert_type='success', theme_colors=self.theme_colors).exec_()
 
         except FileNotFoundError:
-            # --- CORREÇÃO APLICADA AQUI ---
             AlertDialog(self, "Erro de Logo", f"Arquivo de logo não encontrado em:\n{self.logo_path}", 
                         alert_type='error', theme_colors=self.theme_colors).exec_()
         except Exception as e:
-            # --- CORREÇÃO APLICADA AQUI ---
             AlertDialog(self, "Erro ao Gerar PDF", f"Ocorreu um erro inesperado: {str(e)}", 
                         alert_type='error', theme_colors=self.theme_colors).exec_()
 
     def relatorio_vencimentos(self):
         produtos = self.db.verificar_produtos_vencendo(dias=30)
         if not produtos:
-            # --- CORREÇÃO APLICADA AQUI ---
             AlertDialog(self, "Relatório", "Não há produtos vencendo nos próximos 30 dias.", 
                         alert_type='info', theme_colors=self.theme_colors).exec_()
             return
@@ -1084,18 +1031,14 @@ class EstoqueWindow(QWidget):
         if file_path:
             self.gerar_pdf_vencimentos(produtos, file_path)
 
-    # Substitua este método inteiro na classe EstoqueWindow
-
     def gerar_pdf_vencimentos(self, produtos, file_path):
         styles = getSampleStyleSheet()
         elementos = []
 
-        # --- Título e Data ---
         elementos.append(Paragraph("Relatório de Análise de Vencimentos", styles['h1']))
         elementos.append(Paragraph(f"Período de Análise: Próximos 30 dias (a partir de {datetime.now().strftime('%d/%m/%Y')})", styles['Normal']))
         elementos.append(Spacer(1, 0.8 * cm))
         
-        # --- Cálculos para KPIs ---
         hoje = datetime.now().date()
         total_unidades = sum(p['quantidade'] for p in produtos)
         valor_custo_risco = sum(p['quantidade'] * (p['preco_compra'] or 0) for p in produtos)
@@ -1104,7 +1047,6 @@ class EstoqueWindow(QWidget):
         left_margin, right_margin = 2*cm, 2*cm
         doc_width = A4[0] - left_margin - right_margin
         
-        # --- CORREÇÃO 1: Usando a função de formatação de moeda no KPI ---
         kpi_data = [
             {'label': 'PRODUTOS MAPEADOS', 'value': str(len(produtos))},
             {'label': 'UNIDADES EM RISCO', 'value': str(total_unidades)},
@@ -1114,7 +1056,6 @@ class EstoqueWindow(QWidget):
         elementos.append(self._criar_kpi_boxes(kpi_data, doc_width))
         elementos.append(Spacer(1, 1 * cm))
 
-        # --- Tabela de Dados ---
         elementos.append(Paragraph("Detalhamento dos Produtos", styles['h2']))
         produtos_ordenados = sorted(produtos, key=lambda p: datetime.strptime(p['data_validade'], "%Y-%m-%d").date())
         
@@ -1127,7 +1068,6 @@ class EstoqueWindow(QWidget):
                 data_validade.strftime("%d/%m/%Y"), 
                 str(dias_para_vencer),
                 str(p['quantidade']), 
-                # --- CORREÇÃO 2: Usando a função de formatação de moeda na tabela ---
                 f"R$ {self._format_currency_brl(p['preco_compra'] or 0)}", 
                 Paragraph(p['fornecedor_nome'] or "N/A", styles['Normal'])
             ])
@@ -1162,7 +1102,6 @@ class EstoqueWindow(QWidget):
     def relatorio_estoque_baixo(self):
         produtos = self.db.verificar_produtos_estoque_baixo()
         if not produtos:
-            # --- CORREÇÃO APLICADA AQUI ---
             AlertDialog(self, "Relatório", "Não há produtos com estoque abaixo do mínimo.", 
                         alert_type='info', theme_colors=self.theme_colors).exec_()
             return
@@ -1174,25 +1113,20 @@ class EstoqueWindow(QWidget):
     def _format_currency_brl(self, value):
         """Formata um número float para o padrão monetário brasileiro (1.234,56)."""
         try:
-            # Formata com vírgula como separador decimal e ponto para milhares
             return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         except (ValueError, TypeError):
             return "0,00"
 
-
     def gerar_pdf_estoque_baixo(self, produtos, file_path):
         styles = getSampleStyleSheet()
         styles.add(ParagraphStyle(name='RightAlign', parent=styles['Normal'], alignment=TA_RIGHT))
-        # --- CORREÇÃO 1: Criando um novo estilo para texto centralizado ---
         styles.add(ParagraphStyle(name='CenterAlign', parent=styles['Normal'], alignment=TA_CENTER))
         elementos = []
 
-        # --- Título e Data ---
         elementos.append(Paragraph("Plano de Ação de Reposição de Estoque", styles['h1']))
         elementos.append(Paragraph(f"Relatório gerado em: {datetime.now().strftime('%d/%m/%Y')}", styles['Normal']))
         elementos.append(Spacer(1, 0.8 * cm))
         
-        # --- KPIs ---
         produtos_por_fornecedor = defaultdict(list)
         for p in produtos: produtos_por_fornecedor[p['fornecedor_nome'] or "Fornecedor Não Definido"].append(p)
         custo_reposicao = sum(p['preco_compra'] * ((p['estoque_minimo'] * 2) - p['quantidade']) for p in produtos if p['preco_compra'] and (p['estoque_minimo'] * 2) > p['quantidade'])
@@ -1208,7 +1142,6 @@ class EstoqueWindow(QWidget):
         elementos.append(self._criar_kpi_boxes(kpi_data, doc_width))
         elementos.append(Spacer(1, 1 * cm))
 
-        # --- Lista de Compras Agrupada por Fornecedor ---
         elementos.append(Paragraph("Listas de Compras por Fornecedor", styles['h2']))
         
         for fornecedor, itens in sorted(produtos_por_fornecedor.items()):
@@ -1223,12 +1156,11 @@ class EstoqueWindow(QWidget):
                 custo_item = qtd_sugerida * (p['preco_compra'] or 0)
                 total_custo_fornecedor += custo_item
                 
-                # --- CORREÇÃO 2: Removendo o negrito e usando o novo estilo 'CenterAlign' ---
                 data.append([
                     Paragraph(p['nome'], styles['Normal']), 
                     str(p['quantidade']), 
                     str(p['estoque_minimo']),
-                    Paragraph(str(qtd_sugerida), styles['CenterAlign']), # <--- MUDANÇA AQUI
+                    Paragraph(str(qtd_sugerida), styles['CenterAlign']),
                     f"R$ {self._format_currency_brl(custo_item)}"
                 ])
             
@@ -1258,19 +1190,15 @@ class EstoqueWindow(QWidget):
         self._gerar_pdf_com_template(file_path, "Plano de Reposição de Estoque", elementos)
 
     def exportar_csv(self):
-        """Exporta os dados da tabela atual para um arquivo CSV."""
         try:
-            # Solicitar local para salvar o arquivo
             file_path, _ = QFileDialog.getSaveFileName(
                 self, "Exportar Estoque para CSV", 
                 os.path.expanduser("~/estoque_export.csv"),
                 "CSV Files (*.csv)"
             )
             
-            if not file_path:
-                return  # Cancelado pelo usuário
+            if not file_path: return
             
-            # Obter dados atuais da tabela (considerando filtros aplicados)
             produtos = []
             for row in range(self.tabela.rowCount()):
                 produto = {}
@@ -1288,19 +1216,13 @@ class EstoqueWindow(QWidget):
                 produto['fornecedor'] = self.tabela.item(row, 11).text() if self.tabela.item(row, 11) else ""
                 produtos.append(produto)
             
-            # Escrever CSV
             with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
                 fieldnames = ['id', 'codigo_barras', 'nome', 'categoria', 'estoque_detalhado', 
                             'estoque_minimo', 'preco_compra', 'margem', 'preco_venda', 
                             'validade', 'localizacao', 'fornecedor']
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                
-                # Cabeçalho
                 writer.writeheader()
-                
-                # Dados
-                for produto in produtos:
-                    writer.writerow(produto)
+                for produto in produtos: writer.writerow(produto)
             
             QMessageBox.information(self, "Sucesso", f"Dados exportados com sucesso para:\n{file_path}")
             
@@ -1311,41 +1233,29 @@ class EstoqueWindow(QWidget):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Importar CSV para Estoque", os.path.expanduser("~"), "CSV Files (*.csv)"
         )
-        if not file_path:
-            return
+        if not file_path: return
 
         dialog = AlertDialog(self, "Confirmar Importação",
                              "A importação será executada em segundo plano.\nDeseja continuar?",
                              alert_type='question', buttons=QMessageBox.Yes | QMessageBox.No, theme_colors=self.theme_colors)
         
-        if dialog.exec_() != QMessageBox.Yes:
-            return
+        if dialog.exec_() != QMessageBox.Yes: return
 
-        # --- INÍCIO DA MUDANÇA ---
-        # 1. Criamos nossa nova caixa de diálogo de progresso temática
         self.progress_dialog = ThemedProgressDialog(self, 
                                                     "Importando Dados", 
                                                     "Aguarde enquanto os produtos do arquivo CSV são processados...", 
                                                     self.theme_colors)
         
-        # 2. Conectamos o sinal de cancelamento ao nosso slot
         self.progress_dialog.canceled.connect(self.cancelar_importacao)
-
-        # 3. Criamos a thread de trabalho (como antes)
         self.import_thread = CsvImportWorker(self.db.db_path, file_path)
-    
-        # 4. Conectamos o progresso da thread ao método setValue do nosso diálogo
         self.import_thread.progress.connect(self.progress_dialog.setValue)
         self.import_thread.finished.connect(self.importacao_concluida)
-        
-        # 5. Iniciamos a thread e mostramos nosso diálogo temático
         self.import_thread.start()
-        self.progress_dialog.exec_() # Usar exec_() para que ela bloqueie a interação com a janela principal
-        # --- FIM DA MUDANÇA ---
+        self.progress_dialog.exec_()
 
     def cancelar_importacao(self):
         if self.import_thread and self.import_thread.isRunning():
-            self.import_thread.terminate() # Encerramento forçado
+            self.import_thread.terminate()
             QMessageBox.warning(self, "Cancelado", "A importação foi cancelada pelo usuário.")
 
     def importacao_concluida(self, importados, erros, detalhes_erros):
@@ -1359,74 +1269,48 @@ class EstoqueWindow(QWidget):
         mensagem = f"Importação concluída!\n\n- Produtos importados/atualizados: {importados}\n- Linhas com erro: {erros}"
         
         if erros > 0:
-            detalhes = "\n\nDetalhes dos erros:\n" + "\n".join(detalhes_erros[:5]) # Limita a 5 erros para não poluir
+            detalhes = "\n\nDetalhes dos erros:\n" + "\n".join(detalhes_erros[:5])
             mensagem += detalhes
             AlertDialog(self, "Importação Concluída com Erros", mensagem, alert_type='warning', theme_colors=self.theme_colors).exec_()
         else:
             AlertDialog(self, "Importação Concluída", mensagem, alert_type='success', theme_colors=self.theme_colors).exec_()
 
     def _extrair_quantidade_do_estoque_detalhado(self, estoque_str):
-        """Extrai a quantidade numérica do campo estoque detalhado."""
         try:
-            # Se for só um número
-            if estoque_str.isdigit():
-                return int(estoque_str)
-            
-            # Se tiver formato complexo, pegar primeiro número
+            if estoque_str.isdigit(): return int(estoque_str)
             import re
             numeros = re.findall(r'\d+', estoque_str)
-            if numeros:
-                return int(numeros[0])
-            
+            if numeros: return int(numeros[0])
             return 0
-        except:
-            return 0
+        except: return 0
 
     def _extrair_preco(self, preco_str):
-        """Extrai valor numérico de string de preço."""
         try:
-            # Remover R$, espaços e outros caracteres
             preco_limpo = preco_str.replace('R$', '').replace(' ', '').replace(',', '.')
             return float(preco_limpo)
-        except:
-            return 0.0
+        except: return 0.0
 
     def _extrair_margem(self, margem_str):
-        """Extrai valor numérico de string de margem."""
         try:
             margem_limpa = margem_str.replace('%', '').replace(' ', '').replace(',', '.')
             return float(margem_limpa)
-        except:
-            return 0.0
+        except: return 0.0
 
     def _formatar_data_validade(self, data_str):
-        """Formata data de validade para formato YYYY-MM-DD."""
-        if not data_str or data_str.strip() == "":
-            return None
-        
+        if not data_str or data_str.strip() == "": return None
         try:
-            # Tentar diferentes formatos de data
             from datetime import datetime
-            
-            # Formato YYYY-MM-DD (já correto)
             if len(data_str) == 10 and data_str.count('-') == 2:
                 datetime.strptime(data_str, "%Y-%m-%d")
                 return data_str
-            
-            # Formato DD/MM/YYYY
             if len(data_str) == 10 and data_str.count('/') == 2:
                 data_obj = datetime.strptime(data_str, "%d/%m/%Y")
                 return data_obj.strftime("%Y-%m-%d")
-            
-            # Formato DD-MM-YYYY
             if len(data_str) == 10 and data_str.count('-') == 2:
                 data_obj = datetime.strptime(data_str, "%d-%m-%Y")
                 return data_obj.strftime("%Y-%m-%d")
-            
             return None
-        except:
-            return None
-
+        except: return None
 
 # Nenhuma alteração necessária nas classes FormularioProduto e DialogQuebrarEmbalagem
 # Substitua a classe FormularioProduto inteira em estoque_window.py

@@ -104,7 +104,7 @@ class MainWindow(QMainWindow):
         header_layout.addStretch()
         
         self.refresh_button = QPushButton("Atualizar")
-        self.refresh_button.setObjectName("headerActionButton")
+        self.refresh_button.setObjectName("primaryActionButton") # CORREÇÃO
         self.refresh_button.setCursor(Qt.PointingHandCursor)
         self.refresh_button.clicked.connect(self.atualizar_dados)
         header_layout.addWidget(self.refresh_button)
@@ -628,20 +628,34 @@ class MainWindow(QMainWindow):
         is_dark = self.settings.get_theme() == 'dark'
         if is_dark:
             return {
-                'bg_color': "#1c2128", 'surface_color': "#22272e", 'menu_color': "#22272e",
-                'text_color': "#cdd9e5", 'text_secondary': "#768390", 'border_color': "#373e47",
-                'button_hover': "#373e47", 'accent_color': "#007AFF"
+                'bg_color': "#1c2128", 
+                'surface_color': "#22272e", 
+                'menu_color': "#22272e",
+                'text_color': "#cdd9e5", 
+                'text_secondary': "#768390", 
+                'border_color': "#373e47",
+                'button_hover': "#373e47", 
+                'accent_color': "#007AFF"
             }
         else:
+            # ================================================================= #
+            #       CORREÇÃO APLICADA AQUI PARA UM TEMA CLARO MAIS SUAVE        #
+            # ================================================================= #
             return {
-                'bg_color': "#ffffff", 'surface_color': "#f2f2f7", 'menu_color': "#f9f9f9",
-                'text_color': "#000000", 'text_secondary': "#6d6d70", 'border_color': "#d1d1d6",
-                'button_hover': "#e5e5ea", 'accent_color': "#007AFF"
+                'bg_color': "#f8f9fa",       # Fundo: Cinza muito claro (off-white)
+                'surface_color': "#ffffff",  # Superfície: Branco puro para contraste sutil
+                'menu_color': "#ffffff",     # Menu: Branco, para combinar com a superfície
+                'text_color': "#212529",     # Texto: Cinza escuro, menos forte que o preto
+                'text_secondary': "#6c757d", # Texto secundário: Cinza médio
+                'border_color': "#dee2e6",   # Bordas: Cinza claro e suave
+                'button_hover': "#e9ecef",   # Hover do botão: Cinza um pouco mais escuro
+                'accent_color': "#007AFF"    # Cor de destaque: Permanece a mesma
             }
     
     def aplicar_tema(self):
         """Aplica o tema atual a todos os componentes, centralizando o estilo."""
         theme = self._get_theme_colors()
+        self.theme_colors = theme
         accent_color = theme['accent_color']
         text_color = theme['text_color']
         text_secondary = theme['text_secondary']
@@ -652,7 +666,8 @@ class MainWindow(QMainWindow):
 
         # Ícones dinâmicos que DEVEM mudar com o tema
         self.hamburger_btn.setIcon(IconManager.get_icon('menu', text_color))
-        self.refresh_button.setIcon(IconManager.get_icon('atualizar', 'white'))
+        # --- CORREÇÃO 1: A cor do ícone agora é sempre branca, pois o fundo é o accent_color ---
+        self.refresh_button.setIcon(IconManager.get_icon('atualizar', 'white')) 
         self.minimize_btn.setIcon(IconManager.get_icon('minimizar', text_secondary))
         self.maximize_btn.setIcon(IconManager.get_icon('maximizar' if not self.isMaximized() else 'restaurar', text_secondary))
         self.close_btn.setIcon(IconManager.get_icon('fechar', text_secondary))
@@ -667,7 +682,6 @@ class MainWindow(QMainWindow):
                 color: {text_color};
             }}
             
-            /* --- ESTILO DOS MENUS SUSPENSOS (QMenu) --- CORREÇÃO APLICADA AQUI --- */
             QMenu {{
                 background-color: {theme['menu_color']};
                 color: {text_color};
@@ -689,6 +703,14 @@ class MainWindow(QMainWindow):
                 background-color: {border_color};
                 margin: 5px;
             }}
+            
+            /* --- CORREÇÃO 2: Adiciona a regra para o texto dos botões inativos do menu --- */
+            #menuButton #buttonText {{
+                color: {theme['text_color']};
+            }}
+            #menuButton[active="true"] #buttonText {{
+                color: white; /* O texto do botão ativo é sempre branco */
+            }}
             /* --- FIM DA CORREÇÃO --- */
 
             /* --- CAMPOS DE ENTRADA E SELEÇÃO --- */
@@ -701,7 +723,7 @@ class MainWindow(QMainWindow):
                 font-size: 10pt;
             }}
             QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus {{
-                border: 1px solid {accent_color};
+                border: 1px solid {border_color};
             }}
             QComboBox::drop-down {{
                 border: none;
@@ -822,12 +844,38 @@ class MainWindow(QMainWindow):
                 background-color: transparent; border: none;
                 color: {theme['text_color']}; border-radius: 6px;
             }}
-            #menuButton {{
-                background-color: transparent; border: none; text-align: left; 
-                padding: 8px; border-radius: 8px; color: {theme['text_color']};
-            }}
-            #menuButton:hover {{ background-color: {theme['button_hover']}; }}
-            #menuButton[active="true"] {{ background-color: {theme['accent_color']}; color: white; }}
+/* ================================================================= */
+        /*       CORREÇÃO APLICADA AQUI                                      */
+        /* ================================================================= */
+        
+        /* 1. Estilo do BOTÃO. Note que a propriedade 'color' foi REMOVIDA. */
+        #menuButton {{
+            background-color: transparent;
+            border: none;
+            text-align: left; 
+            padding: 8px;
+            border-radius: 8px;
+        }}
+        #menuButton:hover {{
+            background-color: {theme['button_hover']};
+        }}
+        /* A propriedade 'color' também foi removida daqui */
+        #menuButton[active="true"] {{
+            background-color: {theme['accent_color']};
+        }}
+
+        /* 2. NOVAS REGRAS DIRETAMENTE PARA O TEXTO (QLabel) dentro do botão */
+        
+        /* Cor do texto para o botão INATIVO */
+        #menuButton #buttonText {{
+            color: {theme['text_color']};
+        }}
+        /* Cor do texto para o botão ATIVO (sempre branco) */
+        #menuButton[active="true"] #buttonText {{
+            color: white;
+        }}
+
+        /* --- FIM DA CORREÇÃO --- */
         """)
     
         # Propaga a mudança do tema para as sub-páginas
@@ -844,6 +892,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'caixa_page') and self.caixa_page:
             if hasattr(self.caixa_page, 'set_theme'):
                  self.caixa_page.set_theme(theme)
+
+        if hasattr(self, 'user_manager') and self.user_manager:
+            self.user_manager.update_ui_for_theme(theme)
         
         self.update()
         if hasattr(self, 'repaint'):
@@ -870,9 +921,12 @@ class MainWindow(QMainWindow):
             # Reinicia o agendador para aplicar novas configurações de notificação
             self.scheduler.restart()
 
-            QMessageBox.information(self, "Configurações", 
-                                "As configurações foram salvas. Algumas alterações podem exigir que o aplicativo seja reiniciado para terem efeito completo.")
-    
+            alert = AlertDialog(self, 
+                                "Configurações Salvas", 
+                                "O novo tema foi aplicado! Algumas outras configurações podem exigir uma reinicialização para ter efeito completo.",
+                                alert_type="info", 
+                                theme_colors=self._get_theme_colors())
+            alert.exec_()
     def atualizar_dados(self):
         """Atualiza os dados da página atual chamando seu método padronizado 'carregar_dados'."""
         current_widget = self.stack.currentWidget()
@@ -1263,7 +1317,7 @@ class UserMenuWidget(QFrame):
         self.mousePressEvent = self.on_click
 
     def apply_styles(self):
-        """Configura os estilos do widget com base no tema."""
+        """Configura os estilos do widget e ATUALIZA os ícones com base no tema."""
         colors = self.theme_colors
         text_color = colors.get('text_color', '#cdd9e5')
         text_secondary = colors.get('text_secondary', '#768390')
@@ -1292,9 +1346,18 @@ class UserMenuWidget(QFrame):
             }}
         """)
         
-        # ATUALIZAÇÃO: Ícone do dropdown usando IconManager
         self.dropdown_button.setIcon(IconManager.get_icon('chevron_down', color=text_secondary))
         
+        # --- CORREÇÃO: Atualiza os ícones das ações do menu ---
+        if hasattr(self, 'profile_action'):
+            self.profile_action.setIcon(IconManager.get_icon('profile', color=text_color))
+        if hasattr(self, 'password_action'):
+            self.password_action.setIcon(IconManager.get_icon('password', color=text_color))
+        if hasattr(self, 'admin_action') and self.admin_action:
+            self.admin_action.setIcon(IconManager.get_icon('admin', color=text_color))
+        if hasattr(self, 'logout_action'):
+            self.logout_action.setIcon(IconManager.get_icon('logout', color=text_color))
+
         self.menu.setStyleSheet(f"""
             QMenu {{
                 background-color: {menu_color}; color: {text_color};
@@ -1321,30 +1384,26 @@ class UserMenuWidget(QFrame):
         """Adiciona as ações ao menu"""
         text_color = self.theme_colors.get('text_color', '#cdd9e5')
         
-        # Ação de perfil - USA ICONMANAGER
-        profile_action = QAction(IconManager.get_icon('profile', color=text_color), "Meu Perfil", self)
-        profile_action.triggered.connect(self.profile_requested.emit)
-        self.menu.addAction(profile_action)
+        # --- CORREÇÃO: Salva referências às ações ---
+        self.profile_action = QAction(IconManager.get_icon('profile', color=text_color), "Meu Perfil", self)
+        self.profile_action.triggered.connect(self.profile_requested.emit)
+        self.menu.addAction(self.profile_action)
         
-        # Ação de alterar senha - USA ICONMANAGER
-        password_action = QAction(IconManager.get_icon('password', color=text_color), "Alterar Senha", self)
-        password_action.triggered.connect(self.password_change_requested.emit)
-        self.menu.addAction(password_action)
+        self.password_action = QAction(IconManager.get_icon('password', color=text_color), "Alterar Senha", self)
+        self.password_action.triggered.connect(self.password_change_requested.emit)
+        self.menu.addAction(self.password_action)
         
-        # Separador e ação de admin (se aplicável)
+        self.admin_action = None # Inicializa como None
         if self.is_admin():
             self.menu.addSeparator()
-            # USA ICONMANAGER
-            admin_action = QAction(IconManager.get_icon('admin', color=text_color), "Administração", self)
-            admin_action.triggered.connect(self.admin_requested.emit)
-            self.menu.addAction(admin_action)
+            self.admin_action = QAction(IconManager.get_icon('admin', color=text_color), "Administração", self)
+            self.admin_action.triggered.connect(self.admin_requested.emit)
+            self.menu.addAction(self.admin_action)
         
-        # Separador e logout
         self.menu.addSeparator()
-        # USA ICONMANAGER
-        logout_action = QAction(IconManager.get_icon('logout', color=text_color), "Sair", self)
-        logout_action.triggered.connect(self.logout_requested.emit)
-        self.menu.addAction(logout_action)
+        self.logout_action = QAction(IconManager.get_icon('logout', color=text_color), "Sair", self)
+        self.logout_action.triggered.connect(self.logout_requested.emit)
+        self.menu.addAction(self.logout_action)
     
     def show_menu(self):
         """Exibe o menu dropdown"""
@@ -1582,6 +1641,24 @@ class UserManager:
         except:
             import os
             os._exit(0)
+    
+     # NOVO MÉTODO ADICIONADO AQUI
+    def update_ui_for_theme(self, theme_colors):
+        """
+        Atualiza todos os componentes da UI gerenciados pelo UserManager para refletir a mudança de tema.
+        """
+        if hasattr(self, 'user_menu_widget') and self.user_menu_widget:
+            self.user_menu_widget.theme_colors = theme_colors
+            self.user_menu_widget.apply_styles()
+            
+            if hasattr(self.user_menu_widget, 'avatar_widget'):
+                self.user_menu_widget.avatar_widget.theme_colors = theme_colors
+                self.user_menu_widget.avatar_widget.create_avatar()
+
+        # --- CORREÇÃO: Aplica o estilo diretamente no label da barra de status ---
+        if self.user_status_label:
+            text_color = theme_colors.get('text_color', '#000')
+            self.user_status_label.setStyleSheet(f"color: {text_color}; padding-right: 10px;")
 
 class ConfigDialog(QDialog):
     def __init__(self, settings, theme_colors, parent=None):

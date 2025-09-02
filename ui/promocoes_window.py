@@ -183,7 +183,6 @@ class PromocaoCsvImportWorker(QThread):
         
         self.finished.emit(importadas, erros, detalhes_erros)
 
-
 class PromocoesWindow(QWidget):
     def __init__(self, db, theme_colors):
         super().__init__()
@@ -194,31 +193,101 @@ class PromocoesWindow(QWidget):
         self.total_paginas = 1
 
         self.initUI()
+        self.set_theme(self.theme_colors) # Aplica o tema inicial
         self.atualizar_visualizacao_dados()
 
+    # ================================================================= #
+    #       CORREÇÃO 1: MÉTODO set_theme REFEITO                        #
+    # ================================================================= #
     def set_theme(self, theme_colors):
+        """
+        Aplica um stylesheet completo e unificado para toda a janela de promoções,
+        garantindo que todos os componentes, incluindo labels e scrollbars, sejam atualizados.
+        """
         self.theme_colors = theme_colors
         self.update_button_icons()
+
+        style = f"""
+            /* Estilo geral da janela e labels */
+            QWidget, QLabel {{
+                background-color: {self.theme_colors.get('bg_color', '#fff')};
+                color: {self.theme_colors.get('text_color', '#000')};
+            }}
+
+            /* --- CORREÇÃO: Estilo específico para o label de paginação --- */
+            #paginationLabel {{
+                font-size: 10pt;
+            }}
+
+            /* Cabeçalho da tabela */
+            QHeaderView::section {{
+                background-color: {self.theme_colors.get('surface_color', '#e0e0e0')};
+                color: {self.theme_colors.get('text_color', '#000')};
+                padding: 4px;
+                border: 1px solid {self.theme_colors.get('border_color', '#c0c0c0')};
+                font-weight: bold;
+            }}
+
+            /* --- CORREÇÃO: Estilo para a barra de rolagem da tabela --- */
+            QTableWidget QScrollBar:vertical {{
+                border: none;
+                background: {self.theme_colors.get('surface_color', '#f0f0f0')};
+                width: 12px;
+                margin: 0px 0px 0px 0px;
+            }}
+            QTableWidget QScrollBar::handle:vertical {{
+                background: {self.theme_colors.get('border_color', '#cccccc')};
+                min-height: 20px;
+                border-radius: 6px;
+            }}
+            QTableWidget QScrollBar::handle:vertical:hover {{
+                background: {self.theme_colors.get('accent_color', '#007bff')};
+            }}
+            QTableWidget QScrollBar::add-line, QTableWidget QScrollBar::sub-line {{
+                height: 0px; width: 0px;
+            }}
+
+            /* Botões de Ação */
+            #primaryActionButton {{
+                background-color: {self.theme_colors.get('accent_color', '#007bff')};
+                color: white; border: none; padding: 10px 15px;
+                border-radius: 6px; font-weight: bold;
+            }}
+            #primaryActionButton:hover {{ background-color: #0069d9; }}
+        """
+        self.setStyleSheet(style)
+        
+        # O estilo dos botões secundários é aplicado separadamente
+        secondary_button_style = f"""
+            QPushButton {{
+                background-color: {self.theme_colors.get('surface_color', '#fff')};
+                color: {self.theme_colors.get('text_color', '#000')};
+                border: 1px solid {self.theme_colors.get('border_color', '#ccc')};
+                padding: 10px 15px; border-radius: 6px; font-weight: bold;
+            }}
+             QPushButton:hover {{
+                background-color: {self.theme_colors.get('button_hover', '#eee')};
+                border-color: {self.theme_colors.get('accent_color', '#007aff')};
+            }}
+        """
+        self.exportar_button.setStyleSheet(secondary_button_style)
+        self.importar_button.setStyleSheet(secondary_button_style)
+
+        # Atualiza a tabela para redesenhar o conteúdo HTML com as novas cores
         self.atualizar_visualizacao_dados()
 
     def update_button_icons(self):
         icon_color = self.theme_colors.get('text_color', '#000')
-
         self.search_button.setIcon(IconManager.get_icon('search', icon_color))
         self.exportar_button.setIcon(IconManager.get_icon('export', icon_color))
         self.importar_button.setIcon(IconManager.get_icon('import', icon_color))
-        # A linha do 'produtos_especiais_button' foi removida.
-
         self.add_button.setIcon(IconManager.get_icon('add', 'white'))
         self.prev_page_btn.setIcon(IconManager.get_icon('angle-left', icon_color))
         self.next_page_btn.setIcon(IconManager.get_icon('angle-right', icon_color))
 
     def initUI(self):
         layout = QVBoxLayout(self)
-        titulo = QLabel("Gerenciamento de Promoções")
-        titulo.setFont(QFont("Arial", 14, QFont.Bold))
-        layout.addWidget(titulo)
-
+        
         search_group = QGroupBox("Pesquisa")
         search_layout = QHBoxLayout(search_group)
         self.search_input = QLineEdit()
@@ -232,22 +301,23 @@ class PromocoesWindow(QWidget):
         layout.addWidget(search_group)
 
         self.tabela = QTableWidget()
-        # --- INÍCIO DA MODIFICAÇÃO ---
         self.tabela.setColumnCount(8)
         self.tabela.setHorizontalHeaderLabels(["ID", "Produto", "Tipo", "Desconto %", "Detalhes da Promoção", "Início", "Fim", "Ações"])
-        self.tabela.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents) # Produto
-        self.tabela.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents) # Tipo
-        self.tabela.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents) # Desconto %
-        self.tabela.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch) # Detalhes
-        # --- FIM DA MODIFICAÇÃO ---
+        self.tabela.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.tabela.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.tabela.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.tabela.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.tabela.verticalHeader().setVisible(False)
         layout.addWidget(self.tabela)
         
-        # ... (Restante da função initUI permanece igual) ...
         paginacao_layout = QHBoxLayout()
         self.prev_page_btn = QPushButton(" Anterior")
         self.prev_page_btn.clicked.connect(self.ir_pagina_anterior)
+        
+        # --- CORREÇÃO: Adicionando objectName para estilização ---
         self.page_label = QLabel(f"Página {self.pagina_atual} de {self.total_paginas}")
+        self.page_label.setObjectName("paginationLabel")
+
         self.next_page_btn = QPushButton("Próxima ")
         self.next_page_btn.setLayoutDirection(Qt.RightToLeft)
         self.next_page_btn.clicked.connect(self.ir_proxima_pagina)
@@ -257,6 +327,7 @@ class PromocoesWindow(QWidget):
         paginacao_layout.addStretch()
         paginacao_layout.addWidget(self.next_page_btn)
         layout.addLayout(paginacao_layout)
+        
         action_layout = QHBoxLayout()
         action_layout.setSpacing(10)
         self.add_button = QPushButton(" Adicionar Promoção")
@@ -304,29 +375,26 @@ class PromocoesWindow(QWidget):
         self.prev_page_btn.setEnabled(self.pagina_atual > 1)
         self.next_page_btn.setEnabled(self.pagina_atual < self.total_paginas)
 
+     # ================================================================= #
+    #       CORREÇÃO 2: MÉTODO atualizar_tabela MODIFICADO              #
+    # ================================================================= #
     def atualizar_tabela(self, promocoes):
         self.tabela.setRowCount(0)
         icon_color = self.theme_colors.get('text_color', '#000')
+        
+        # --- CORREÇÃO: Pega as cores do tema para usar no HTML ---
+        secondary_text_color = self.theme_colors.get('text_secondary', '#888')
+        success_color = '#28a745' # Manter verde para promoções é bom para UX
 
-        # Itera sobre as promoções sem usar 'enumerate'
         for promocao_row in promocoes:
             promocao = dict(promocao_row)
-
-            # --- INÍCIO DA CORREÇÃO ---
-            # 1. Primeiro, verifica se o produto associado à promoção ainda existe.
             produto = self.db.obter_produto(promocao['produto_id'])
-            
-            # 2. Se o produto não existe (foi apagado), simplesmente pula para a próxima promoção.
-            #    Nenhuma linha em branco será criada.
             if not produto:
                 continue
 
-            # 3. Se o produto existe, adicionamos uma nova linha e obtemos seu índice para preenchê-la.
             row = self.tabela.rowCount()
             self.tabela.insertRow(row)
-            # --- FIM DA CORREÇÃO ---
 
-            # O restante do código para preencher a linha permanece o mesmo.
             tipo_aplicacao = promocao.get('tipo_aplicacao', 'Ambos')
             if not produto.get('fracionado'): tipo_aplicacao = 'Embalagem'
 
@@ -337,21 +405,24 @@ class PromocoesWindow(QWidget):
             if tipo_aplicacao == 'Fração':
                 preco_original, preco_promo = produto.get('preco_unitario_fracao', 0), promocao.get('preco_promocional_fracao', 0)
                 if preco_original > 0: taxa_desconto = ((preco_original - preco_promo) / preco_original) * 100
-                detalhes_html = f"""<span style='color: #888;'>Original: R$ {preco_original:.2f}</span><br><b style='font-size: 11pt; color: #28a745;'>Promoção: R$ {preco_promo:.2f}</b>"""
+                detalhes_html = f"""<span style='color: {secondary_text_color};'>Original: R$ {preco_original:.2f}</span><br><b style='font-size: 11pt; color: {success_color};'>Promoção: R$ {preco_promo:.2f}</b>"""
             elif tipo_aplicacao == 'Embalagem':
                 preco_original, preco_promo = promocao.get('preco_antigo', 0), promocao.get('preco_promocional', 0)
                 if preco_original > 0: taxa_desconto = ((preco_original - preco_promo) / preco_original) * 100
-                detalhes_html = f"""<span style='color: #888;'>Original: R$ {preco_original:.2f}</span><br><b style='font-size: 11pt; color: #28a745;'>Promoção: R$ {preco_promo:.2f}</b>"""
+                detalhes_html = f"""<span style='color: {secondary_text_color};'>Original: R$ {preco_original:.2f}</span><br><b style='font-size: 11pt; color: {success_color};'>Promoção: R$ {preco_promo:.2f}</b>"""
             else: # 'Ambos'
                 preco_original_emb, preco_promo_emb = promocao.get('preco_antigo', 0), promocao.get('preco_promocional', 0)
                 if preco_original_emb > 0: taxa_desconto = ((preco_original_emb - preco_promo_emb) / preco_original_emb) * 100
                 preco_original_fracao = produto.get('preco_unitario_fracao', 0)
                 preco_promo_fracao = preco_original_fracao * (1 - (taxa_desconto / 100))
-                detalhes_html = f"""<b>Emb:</b> R$ {preco_original_emb:.2f} → <b style='color: #28a745;'>R$ {preco_promo_emb:.2f}</b><br><b>Fração:</b> R$ {preco_original_fracao:.2f} → <b style='color: #28a745;'>R$ {preco_promo_fracao:.2f}</b>"""
+                detalhes_html = f"""<b>Emb:</b> R$ {preco_original_emb:.2f} → <b style='color: {success_color};'>R$ {preco_promo_emb:.2f}</b><br><b>Fração:</b> R$ {preco_original_fracao:.2f} → <b style='color: {success_color};'>R$ {preco_promo_fracao:.2f}</b>"""
 
             detalhes_label = QLabel(detalhes_html)
             detalhes_label.setWordWrap(True)
             detalhes_label.setAlignment(Qt.AlignCenter)
+            # --- CORREÇÃO: Garante que o fundo do label na célula seja transparente ---
+            detalhes_label.setStyleSheet("background-color: transparent;")
+
 
             self.tabela.setItem(row, 0, QTableWidgetItem(str(promocao['id'])))
             self.tabela.setItem(row, 1, QTableWidgetItem(promocao['produto_nome']))
@@ -359,38 +430,23 @@ class PromocoesWindow(QWidget):
             self.tabela.setItem(row, 3, QTableWidgetItem(f"{taxa_desconto:.1f}%"))
             self.tabela.setCellWidget(row, 4, detalhes_label)
             self.tabela.setItem(row, 5, QTableWidgetItem(str(promocao['data_inicio'])))
-
+            # O resto da função continua igual...
             fim_item = QTableWidgetItem(str(promocao['data_fim']))
             data_fim_promo = promocao.get('data_fim')
             data_validade_prod = produto.get('data_validade')
-
             if data_fim_promo and data_validade_prod and data_fim_promo == data_validade_prod:
                 fim_item.setForeground(QColor("#FFD700")) 
-                font = QFont()
-                font.setBold(True)
-                fim_item.setFont(font)
+                font = QFont(); font.setBold(True); fim_item.setFont(font)
                 fim_item.setToolTip("Promoção termina na data de validade do produto.")
-            
             self.tabela.setItem(row, 6, fim_item)
-
             acoes_widget = QWidget()
             acoes_layout = QHBoxLayout(acoes_widget)
-            acoes_layout.setContentsMargins(5, 2, 5, 2)
-            acoes_layout.setSpacing(5)
-            
-            editar_btn = QPushButton(IconManager.get_icon('edit', icon_color), " ")
-            editar_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
-            editar_btn.setToolTip("Editar Promoção")
+            acoes_layout.setContentsMargins(5, 2, 5, 2); acoes_layout.setSpacing(5)
+            editar_btn = QPushButton(IconManager.get_icon('edit', icon_color), " "); editar_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored); editar_btn.setToolTip("Editar Promoção")
             editar_btn.clicked.connect(lambda _, p_id=promocao['id']: self.abrir_formulario_promocao(p_id))
-            
-            excluir_btn = QPushButton(IconManager.get_icon('delete', icon_color), " ")
-            excluir_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
-            excluir_btn.setToolTip("Excluir Promoção")
+            excluir_btn = QPushButton(IconManager.get_icon('delete', icon_color), " "); excluir_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored); excluir_btn.setToolTip("Excluir Promoção")
             excluir_btn.clicked.connect(lambda _, p_id=promocao['id']: self.excluir_promocao(p_id))
-            
-            acoes_layout.addWidget(editar_btn)
-            acoes_layout.addWidget(excluir_btn)
-            
+            acoes_layout.addWidget(editar_btn); acoes_layout.addWidget(excluir_btn)
             self.tabela.setCellWidget(row, 7, acoes_widget)
         
         self.tabela.verticalHeader().setDefaultSectionSize(55)
@@ -476,7 +532,6 @@ class FormularioPromocao(QDialog):
         self.promocao_id = promocao_id
         self.promocao = None
         self.produto_selecionado_id = None
-        # --- NOVAS VARIÁVEIS PARA GUARDAR PREÇOS ORIGINAIS ---
         self.preco_original_embalagem = 0.0
         self.preco_original_fracao = 0.0
 
@@ -486,7 +541,7 @@ class FormularioPromocao(QDialog):
                 self.produto_selecionado_id = self.promocao['produto_id']
 
         self.initUI()
-        self.apply_styles()
+        self.apply_styles() # Aplica os estilos na inicialização
         
         if self.promocao:
             self.carregar_dados_promocao()
@@ -808,9 +863,103 @@ class FormularioPromocao(QDialog):
         self.descricao_input.setText(self.promocao['descricao'])
         self._atualizar_visibilidade_campos_promo()
 
+    # ================================================================= #
+    #       CORREÇÃO 3: MÉTODO apply_styles REFEITO                     #
+    # ================================================================= #
     def apply_styles(self):
+        """
+        Aplica um stylesheet completo e unificado para todo o diálogo,
+        incluindo tabelas, abas, labels, scrollbars e o canto da tabela.
+        """
         colors = self.theme_colors
-        style = f""" QDialog {{ background-color: {colors.get('bg_color', '#fff')}; color: {colors.get('text_color', '#000')}; }} QGroupBox {{ border: 1px solid {colors.get('border_color', '#ccc')}; border-radius: 6px; margin-top: 15px; padding: 10px; font-weight: bold; }} QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top center; padding: 0 10px; background-color: {colors.get('bg_color', '#fff')}; color: {colors.get('text_secondary', '#333')}; }} QTableWidget {{ background-color: {colors.get('surface_color', '#f2f2f7')}; border: 1px solid {colors.get('border_color', '#d1d1d6')}; gridline-color: {colors.get('border_color', '#d1d1d6')}; }} QHeaderView::section {{ background-color: {colors.get('bg_color', '#fff')}; color: {colors.get('text_color', '#000')}; padding: 5px; border: 1px solid {colors.get('border_color', '#d1d1d6')}; font-weight: bold; }} QComboBox, QDoubleSpinBox, QDateEdit, QLineEdit, QRadioButton {{ background-color: transparent; color: {colors.get('text_color', '#000')}; }} QPushButton {{ background-color: transparent; color: {colors.get('text_color', '#000')}; border: 1px solid {colors.get('border_color', '#ccc')}; padding: 8px 12px; border-radius: 4px; font-weight: bold; }} QPushButton:hover {{ background-color: {colors.get('button_hover', '#e0e0e0')}; border: 1px solid {colors.get('accent_color', '#007aff')}; }} #primaryActionButton {{ background-color: {colors.get('accent_color', '#007aff')}; color: white; border: none; }} #primaryActionButton:hover {{ background-color: #0069d9; }} """
+        style = f"""
+            QDialog {{ 
+                background-color: {colors.get('bg_color', '#fff')};
+            }}
+            QGroupBox, QLabel, QRadioButton {{ 
+                color: {colors.get('text_color', '#000')};
+            }}
+            QGroupBox {{ 
+                border: 1px solid {colors.get('border_color', '#ccc')}; 
+                border-radius: 6px; margin-top: 15px; padding: 10px; 
+                font-weight: bold; 
+            }}
+            QGroupBox::title {{ 
+                subcontrol-origin: margin; subcontrol-position: top center; 
+                padding: 0 10px; 
+                background-color: {colors.get('bg_color', '#fff')}; 
+                color: {colors.get('text_secondary', '#333')}; 
+            }}
+            
+            /* Tabela de Seleção de Produtos */
+            QTableWidget {{ 
+                background-color: {colors.get('surface_color', '#f2f2f7')}; 
+                border: 1px solid {colors.get('border_color', '#d1d1d6')}; 
+                gridline-color: {colors.get('border_color', '#d1d1d6')}; 
+            }}
+            QHeaderView::section {{ 
+                background-color: {colors.get('bg_color', '#fff')}; 
+                color: {colors.get('text_color', '#000')}; 
+                padding: 5px; 
+                border: 1px solid {colors.get('border_color', '#d1d1d6')}; 
+                font-weight: bold; 
+            }}
+            /* --- CORREÇÃO: Estilo para o canto da tabela --- */
+            QHeaderView::corner {{
+                background-color: {colors.get('bg_color', '#fff')};
+                border: 1px solid {colors.get('border_color', '#d1d1d6')};
+            }}
+
+            /* --- CORREÇÃO: Estilo para a barra de rolagem da tabela --- */
+            QTableWidget QScrollBar:vertical {{
+                border: none;
+                background: {colors.get('surface_color', '#f0f0f0')};
+                width: 12px;
+            }}
+            QTableWidget QScrollBar::handle:vertical {{
+                background: {colors.get('border_color', '#cccccc')};
+                min-height: 20px;
+                border-radius: 6px;
+            }}
+            QTableWidget QScrollBar::handle:vertical:hover {{
+                background: {colors.get('accent_color', '#007bff')};
+            }}
+
+            /* Estilo para as Abas (Tabs) */
+            QTabWidget::pane {{ border: 1px solid {colors.get('border_color', '#d1d1d6')}; }}
+            QTabBar::tab {{
+                background-color: {colors.get('surface_color', '#f2f2f7')};
+                color: {colors.get('text_secondary', '#333')};
+                padding: 8px 15px; border: 1px solid {colors.get('border_color', '#d1d1d6')};
+                border-bottom: none; border-top-left-radius: 4px; border-top-right-radius: 4px;
+            }}
+            QTabBar::tab:selected, QTabBar::tab:hover {{
+                background-color: {colors.get('bg_color', '#fff')};
+                color: {colors.get('accent_color', '#007aff')};
+            }}
+
+            /* Inputs e Botões */
+            QComboBox, QDoubleSpinBox, QDateEdit, QLineEdit {{ 
+                background-color: {colors.get('surface_color', '#f2f2f7')};
+                color: {colors.get('text_color', '#000')};
+                border: 1px solid {colors.get('border_color', '#d1d1d6')};
+                padding: 6px; border-radius: 4px;
+            }}
+            QPushButton {{ 
+                background-color: transparent; 
+                color: {colors.get('text_color', '#000')}; 
+                border: 1px solid {colors.get('border_color', '#ccc')}; 
+                padding: 8px 12px; border-radius: 4px; font-weight: bold; 
+            }}
+            QPushButton:hover {{ 
+                background-color: {colors.get('button_hover', '#e0e0e0')}; 
+                border: 1px solid {colors.get('accent_color', '#007aff')}; 
+            }}
+            #primaryActionButton {{ 
+                background-color: {colors.get('accent_color', '#007aff')}; color: white; border: none; 
+            }}
+            #primaryActionButton:hover {{ background-color: #0069d9; }}
+        """
         self.setStyleSheet(style)
         self.salvar_btn.setIcon(IconManager.get_icon('save', 'white'))
         self.cancelar_btn.setIcon(IconManager.get_icon('cancel', colors.get('text_color', '#000')))

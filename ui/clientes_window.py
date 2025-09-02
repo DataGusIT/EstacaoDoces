@@ -193,68 +193,96 @@ class ClientesWindow(QWidget):
         self.total_paginas = 1
         
         self.initUI()
-        self.atualizar_visualizacao_dados()
+        self.set_theme(self.theme_colors) # Aplica o tema e carrega os dados
 
-    # NOVO MÉTODO: Centraliza a estilização dos botões
-    def _get_button_style(self, style_type):
-        """Retorna uma string de estilo CSS para um tipo de botão específico."""
-        base_style = """
-            QPushButton {{
-                color: {text_color};
-                background-color: {bg_color};
-                border: none;
-                padding: 8px 12px;
-                border-radius: 4px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {hover_color};
-            }}
-            QPushButton:pressed {{
-                background-color: {pressed_color};
-            }}
-        """
-        styles = {
-            "add":      ("white", "#28a745", "#218838", "#1e7e34"),  # Verde (Sucesso)
-            "report":   ("white", "#007bff", "#0069d9", "#0062cc"),  # Azul (Informativo)
-            "data":     ("white", "#17a2b8", "#138496", "#117a8b"),  # Azul-petróleo (Import/Export)
-            "edit":     ("black", "#ffc107", "#e0a800", "#d39e00"),  # Amarelo (Aviso/Edição)
-            "delete":   ("white", "#dc3545", "#c82333", "#bd2130"),  # Vermelho (Perigo/Exclusão)
-            "action":   ("white", "#fd7e14", "#e67311", "#da6d10")   # Laranja (Ação especial)
-        }
-        text, bg, hover, pressed = styles.get(style_type, ("black", "#f0f0f0", "#e0e0e0", "#d0d0d0"))
-        return base_style.format(text_color=text, bg_color=bg, hover_color=hover, pressed_color=pressed)
-    
-
+    # ================================================================= #
+    #       CORREÇÃO PRINCIPAL: MÉTODO set_theme REFEITO                #
+    # ================================================================= #
     def set_theme(self, theme_colors):
-        """Atualiza as cores do tema e os ícones."""
+        """
+        Aplica um stylesheet completo e unificado para toda a janela de clientes,
+        garantindo que todos os componentes, incluindo labels e scrollbars, sejam atualizados.
+        """
         self.theme_colors = theme_colors
         self.update_button_icons()
-        self.atualizar_visualizacao_dados() # Recarrega a tabela para atualizar ícones internos
+
+        style = f"""
+            /* Estilo geral da janela e labels */
+            QWidget, QLabel {{
+                background-color: {self.theme_colors.get('bg_color', '#fff')};
+                color: {self.theme_colors.get('text_color', '#000')};
+            }}
+
+            /* --- CORREÇÃO: Estilo específico para o label de paginação --- */
+            #paginationLabel {{
+                font-size: 10pt;
+            }}
+
+            /* Cabeçalho da tabela */
+            QHeaderView::section {{
+                background-color: {self.theme_colors.get('surface_color', '#e0e0e0')};
+                color: {self.theme_colors.get('text_color', '#000')};
+                padding: 4px;
+                border: 1px solid {self.theme_colors.get('border_color', '#c0c0c0')};
+                font-weight: bold;
+            }}
+
+            /* --- CORREÇÃO: Estilo para a barra de rolagem da tabela --- */
+            QTableWidget QScrollBar:vertical {{
+                border: none;
+                background: {self.theme_colors.get('surface_color', '#f0f0f0')};
+                width: 12px;
+                margin: 0px 0px 0px 0px;
+            }}
+            QTableWidget QScrollBar::handle:vertical {{
+                background: {self.theme_colors.get('border_color', '#cccccc')};
+                min-height: 20px;
+                border-radius: 6px;
+            }}
+            QTableWidget QScrollBar::handle:vertical:hover {{
+                background: {self.theme_colors.get('accent_color', '#007bff')};
+            }}
+            QTableWidget QScrollBar::add-line, QTableWidget QScrollBar::sub-line {{
+                height: 0px; width: 0px;
+            }}
+
+            /* Botões de Ação */
+            #primaryActionButton {{
+                background-color: {self.theme_colors.get('accent_color', '#007bff')};
+                color: white; border: none; padding: 10px 15px;
+                border-radius: 6px; font-weight: bold;
+            }}
+            #primaryActionButton:hover {{ background-color: #0069d9; }}
+            
+            #secondaryActionButton {{
+                background-color: {self.theme_colors.get('surface_color', '#fff')};
+                color: {self.theme_colors.get('text_color', '#000')};
+                border: 1px solid {self.theme_colors.get('border_color', '#ccc')};
+                padding: 10px 15px; border-radius: 6px; font-weight: bold;
+            }}
+             #secondaryActionButton:hover {{
+                background-color: {self.theme_colors.get('button_hover', '#eee')};
+                border-color: {self.theme_colors.get('accent_color', '#007aff')};
+            }}
+        """
+        self.setStyleSheet(style)
+        
+        # Recarrega os dados para que os ícones internos da tabela sejam redesenhados
+        self.atualizar_visualizacao_dados()
 
     def update_button_icons(self):
         """Define ou atualiza os ícones de todos os botões com base no tema."""
-        # Se você quer que os ícones dos botões secundários também mudem de cor com o tema
         icon_color = self.theme_colors.get('text_color', '#000') 
         
         self.search_button.setIcon(IconManager.get_icon('search', icon_color))
-        
-        # O botão primário sempre terá ícone branco para contrastar
         self.add_button.setIcon(IconManager.get_icon('add', 'white'))
-        
-        # Botões secundários
         self.importar_csv_button.setIcon(IconManager.get_icon('import', icon_color))
         self.exportar_csv_button.setIcon(IconManager.get_icon('export', icon_color))
-        
-        # Botões de paginação
         self.prev_page_btn.setIcon(IconManager.get_icon('angle-left', icon_color))
         self.next_page_btn.setIcon(IconManager.get_icon('angle-right', icon_color))
 
     def initUI(self):
         layout = QVBoxLayout(self)
-        titulo = QLabel("Gerenciamento de Clientes")
-        titulo.setFont(QFont("Arial", 14, QFont.Bold))
-        layout.addWidget(titulo)
 
         search_group = QGroupBox("Pesquisa")
         search_layout = QHBoxLayout(search_group)
@@ -276,10 +304,14 @@ class ClientesWindow(QWidget):
         layout.addWidget(self.tabela)
 
         paginacao_layout = QHBoxLayout()
-        self.prev_page_btn = QPushButton(IconManager.get_icon('angle-left'), " Anterior")
+        self.prev_page_btn = QPushButton(" Anterior")
         self.prev_page_btn.clicked.connect(self.ir_pagina_anterior)
+        
+        # --- CORREÇÃO: Adicionando objectName para estilização ---
         self.page_label = QLabel(f"Página {self.pagina_atual} de {self.total_paginas}")
-        self.next_page_btn = QPushButton(IconManager.get_icon('angle-right'), "Próxima")
+        self.page_label.setObjectName("paginationLabel")
+
+        self.next_page_btn = QPushButton("Próxima ")
         self.next_page_btn.setLayoutDirection(Qt.RightToLeft)
         self.next_page_btn.clicked.connect(self.ir_proxima_pagina)
         paginacao_layout.addWidget(self.prev_page_btn)
@@ -293,14 +325,20 @@ class ClientesWindow(QWidget):
         self.add_button = QPushButton(" Adicionar Cliente")
         self.add_button.setObjectName("primaryActionButton")
         self.add_button.clicked.connect(self.abrir_formulario_cliente)
+        
         self.importar_csv_button = QPushButton(" Importar CSV")
+        self.importar_csv_button.setObjectName("secondaryActionButton") # Adicionado
         self.importar_csv_button.clicked.connect(self.importar_csv)
+        
         self.exportar_csv_button = QPushButton(" Exportar CSV")
+        self.exportar_csv_button.setObjectName("secondaryActionButton") # Adicionado
         self.exportar_csv_button.clicked.connect(self.exportar_csv)
+
         action_layout.addWidget(self.add_button)
         action_layout.addWidget(self.importar_csv_button)
         action_layout.addWidget(self.exportar_csv_button)
         layout.addLayout(action_layout)
+        
 
     def ir_pagina_anterior(self):
         if self.pagina_atual > 1:

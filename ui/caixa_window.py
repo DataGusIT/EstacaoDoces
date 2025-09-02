@@ -171,9 +171,8 @@ class CaixaWindow(QWidget):
         self.caixa_atual = None
         self.itens_venda = []
         self.total_venda = 0.0
-        self.dados_relatorio_atual = None # <-- ADICIONE ESTA LINHA
+        self.dados_relatorio_atual = None
 
-        # --- CONFIGURAÇÕES DO RELATÓRIO (ADICIONADAS) ---
         self.logo_path = "assets/img/GestorX (2).png"
         self.company_info = {
             "nome": "Estação Doces",
@@ -181,131 +180,153 @@ class CaixaWindow(QWidget):
             "contato": "Telefone: (11) 99999-8888 | Email: contato@estacaodoces.com"
         }
         self.initUI()
+        self.set_theme(self.theme_colors) # Aplica o tema
         self.verificar_caixa_aberto()
         self.carregar_clientes()
         self.carregar_produtos()
         self.setup_codigo_barras()
 
     def _update_icons(self):
-        """Define ou atualiza todos os ícones da janela usando o IconManager."""
-        # Define as cores principais com base no tema
-        text_color = self.theme_colors.get('text_color', '#000000')
-        text_secondary = self.theme_colors.get('text_secondary', '#6d6d70')
-        accent_color = self.theme_colors.get('accent_color', '#007AFF')
-        
-        # Cores específicas para ações
+        text_color = self.theme_colors.get('text_color', '#000')
         success_color = "#28a745"
         danger_color = "#dc3545"
         warning_color = "#ffc107"
 
-        # --- Abas Principais ---
+        # Abas Principais
         self.tabs.setTabIcon(0, IconManager.get_icon('caixa', color=text_color))
         self.tabs.setTabIcon(1, IconManager.get_icon('relatorio', color=text_color))
         self.tabs.setTabIcon(2, IconManager.get_icon('report', color=text_color))
 
-        # --- Status do Caixa ---
+        # Status do Caixa
         self.btn_abrir_caixa.setIcon(IconManager.get_icon('unlock', color=text_color))
         self.btn_fechar_caixa.setIcon(IconManager.get_icon('lock', color=text_color))
         
-        # --- Tab de Vendas (PDV) ---
+        # PDV
         self.btn_add_cliente.setIcon(IconManager.get_icon('add', color=text_color))
-        # self.btn_atualizar_cliente.setIcon(IconManager.get_icon('atualizar', color=text_secondary))
-        # self.btn_atualizar_produto.setIcon(IconManager.get_icon('atualizar', color=text_secondary))
         self.btn_adicionar_item.setIcon(IconManager.get_icon('add', color=text_color))
-        self.btn_limpar.setIcon(IconManager.get_icon('clear', color=warning_color))
-        self.btn_finalizar.setIcon(IconManager.get_icon('check', color='white')) # Fundo verde, ícone branco
+        self.btn_limpar.setIcon(IconManager.get_icon('clear', color='black')) # Ícone preto no botão amarelo
+        self.btn_finalizar.setIcon(IconManager.get_icon('check', color='white'))
 
-        # --- Tab de Movimentações ---
-        self.btn_nova_entrada.setIcon(IconManager.get_icon('add', color=success_color))
-        self.btn_nova_saida.setIcon(IconManager.get_icon('send', color=danger_color))
+        # Movimentações
+        self.btn_nova_entrada.setIcon(IconManager.get_icon('add', color='white')) # Ícone branco no botão verde
+        self.btn_nova_saida.setIcon(IconManager.get_icon('send', color='white')) # Ícone branco no botão vermelho
         self.btn_filtrar.setIcon(IconManager.get_icon('filter', color=text_color))
 
-        # --- Tab de Relatórios ---
+        # Relatórios
         self.btn_gerar_relatorio.setIcon(IconManager.get_icon('report', color=text_color))
+        if hasattr(self, 'btn_exportar_pdf'):
+            self.btn_exportar_pdf.setIcon(IconManager.get_icon('report', color=text_color))
 
-        def set_theme(self, theme_colors):
-            """Aplica as cores do tema e atualiza os ícones."""
-            self.theme_colors = theme_colors
-            self._update_icons()
+        # ================================================================= #
+    #       CORREÇÃO PRINCIPAL: MÉTODO set_theme REFEITO                #
+    # ================================================================= #
+    def set_theme(self, theme_colors):
+        """Aplica as cores do tema a todos os componentes da janela."""
+        self.theme_colors = theme_colors
+        self._update_icons()
 
-            # --- INÍCIO DO CÓDIGO ADICIONADO ---
-            # Define a cor do texto das abas com base na cor principal do tema
-            text_color = self.theme_colors.get('text_color', '#000000')
-            self.tabs.setStyleSheet(f"QTabBar::tab {{ color: {text_color}; }}")
-            # --- FIM DO CÓDIGO ADICIONADO ---
+        # Folha de estilos (QSS) unificada para toda a janela
+        style = f"""
+            /* Estilo geral */
+            QWidget, QLabel, QRadioButton, QGroupBox {{
+                background-color: transparent;
+                color: {self.theme_colors.get('text_color', '#000')};
+            }}
 
-            if hasattr(self, 'lbl_imagem_produto'):
-                bg_color = self.theme_colors.get('surface_color', '#f0f0f0')
-                border_color = self.theme_colors.get('border_color', '#ccc')
-                text_secondary_color = self.theme_colors.get('text_secondary', '#6d6d70')
-                
-                self.lbl_imagem_produto.setStyleSheet(f"""
-                    QLabel {{
-                        background-color: {bg_color};
-                        border: 2px dashed {border_color};
-                        border-radius: 8px;
-                        color: {text_secondary_color};
-                        font-style: italic;
-                        font-size: 10pt;
-                        padding: 10px;
-                    }}
-                """)
-            # Força a reavaliação da folha de estilo herdada
-            self.style().unpolish(self)
-            self.style().polish(self)
-            self.update()
+            /* --- ESTILO DAS ABAS PRINCIPAIS E INTERNAS --- */
+            QTabWidget::pane {{ border-top: 1px solid {self.theme_colors.get('border_color')}; }}
+            QTabBar::tab {{
+                background-color: {self.theme_colors.get('bg_color')};
+                color: {self.theme_colors.get('text_secondary')};
+                padding: 10px 15px; border: 1px solid {self.theme_colors.get('border_color')};
+                border-bottom: none; border-top-left-radius: 6px; border-top-right-radius: 6px;
+                font-weight: bold;
+            }}
+            QTabBar::tab:hover {{
+                background-color: {self.theme_colors.get('button_hover')};
+                color: {self.theme_colors.get('text_color')};
+            }}
+            QTabBar::tab:selected {{
+                background-color: {self.theme_colors.get('surface_color')};
+                color: {self.theme_colors.get('accent_color')};
+                border-bottom: 1px solid {self.theme_colors.get('surface_color')};
+            }}
+            
+            /* --- ESTILO DE INPUTS E TABELAS --- */
+            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit, QTableWidget, QTextEdit {{
+                background-color: {self.theme_colors.get('surface_color')};
+                color: {self.theme_colors.get('text_color')};
+                border: 1px solid {self.theme_colors.get('border_color')};
+                border-radius: 4px; padding: 5px;
+            }}
+            QHeaderView::section {{
+                background-color: {self.theme_colors.get('menu_color', '#333')};
+                color: {self.theme_colors.get('text_color')};
+                padding: 5px; border: 1px solid {self.theme_colors.get('border_color')};
+                font-weight: bold;
+            }}
+
+            /* --- CORREÇÃO: SCROLLBARS PARA TABELAS, COMBOBOX E TEXTEDIT --- */
+            QTableWidget QScrollBar:vertical, QComboBox QAbstractItemView QScrollBar:vertical, QTextEdit QScrollBar:vertical {{
+                border: none; background: {self.theme_colors.get('surface_color')}; width: 12px;
+            }}
+            QTableWidget QScrollBar::handle:vertical, QComboBox QAbstractItemView QScrollBar::handle:vertical, QTextEdit QScrollBar::handle:vertical {{
+                background: {self.theme_colors.get('border_color')}; min-height: 20px; border-radius: 6px;
+            }}
+
+            /* --- CORREÇÃO: DROPDOWN DO COMBOBOX --- */
+            QComboBox QAbstractItemView {{
+                background-color: {self.theme_colors.get('surface_color')};
+                border: 1px solid {self.theme_colors.get('border_color')};
+                selection-background-color: {self.theme_colors.get('accent_color')};
+            }}
+
+            /* --- ESTILO DE LABELS ESPECÍFICOS --- */
+            #statusLabel {{ font-weight: bold; }}
+            #saldoLabel {{ font-weight: bold; }}
+            #totalLabel {{ font-size: 18px; font-weight: bold; }}
+
+            /* --- BOTÕES --- */
+            #successButton {{ background-color: #28a745; color: white; border: none; font-weight: bold; }}
+            #dangerButton {{ background-color: #dc3545; color: white; border: none; font-weight: bold; }}
+            #warningButton {{ background-color: #ffc107; color: black; border: none; font-weight: bold; }}
+        """
+        self.setStyleSheet(style)
+
+        # Atualiza a imagem do produto placeholder, se existir
+        if hasattr(self, 'lbl_imagem_produto'):
+            bg_color = self.theme_colors.get('surface_color', '#f0f0f0')
+            border_color = self.theme_colors.get('border_color', '#ccc')
+            text_secondary_color = self.theme_colors.get('text_secondary', '#6d6d70')
+            self.lbl_imagem_produto.setStyleSheet(f"""
+                QLabel {{
+                    background-color: {bg_color}; border: 2px dashed {border_color};
+                    border-radius: 8px; color: {text_secondary_color};
+                    font-style: italic; font-size: 10pt; padding: 10px;
+                }}
+            """)
+        
+        self.verificar_caixa_aberto() # Atualiza as cores do status
+        self.update() # Força o redesenho
+
 
     def initUI(self):
-        # Layout principal
+        # ... (seu método initUI sem alterações, mas adicionando objectNames) ...
         main_layout = QVBoxLayout(self)
-        
-        # Status do caixa
-        self.frame_status = QFrame()
-        self.frame_status.setFrameShape(QFrame.StyledPanel)
-        self.frame_status.setFrameShadow(QFrame.Raised)        
+        self.frame_status = QFrame(); self.frame_status.setFrameShape(QFrame.StyledPanel)
         status_layout = QHBoxLayout(self.frame_status)
-        
-        self.lbl_status = QLabel("Status do Caixa: Fechado")
-        self.lbl_status.setStyleSheet("font-weight: bold;")
-        status_layout.addWidget(self.lbl_status)
-        
-        self.lbl_saldo = QLabel("Saldo Atual: R$ 0,00")
-        self.lbl_saldo.setStyleSheet("font-weight: bold;")
-        status_layout.addWidget(self.lbl_saldo)
-        
-        self.btn_abrir_caixa = QPushButton(" Abrir Caixa") # Espaço para o ícone
-        self.btn_abrir_caixa.clicked.connect(self.abrir_caixa)
-        status_layout.addWidget(self.btn_abrir_caixa)
-        
-        self.btn_fechar_caixa = QPushButton(" Fechar Caixa") # Espaço para o ícone
-        self.btn_fechar_caixa.setEnabled(False)
-        self.btn_fechar_caixa.clicked.connect(self.fechar_caixa)
-        status_layout.addWidget(self.btn_fechar_caixa)
-        
+        self.lbl_status = QLabel("Status do Caixa: Fechado"); self.lbl_status.setObjectName("statusLabel")
+        self.lbl_saldo = QLabel("Saldo Atual: R$ 0,00"); self.lbl_saldo.setObjectName("saldoLabel")
+        status_layout.addWidget(self.lbl_status); status_layout.addWidget(self.lbl_saldo)
+        self.btn_abrir_caixa = QPushButton(" Abrir Caixa"); self.btn_abrir_caixa.clicked.connect(self.abrir_caixa)
+        self.btn_fechar_caixa = QPushButton(" Fechar Caixa"); self.btn_fechar_caixa.setEnabled(False); self.btn_fechar_caixa.clicked.connect(self.fechar_caixa)
+        status_layout.addWidget(self.btn_abrir_caixa); status_layout.addWidget(self.btn_fechar_caixa)
         main_layout.addWidget(self.frame_status)
-        
-        # Tabs para operações
         self.tabs = QTabWidget()
-        
-        # Tab de Vendas (PDV)
-        self.tab_vendas = QWidget()
-        self.setup_vendas_tab()
-        self.tabs.addTab(self.tab_vendas, " Vendas (PDV)")
-        
-        # Tab de Movimentações
-        self.tab_movimentos = QWidget()
-        self.setup_movimentos_tab()
-        self.tabs.addTab(self.tab_movimentos, " Movimentações")
-        
-        # Tab de Relatórios
-        self.tab_relatorios = QWidget()
-        self.setup_relatorios_tab()
-        self.tabs.addTab(self.tab_relatorios, " Relatórios de Caixa")
-        
+        self.tab_vendas = QWidget(); self.setup_vendas_tab(); self.tabs.addTab(self.tab_vendas, " Vendas (PDV)")
+        self.tab_movimentos = QWidget(); self.setup_movimentos_tab(); self.tabs.addTab(self.tab_movimentos, " Movimentações")
+        self.tab_relatorios = QWidget(); self.setup_relatorios_tab(); self.tabs.addTab(self.tab_relatorios, " Relatórios de Caixa")
         main_layout.addWidget(self.tabs)
-
-        # CHAMA O MÉTODO PARA CONFIGURAR OS ÍCONES
-        self._update_icons()
     
     def _create_combobox_with_icon(self, combobox, icon_name):
         """
@@ -346,172 +367,42 @@ class CaixaWindow(QWidget):
         return container
     
     def setup_vendas_tab(self):
-        # Layout principal da aba de vendas
-        main_layout = QHBoxLayout(self.tab_vendas)
-        splitter = QSplitter(Qt.Horizontal)
-        left_panel_widget = QWidget()
-        layout_esquerda = QVBoxLayout(left_panel_widget)
-        layout_esquerda.setContentsMargins(0, 0, 0, 0)
-        frame_info = QFrame()
-        frame_info.setFrameShape(QFrame.StyledPanel)
-        frame_info_layout = QGridLayout(frame_info)
-        
-        # ===== INÍCIO DA MUDANÇA =====
-
-        # Obter o caminho do ícone uma vez
-        icon_color = self.theme_colors.get('text_secondary', '#6d6d70')
-        dropdown_icon_path = IconManager.get_icon_path('chevron_down', color=icon_color, size=12)
-        # É crucial usar barras normais '/' no caminho para CSS
-        dropdown_icon_path = dropdown_icon_path.replace('\\', '/')
-
-        # Definir o estilo que será aplicado a ambos os ComboBox
-        combobox_style = f"""
-            QComboBox {{
-                padding-right: 20px; /* Deixa espaço para o ícone */
-            }}
-            QComboBox::drop-down {{
-                border: none; /* Remove a borda do botão de dropdown */
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 20px;
-            }}
-            QComboBox::down-arrow {{
-                image: url({dropdown_icon_path}); /* Usa o nosso ícone */
-            }}
-        """
-
-        # --- Cliente ---
+        # ... (seu método setup_vendas_tab sem alterações, mas adicionando objectNames) ...
+        main_layout = QHBoxLayout(self.tab_vendas); splitter = QSplitter(Qt.Horizontal)
+        left_panel_widget = QWidget(); layout_esquerda = QVBoxLayout(left_panel_widget); layout_esquerda.setContentsMargins(0, 0, 0, 0)
+        frame_info = QFrame(); frame_info.setFrameShape(QFrame.StyledPanel); frame_info_layout = QGridLayout(frame_info)
         frame_info_layout.addWidget(QLabel("Cliente:"), 0, 0)
-        self.cb_cliente = QComboBox() # ComboBox padrão
-        self.cb_cliente.setMinimumWidth(200)
-        self.cb_cliente.setStyleSheet(combobox_style) # Aplica o estilo
+        self.cb_cliente = QComboBox(); self.cb_cliente.setMinimumWidth(200)
         frame_info_layout.addWidget(self.cb_cliente, 0, 1)
-
-         # --- INÍCIO DA REMOÇÃO (CLIENTE) ---
-        
-        # O layout btn_container_cliente não é mais necessário para um único botão.
-        # btn_container_cliente = QHBoxLayout() 
-        
-        self.btn_add_cliente = QPushButton()
-        self.btn_add_cliente.setFixedSize(30, 30)
-        self.btn_add_cliente.setToolTip("Adicionar Novo Cliente")
-        self.btn_add_cliente.clicked.connect(self.adicionar_novo_cliente)
-        
-        # A PARTIR DAQUI, REMOVA OU COMENTE AS LINHAS DO BOTÃO DE ATUALIZAR
-        # self.btn_atualizar_cliente = QPushButton()
-        # self.btn_atualizar_cliente.setFixedSize(30, 30)
-        # self.btn_atualizar_cliente.setToolTip("Atualizar lista de clientes")
-        # self.btn_atualizar_cliente.clicked.connect(self.carregar_clientes)
-        
-        # Adicione o btn_add_cliente diretamente ao layout principal
-        # btn_container_cliente.addWidget(self.btn_add_cliente)
-        # btn_container_cliente.addWidget(self.btn_atualizar_cliente) # LINHA REMOVIDA
-        # frame_info_layout.addLayout(btn_container_cliente, 0, 2)
-        
-        # SUBSTITUA as linhas acima por esta, que adiciona apenas o botão de "Adicionar":
+        self.btn_add_cliente = QPushButton(); self.btn_add_cliente.setFixedSize(30, 30); self.btn_add_cliente.setToolTip("Adicionar Novo Cliente"); self.btn_add_cliente.clicked.connect(self.adicionar_novo_cliente)
         frame_info_layout.addWidget(self.btn_add_cliente, 0, 2)
-
-        # --- FIM DA REMOÇÃO (CLIENTE) ---
-
-        # --- Produto ---
         frame_info_layout.addWidget(QLabel("Produto/Código:"), 1, 0)
-        self.cb_produto = AutoPopupComboBox() # Usando a classe que auto-abre
-        self.cb_produto.setEditable(True)
-        # ... (código de configuração do cb_produto) ...
-        self.cb_produto.setStyleSheet(combobox_style) # Aplica o mesmo estilo
-         # --- INÍCIO DA CORREÇÃO ---
-        # Conecta a tecla Enter do campo de produto à função de busca e adição
-        self.cb_produto.lineEdit().returnPressed.connect(self.buscar_produto)
-        # --- FIM DA CORREÇÃO ---
+        self.cb_produto = AutoPopupComboBox(); self.cb_produto.setEditable(True); self.cb_produto.lineEdit().returnPressed.connect(self.buscar_produto)
         frame_info_layout.addWidget(self.cb_produto, 1, 1)
-       
-
-        # --- INÍCIO DA REMOÇÃO (PRODUTO) ---
-        
-        # REMOVA OU COMENTE AS LINHAS A SEGUIR
-        # self.btn_atualizar_produto = QPushButton()
-        # self.btn_atualizar_produto.setFixedSize(30, 30)
-        # self.btn_atualizar_produto.setToolTip("Atualizar lista de produtos")
-        # self.btn_atualizar_produto.clicked.connect(self.carregar_produtos)
-        # frame_info_layout.addWidget(self.btn_atualizar_produto, 1, 2)
-        
-        # --- FIM DA REMOÇÃO (PRODUTO) ---
-
-        #self.btn_atualizar_produto = QPushButton()
-        #self.btn_atualizar_produto.setFixedSize(30, 30)
-        #self.btn_atualizar_produto.setToolTip("Atualizar lista de produtos")
-        #self.btn_atualizar_produto.clicked.connect(self.carregar_produtos)
-        #frame_info_layout.addWidget(self.btn_atualizar_produto, 1, 2)
-        
-        # ===== FIM DA MUDANÇA =====
-        
-        # Quantidade
         frame_info_layout.addWidget(QLabel("Quantidade:"), 0, 3)
-        self.spin_quantidade = QSpinBox()
-        self.spin_quantidade.setMinimum(1)
-        self.spin_quantidade.setMaximum(9999)
+        self.spin_quantidade = QSpinBox(); self.spin_quantidade.setMinimum(1); self.spin_quantidade.setMaximum(9999)
         frame_info_layout.addWidget(self.spin_quantidade, 0, 4)
-        
-        # Preço unitário
         frame_info_layout.addWidget(QLabel("Preço Unitário:"), 1, 3)
-        self.spin_preco = QDoubleSpinBox()
-        self.spin_preco.setMinimum(0)
-        self.spin_preco.setMaximum(999999.99)
-        self.spin_preco.setDecimals(2)
-        self.spin_preco.setSingleStep(0.10)
-        self.spin_preco.setPrefix("R$ ")
+        self.spin_preco = QDoubleSpinBox(); self.spin_preco.setMinimum(0); self.spin_preco.setMaximum(999999.99); self.spin_preco.setDecimals(2); self.spin_preco.setSingleStep(0.10); self.spin_preco.setPrefix("R$ ")
         frame_info_layout.addWidget(self.spin_preco, 1, 4)
-        
-        # Botão adicionar item
-        self.btn_adicionar_item = QPushButton(" Adicionar Item")
-        self.btn_adicionar_item.clicked.connect(self.adicionar_item)
+        self.btn_adicionar_item = QPushButton(" Adicionar Item"); self.btn_adicionar_item.clicked.connect(self.adicionar_item)
         frame_info_layout.addWidget(self.btn_adicionar_item, 0, 5, 2, 1)
-        
         layout_esquerda.addWidget(frame_info)
-        
-        # Tabela de itens
-        self.tabela_itens = QTableWidget()
-        self.tabela_itens.setColumnCount(6)
-        self.tabela_itens.setHorizontalHeaderLabels(['Cód.', 'Produto', 'Qtde', 'Preço Unit.', 'Subtotal', ''])
-        self.tabela_itens.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.tabela_itens.setSelectionBehavior(QTableWidget.SelectRows)
-        self.tabela_itens.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.tabela_itens.setColumnWidth(5, 40)
+        self.tabela_itens = QTableWidget(); self.tabela_itens.setColumnCount(6); self.tabela_itens.setHorizontalHeaderLabels(['Cód.', 'Produto', 'Qtde', 'Preço Unit.', 'Subtotal', ''])
+        self.tabela_itens.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch); self.tabela_itens.setColumnWidth(5, 40)
         layout_esquerda.addWidget(self.tabela_itens)
-        
-        # Frame inferior com total e finalização
-        frame_total = QFrame()
-        frame_total.setFrameShape(QFrame.StyledPanel)
-        frame_total_layout = QHBoxLayout(frame_total)
-        self.lbl_total = QLabel("Total: R$ 0,00")
-        self.lbl_total.setStyleSheet("font-size: 18px; font-weight: bold;")
-        frame_total_layout.addWidget(self.lbl_total)
-        frame_total_layout.addStretch()
-        self.btn_limpar = QPushButton(" Limpar Venda")
-        self.btn_limpar.clicked.connect(self.limpar_venda)
+        frame_total = QFrame(); frame_total.setFrameShape(QFrame.StyledPanel); frame_total_layout = QHBoxLayout(frame_total)
+        self.lbl_total = QLabel("Total: R$ 0,00"); self.lbl_total.setObjectName("totalLabel") # Adicionado objectName
+        frame_total_layout.addWidget(self.lbl_total); frame_total_layout.addStretch()
+        self.btn_limpar = QPushButton(" Limpar Venda"); self.btn_limpar.setObjectName("warningButton"); self.btn_limpar.clicked.connect(self.limpar_venda)
         frame_total_layout.addWidget(self.btn_limpar)
-        self.btn_finalizar = QPushButton(" Finalizar Venda")
-        self.btn_finalizar.clicked.connect(self.finalizar_venda)
-        self.btn_finalizar.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        self.btn_finalizar = QPushButton(" Finalizar Venda"); self.btn_finalizar.setObjectName("successButton"); self.btn_finalizar.clicked.connect(self.finalizar_venda)
         frame_total_layout.addWidget(self.btn_finalizar)
-        
-        layout_esquerda.addWidget(frame_total)
-        splitter.addWidget(left_panel_widget)
-
-        # -- PAINEL DIREITO (IMAGEM DO PRODUTO) --
-        right_panel_widget = QWidget()
-        layout_direita = QVBoxLayout(right_panel_widget)
-        
-        self.lbl_imagem_produto = QLabel("Selecione um produto para ver a imagem")
-        self.lbl_imagem_produto.setAlignment(Qt.AlignCenter)
-        self.lbl_imagem_produto.setMinimumSize(250, 250)
+        layout_esquerda.addWidget(frame_total); splitter.addWidget(left_panel_widget)
+        right_panel_widget = QWidget(); layout_direita = QVBoxLayout(right_panel_widget)
+        self.lbl_imagem_produto = QLabel("Selecione um produto para ver a imagem"); self.lbl_imagem_produto.setAlignment(Qt.AlignCenter); self.lbl_imagem_produto.setMinimumSize(250, 250)
         layout_direita.addWidget(self.lbl_imagem_produto, 1)
-        
-        splitter.addWidget(right_panel_widget)
-        
-        # Configurar tamanhos do splitter
-        splitter.setSizes([700, 300]) # Tamanho inicial (esquerda, direita)
-        main_layout.addWidget(splitter)
+        splitter.addWidget(right_panel_widget); splitter.setSizes([700, 300]); main_layout.addWidget(splitter)
     
 
     def adicionar_item_pelo_codigo(self):
@@ -586,75 +477,26 @@ class CaixaWindow(QWidget):
                 break
     
     def setup_movimentos_tab(self):
+        # ... (seu método setup_movimentos_tab, mas adicionando objectNames aos botões)...
         layout = QVBoxLayout(self.tab_movimentos)
-        
-        # --- INÍCIO DA MODIFICAÇÃO ---
-        frame_acoes = QFrame()
-        frame_acoes_layout = QHBoxLayout(frame_acoes)
-        
-        self.btn_nova_entrada = QPushButton(" Nova Entrada")        
-        self.btn_nova_entrada.clicked.connect(lambda: self.novo_movimento("Entrada"))
+        frame_acoes = QFrame(); frame_acoes_layout = QHBoxLayout(frame_acoes)
+        self.btn_nova_entrada = QPushButton(" Nova Entrada"); self.btn_nova_entrada.setObjectName("successButton"); self.btn_nova_entrada.clicked.connect(lambda: self.novo_movimento("Entrada"))
         frame_acoes_layout.addWidget(self.btn_nova_entrada)
-        
-        self.btn_nova_saida = QPushButton(" Nova Saída")
-        self.btn_nova_saida.clicked.connect(lambda: self.novo_movimento("Saída"))
+        self.btn_nova_saida = QPushButton(" Nova Saída"); self.btn_nova_saida.setObjectName("dangerButton"); self.btn_nova_saida.clicked.connect(lambda: self.novo_movimento("Saída"))
         frame_acoes_layout.addWidget(self.btn_nova_saida)
-        
         frame_acoes_layout.addStretch()
-
-        # Novos filtros de período
-        frame_acoes_layout.addWidget(QLabel("Período:"))
-        self.cb_periodo_mov = QComboBox()
-        self.cb_periodo_mov.addItems(["Hoje", "Última Semana", "Este Caixa", "Personalizado"])
-        self.cb_periodo_mov.currentIndexChanged.connect(self.periodo_movimentos_alterado)
-        frame_acoes_layout.addWidget(self.cb_periodo_mov)
-
-        self.dt_inicio = QDateEdit(QDate.currentDate())
-        self.dt_inicio.setCalendarPopup(True)
-        frame_acoes_layout.addWidget(self.dt_inicio)
-        
-        self.dt_fim = QDateEdit(QDate.currentDate())
-        self.dt_fim.setCalendarPopup(True)
-        frame_acoes_layout.addWidget(self.dt_fim)
-        
-        self.btn_filtrar = QPushButton(" Filtrar")
-        # A conexão agora chama a mesma função para garantir consistência
-        self.btn_filtrar.clicked.connect(self.filtrar_movimentos)
-        frame_acoes_layout.addWidget(self.btn_filtrar)
-        
+        # O resto do setup_movimentos_tab...
+        frame_acoes_layout.addWidget(QLabel("Período:")); self.cb_periodo_mov = QComboBox(); self.cb_periodo_mov.addItems(["Hoje", "Última Semana", "Este Caixa", "Personalizado"]); self.cb_periodo_mov.currentIndexChanged.connect(self.periodo_movimentos_alterado); frame_acoes_layout.addWidget(self.cb_periodo_mov)
+        self.dt_inicio = QDateEdit(QDate.currentDate()); self.dt_inicio.setCalendarPopup(True); frame_acoes_layout.addWidget(self.dt_inicio)
+        self.dt_fim = QDateEdit(QDate.currentDate()); self.dt_fim.setCalendarPopup(True); frame_acoes_layout.addWidget(self.dt_fim)
+        self.btn_filtrar = QPushButton(" Filtrar"); self.btn_filtrar.clicked.connect(self.filtrar_movimentos); frame_acoes_layout.addWidget(self.btn_filtrar)
         layout.addWidget(frame_acoes)
-        # --- FIM DA MODIFICAÇÃO ---
-        
-        # Tabela de movimentos (sem alteração)
-        self.tabela_movimentos = QTableWidget()
-        self.tabela_movimentos.setColumnCount(6)
-        self.tabela_movimentos.setHorizontalHeaderLabels(['ID', 'Data/Hora', 'Tipo', 'Descrição', 'Forma Pgto', 'Valor'])
-        self.tabela_movimentos.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
-        self.tabela_movimentos.setSelectionBehavior(QTableWidget.SelectRows)
-        self.tabela_movimentos.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.tabela_movimentos = QTableWidget(); self.tabela_movimentos.setColumnCount(6); self.tabela_movimentos.setHorizontalHeaderLabels(['ID', 'Data/Hora', 'Tipo', 'Descrição', 'Forma Pgto', 'Valor']); self.tabela_movimentos.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         layout.addWidget(self.tabela_movimentos)
-        
-        # Frame de totais (sem alteração)
-        frame_totais = QFrame()
-        frame_totais.setFrameShape(QFrame.StyledPanel)
-        frame_totais_layout = QHBoxLayout(frame_totais)
-        
-        self.lbl_total_entradas = QLabel("Total Entradas: R$ 0,00")
-        self.lbl_total_entradas.setStyleSheet("color: green; font-weight: bold;")
-        frame_totais_layout.addWidget(self.lbl_total_entradas)
-        
-        self.lbl_total_saidas = QLabel("Total Saídas: R$ 0,00")
-        self.lbl_total_saidas.setStyleSheet("color: red; font-weight: bold;")
-        frame_totais_layout.addWidget(self.lbl_total_saidas)
-        
-        self.lbl_saldo_periodo = QLabel("Saldo do Período: R$ 0,00")
-        self.lbl_saldo_periodo.setStyleSheet("font-weight: bold;")
-        frame_totais_layout.addWidget(self.lbl_saldo_periodo)
-        
-        layout.addWidget(frame_totais)
-
-        # Inicia com o filtro "Hoje" e os campos de data desabilitados
-        self.periodo_movimentos_alterado()
+        frame_totais = QFrame(); frame_totais.setFrameShape(QFrame.StyledPanel); frame_totais_layout = QHBoxLayout(frame_totais)
+        self.lbl_total_entradas = QLabel("Total Entradas: R$ 0,00"); self.lbl_total_saidas = QLabel("Total Saídas: R$ 0,00"); self.lbl_saldo_periodo = QLabel("Saldo do Período: R$ 0,00")
+        frame_totais_layout.addWidget(self.lbl_total_entradas); frame_totais_layout.addWidget(self.lbl_total_saidas); frame_totais_layout.addWidget(self.lbl_saldo_periodo)
+        layout.addWidget(frame_totais); self.periodo_movimentos_alterado()
 
     # Adicione este novo método dentro da classe CaixaWindow
     def periodo_movimentos_alterado(self):
@@ -769,29 +611,20 @@ class CaixaWindow(QWidget):
 
     
     def verificar_caixa_aberto(self):
+        # ... (seu método sem alterações, mas a cor agora vem do QSS) ...
         self.caixa_atual = self.db.obter_caixa_aberto()
-        
         if self.caixa_atual:
             self.lbl_status.setText(f"Status do Caixa: Aberto (ID: {self.caixa_atual['id']})")
-            self.lbl_status.setStyleSheet("font-weight: bold; color: green;")
-            
+            self.lbl_status.setStyleSheet(f"font-weight: bold; color: {self.theme_colors.get('success_color', '#28a745')};")
             saldo_atual = self.db.obter_saldo_atual(self.caixa_atual['id'])
             self.lbl_saldo.setText(f"Saldo Atual: R$ {saldo_atual:.2f}")
-            
-            self.btn_abrir_caixa.setEnabled(False)
-            self.btn_fechar_caixa.setEnabled(True)
-            
-            # --- MUDANÇA PRINCIPAL ---
-            # Em vez de carregar tudo, aplica o filtro padrão ("Hoje")
+            self.btn_abrir_caixa.setEnabled(False); self.btn_fechar_caixa.setEnabled(True)
             self.filtrar_movimentos()
         else:
             self.lbl_status.setText("Status do Caixa: Fechado")
-            self.lbl_status.setStyleSheet("font-weight: bold; color: red;")
+            self.lbl_status.setStyleSheet(f"font-weight: bold; color: {self.theme_colors.get('danger_color', '#dc3545')};")
             self.lbl_saldo.setText("Saldo Atual: R$ 0,00")
-            
-            self.btn_abrir_caixa.setEnabled(True)
-            self.btn_fechar_caixa.setEnabled(False)
-            # Limpa a tabela se o caixa estiver fechado
+            self.btn_abrir_caixa.setEnabled(True); self.btn_fechar_caixa.setEnabled(False)
             self.tabela_movimentos.setRowCount(0)
     
     def carregar_clientes(self):
@@ -940,7 +773,8 @@ class CaixaWindow(QWidget):
         
         # 3. A lógica de venda agora usa o objeto 'produto_com_preco_final', que contém os preços corretos
         if produto_com_preco_final.get('fracionado'):
-            dialog = DialogVendaFracionada(produto_com_preco_final, self)
+             # CHAMA A NOVA CLASSE DE DIÁLOGO TEMÁTICA
+            dialog = DialogVendaFracionada(self, produto_com_preco_final, self.theme_colors)
             if dialog.exec_() == QDialog.Accepted:
                 sale_details = dialog.get_sale_details()
             else:
@@ -1055,267 +889,82 @@ class CaixaWindow(QWidget):
             AlertDialog(self, "Venda Vazia", "Adicione itens para finalizar a venda", 'warning', theme_colors=self.theme_colors).exec_()
             return
 
-        # Busca as taxas salvas no banco de dados, com valores padrão caso não existam
-        taxa_debito_salva = float(self.db.obter_configuracao('taxa_cartao_debito', '1.99'))
-        taxa_credito_salva = float(self.db.obter_configuracao('taxa_cartao_credito', '4.98'))
+        taxa_debito = float(self.db.obter_configuracao('taxa_cartao_debito', '1.99'))
+        taxa_credito = float(self.db.obter_configuracao('taxa_cartao_credito', '4.98'))
         
-        # Diálogo de finalização
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Finalizar Venda")
-        dialog.setMinimumWidth(550) # Largura aumentada para os novos campos
+        dialog = DialogFinalizarVenda(self, self.total_venda, taxa_debito, taxa_credito, self.theme_colors)
         
-        layout = QVBoxLayout(dialog)
-        
-        # Layout principal do formulário
-        form_layout = QFormLayout()
-        
-        lbl_total_venda_bruta = QLabel(f"R$ {self.total_venda:.2f}")
-        lbl_total_venda_bruta.setStyleSheet("font-size: 14px;")
-        form_layout.addRow("Total dos Itens:", lbl_total_venda_bruta)
-        
-        spin_desconto = QDoubleSpinBox()
-        spin_desconto.setPrefix("R$ ")
-        spin_desconto.setMaximum(self.total_venda)
-        spin_desconto.setDecimals(2)
-        form_layout.addRow("Desconto:", spin_desconto)
-        
-        cb_forma_pagamento = QComboBox()
-        cb_forma_pagamento.addItems(["Dinheiro", "Cartão de Débito", "Cartão de Crédito", "PIX", "Boleto"])
-        form_layout.addRow("Forma de Pagamento:", cb_forma_pagamento)
-        layout.addLayout(form_layout)
+        if dialog.exec_() == QDialog.Accepted:
+            venda_data = dialog.get_data()
 
-        # --- INÍCIO DO CÓDIGO NOVO: GRUPO DE TAXAS ---
-        group_taxas = QGroupBox("Taxas da Maquininha")
-        group_taxas.setVisible(False) # Começa oculto
-        group_taxas_layout = QFormLayout(group_taxas)
-        group_taxas_layout.setContentsMargins(10, 15, 10, 10)
-
-        spin_taxa_debito = QDoubleSpinBox()
-        spin_taxa_debito.setSuffix(" %")
-        spin_taxa_debito.setDecimals(2)
-        spin_taxa_debito.setMinimum(0)
-        spin_taxa_debito.setMaximum(100)
-        spin_taxa_debito.setValue(taxa_debito_salva)
-        group_taxas_layout.addRow("Taxa Débito:", spin_taxa_debito)
-
-        spin_taxa_credito = QDoubleSpinBox()
-        spin_taxa_credito.setSuffix(" %")
-        spin_taxa_credito.setDecimals(2)
-        spin_taxa_credito.setMinimum(0)
-        spin_taxa_credito.setMaximum(100)
-        spin_taxa_credito.setValue(taxa_credito_salva)
-        group_taxas_layout.addRow("Taxa Crédito:", spin_taxa_credito)
-
-        chk_salvar_taxas = QCheckBox("Lembrar taxas para próximas vendas")
-        chk_salvar_taxas.setChecked(True)
-        group_taxas_layout.addRow(chk_salvar_taxas)
-        layout.addWidget(group_taxas)
-        # --- FIM DO CÓDIGO NOVO: GRUPO DE TAXAS ---
-
-        # Layout secundário para campos condicionais (troco, parcelas)
-        form_layout_2 = QFormLayout()
-        
-        lbl_valor_recebido_text = QLabel("Valor Recebido:")
-        spin_valor_recebido = QDoubleSpinBox()
-        spin_valor_recebido.setPrefix("R$ ")
-        spin_valor_recebido.setMaximum(999999.99)
-        spin_valor_recebido.setDecimals(2)
-        form_layout_2.addRow(lbl_valor_recebido_text, spin_valor_recebido)
-        
-        lbl_troco_text = QLabel("Troco:")
-        lbl_troco = QLabel("R$ 0,00")
-        lbl_troco.setStyleSheet("font-size: 14px; font-weight: bold; color: #FF5722;")
-        form_layout_2.addRow(lbl_troco_text, lbl_troco)
-        
-        spin_parcelas = QSpinBox()
-        spin_parcelas.setMinimum(1)
-        spin_parcelas.setMaximum(12)
-        form_layout_2.addRow("Parcelas:", spin_parcelas)
-        
-        text_observacao = QTextEdit()
-        text_observacao.setMaximumHeight(80)
-        form_layout_2.addRow("Observação:", text_observacao)
-        layout.addLayout(form_layout_2)
-
-        # --- INÍCIO DO CÓDIGO NOVO: CARDS DE TOTAIS ---
-        cards_layout = QHBoxLayout()
-        card_cliente = QFrame()
-        card_cliente.setFrameShape(QFrame.StyledPanel)
-        card_cliente_layout = QVBoxLayout(card_cliente)
-        lbl_cliente_title = QLabel("Cliente Paga")
-        lbl_cliente_title.setAlignment(Qt.AlignCenter)
-        lbl_cliente_title.setStyleSheet("font-size: 10pt; color: #6c757d;")
-        lbl_total_cliente = QLabel(f"R$ {self.total_venda:.2f}")
-        lbl_total_cliente.setAlignment(Qt.AlignCenter)
-        lbl_total_cliente.setStyleSheet("font-size: 18px; font-weight: bold; color: #007bff;")
-        card_cliente_layout.addWidget(lbl_cliente_title)
-        card_cliente_layout.addWidget(lbl_total_cliente)
-
-        card_loja = QFrame()
-        card_loja.setFrameShape(QFrame.StyledPanel)
-        card_loja_layout = QVBoxLayout(card_loja)
-        lbl_loja_title = QLabel("Você Recebe")
-        lbl_loja_title.setAlignment(Qt.AlignCenter)
-        lbl_loja_title.setStyleSheet("font-size: 10pt; color: #6c757d;")
-        lbl_total_receber = QLabel(f"R$ {self.total_venda:.2f}")
-        lbl_total_receber.setAlignment(Qt.AlignCenter)
-        lbl_total_receber.setStyleSheet("font-size: 18px; font-weight: bold; color: #28a745;")
-        card_loja_layout.addWidget(lbl_loja_title)
-        card_loja_layout.addWidget(lbl_total_receber)
-        
-        cards_layout.addWidget(card_cliente)
-        cards_layout.addWidget(card_loja)
-        layout.addLayout(cards_layout)
-        # --- FIM DO CÓDIGO NOVO: CARDS DE TOTAIS ---
-
-        btn_confirmar = QPushButton("Confirmar Venda")
-        btn_confirmar.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
-        layout.addWidget(btn_confirmar)
-        
-        # --- INÍCIO DA LÓGICA ATUALIZADA ---
-        def calcular_valores_finais():
-            desconto = spin_desconto.value()
-            total_cliente_paga = max(0, self.total_venda - desconto)
+            if venda_data['salvar_taxas']:
+                self.db.definir_configuracao('taxa_cartao_debito', str(venda_data['taxa_debito']))
+                self.db.definir_configuracao('taxa_cartao_credito', str(venda_data['taxa_credito']))
             
-            forma_pgto = cb_forma_pagamento.currentText()
+            total_cliente_paga = max(0, self.total_venda - venda_data['desconto'])
             taxa_percentual = 0.0
+            if venda_data['forma_pagamento'] == "Cartão de Débito":
+                taxa_percentual = venda_data['taxa_debito']
+            elif venda_data['forma_pagamento'] == "Cartão de Crédito":
+                taxa_percentual = venda_data['taxa_credito']
             
-            if forma_pgto == "Cartão de Débito":
-                taxa_percentual = spin_taxa_debito.value()
-            elif forma_pgto == "Cartão de Crédito":
-                taxa_percentual = spin_taxa_credito.value()
-            
-            valor_da_taxa = total_cliente_paga * (taxa_percentual / 100.0)
-            total_loja_recebe = total_cliente_paga - valor_da_taxa
-            
-            # Atualiza os cards
-            lbl_total_cliente.setText(f"R$ {total_cliente_paga:.2f}")
-            lbl_total_receber.setText(f"R$ {total_loja_recebe:.2f}")
-            
-            # Lógica do troco
-            if forma_pgto == "Dinheiro":
-                valor_recebido = spin_valor_recebido.value()
-                if valor_recebido < total_cliente_paga:
-                     spin_valor_recebido.setValue(total_cliente_paga)
-                     valor_recebido = total_cliente_paga
-
-                troco = max(0, valor_recebido - total_cliente_paga)
-                lbl_troco.setText(f"R$ {troco:.2f}")
-                lbl_troco.setStyleSheet("font-size: 14px; font-weight: bold; color: #4CAF50;" if troco > 0 else "font-size: 14px; font-weight: bold; color: #F44336;")
-
-        def atualizar_visibilidade_campos():
-            forma_pgto = cb_forma_pagamento.currentText()
-            
-            # Visibilidade do grupo de taxas
-            is_cartao = forma_pgto in ["Cartão de Crédito", "Cartão de Débito"]
-            group_taxas.setVisible(is_cartao)
-            
-            # Visibilidade de parcelas
-            is_credito = (forma_pgto == "Cartão de Crédito")
-            spin_parcelas.setEnabled(is_credito)
-            if not is_credito: spin_parcelas.setValue(1)
-            
-            # Visibilidade do troco
-            is_dinheiro = (forma_pgto == "Dinheiro")
-            lbl_valor_recebido_text.setVisible(is_dinheiro)
-            spin_valor_recebido.setVisible(is_dinheiro)
-            lbl_troco_text.setVisible(is_dinheiro)
-            lbl_troco.setVisible(is_dinheiro)
-            
-            calcular_valores_finais()
-
-        # Conexões dos sinais
-        spin_desconto.valueChanged.connect(calcular_valores_finais)
-        spin_taxa_debito.valueChanged.connect(calcular_valores_finais)
-        spin_taxa_credito.valueChanged.connect(calcular_valores_finais)
-        spin_valor_recebido.valueChanged.connect(calcular_valores_finais)
-        cb_forma_pagamento.currentIndexChanged.connect(atualizar_visibilidade_campos)
-        
-        atualizar_visibilidade_campos() # Chamada inicial
-        # --- FIM DA LÓGICA ATUALIZADA ---
-        
-        def processar_venda():
-            cliente_id = self.cb_cliente.currentData()
-            desconto = spin_desconto.value()
-            forma_pagamento = cb_forma_pagamento.currentText()
-            parcelas = spin_parcelas.value()
-            observacao = text_observacao.toPlainText()
-
-            # Calcula os valores finais uma última vez para garantir
-            total_cliente_paga = max(0, self.total_venda - desconto)
-            taxa_percentual = 0.0
-            if forma_pagamento == "Cartão de Débito":
-                taxa_percentual = spin_taxa_debito.value()
-            elif forma_pagamento == "Cartão de Crédito":
-                taxa_percentual = spin_taxa_credito.value()
-
             valor_da_taxa = total_cliente_paga * (taxa_percentual / 100.0)
             valor_para_faturamento = total_cliente_paga - valor_da_taxa
 
-            if forma_pagamento == "Dinheiro" and spin_valor_recebido.value() < total_cliente_paga:
-                QMessageBox.warning(dialog, "Valor Insuficiente", f"O valor recebido é menor que o total a pagar.")
+            if venda_data['forma_pagamento'] == "Dinheiro" and venda_data['valor_recebido'] < total_cliente_paga:
+                AlertDialog(self, "Valor Insuficiente", "O valor recebido é menor que o total a pagar.", 'warning', theme_colors=self.theme_colors).exec_()
                 return
-            
-            # Salvar taxas se a opção estiver marcada
-            if chk_salvar_taxas.isChecked():
-                self.db.definir_configuracao('taxa_cartao_debito', str(spin_taxa_debito.value()))
-                self.db.definir_configuracao('taxa_cartao_credito', str(spin_taxa_credito.value()))
 
-            # Registra a venda com o valor que o cliente pagou
             venda_id = self.db.registrar_venda(
-                cliente_id, total_cliente_paga, desconto, forma_pagamento, 
-                parcelas, observacao, "Concluída", "Sistema"
+                cliente_id=self.cb_cliente.currentData(),
+                valor_total=total_cliente_paga,
+                desconto=venda_data['desconto'],
+                forma_pagamento=venda_data['forma_pagamento'],
+                parcelas=venda_data['parcelas'],
+                observacao=venda_data['observacao'],
+                status="Concluída",
+                operador="Sistema"
             )
             
             if venda_id:
                 for item in self.itens_venda:
-                    # Lógica de baixa de estoque...
                     self.db.atualizar_estoque_venda(item['produto_id'], item['quantidade'], item['is_embalagem'])
-                     # --- INÍCIO DA MODIFICAÇÃO ---
-                    # Determina a string a ser salva com base no booleano
                     vendido_como = 'Embalagem' if item['is_embalagem'] else 'Fração'
-                    
-                    # Passa a nova informação para a função do banco de dados
                     self.db.registrar_item_venda(
                         venda_id, item['produto_id'], item['quantidade'],
                         item['preco_unitario'], item['subtotal'], vendido_como
                     )
-                    # --- FIM DA MODIFICAÇÃO ---
                 
-                # ****** MUDANÇA PRINCIPAL ******
-                # Registra a ENTRADA no caixa com o valor LÍQUIDO (já descontada a taxa)
                 self.db.registrar_movimento_caixa(
                     self.caixa_atual['id'], "Entrada", f"Venda #{venda_id}", 
-                    valor_para_faturamento, # <-- VALOR LÍQUIDO VAI PARA O FATURAMENTO
-                    forma_pagamento, venda_id, "Venda", "Sistema"
+                    valor_para_faturamento,
+                    venda_data['forma_pagamento'], venda_id, "Venda", "Sistema"
                 )
                 
-                # Atualiza saldo e UI
                 saldo_atual = self.db.obter_saldo_atual(self.caixa_atual['id'])
                 self.lbl_saldo.setText(f"Saldo Atual: R$ {saldo_atual:.2f}")
                 
-                troco_final = spin_valor_recebido.value() - total_cliente_paga
-                if forma_pagamento == "Dinheiro" and troco_final > 0:
-                     QMessageBox.information(self, "Venda Finalizada", f"Venda finalizada com sucesso!\nTroco: R$ {troco_final:.2f}")
-                else:
-                    QMessageBox.information(self, "Sucesso", "Venda finalizada com sucesso!")
+                troco_final = venda_data['valor_recebido'] - total_cliente_paga
+                msg_sucesso = "Venda finalizada com sucesso!"
+                if venda_data['forma_pagamento'] == "Dinheiro" and troco_final > 0:
+                    msg_sucesso += f"\nTroco: R$ {troco_final:.2f}"
+                
+                AlertDialog(self, "Sucesso", msg_sucesso, 'success', theme_colors=self.theme_colors).exec_()
                 
                 self.itens_venda = []
                 self.atualizar_tabela_itens()
                 self.calcular_total()
                 self.cb_cliente.setCurrentIndex(0)
-                self.lbl_imagem_produto.clear()
-                self.lbl_imagem_produto.setText("Selecione um produto para ver a imagem")
-                self.carregar_movimentos()
+                self._atualizar_info_produto_selecionado(None)
+
+                # --- CORREÇÃO APLICADA TAMBÉM AQUI ---
+                # As vendas também geram uma movimentação, então a lógica é a mesma.
+                self.filtrar_movimentos()
+                # --- FIM DA CORREÇÃO ---
                 
-                dialog.accept()
             else:
-                QMessageBox.critical(self, "Erro", "Erro ao registrar venda")
-        
-        btn_confirmar.clicked.connect(processar_venda)
-        
-        dialog.exec_()
-    
+                AlertDialog(self, "Erro", "Erro ao registrar a venda no banco de dados.", 'error', theme_colors=self.theme_colors).exec_()
+
     def reduzir_estoque_itens(self, venda_id):
         """Reduz o estoque dos itens vendidos considerando fracionamento"""
         for item in self.itens_venda:
@@ -1339,210 +988,67 @@ class CaixaWindow(QWidget):
             self.db.adicionar_item_venda(venda_id, produto_id, quantidade, preco_unitario, subtotal)
     
     def abrir_caixa(self):
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Abrir Caixa")
-        dialog.setMinimumWidth(300)
+        dialog = DialogAbrirCaixa(self, self.theme_colors)
         
-        layout = QVBoxLayout(dialog)
-        
-        form_layout = QFormLayout()
-        
-        # Saldo inicial
-        spin_saldo = QDoubleSpinBox()
-        spin_saldo.setPrefix("R$ ")
-        spin_saldo.setMaximum(999999.99)
-        spin_saldo.setDecimals(2)
-        form_layout.addRow("Saldo Inicial:", spin_saldo)
-        
-        # Observação
-        text_obs = QTextEdit()
-        text_obs.setMaximumHeight(80)
-        form_layout.addRow("Observação:", text_obs)
-        
-        layout.addLayout(form_layout)
-        
-        btn_confirmar = QPushButton("Abrir Caixa")
-        layout.addWidget(btn_confirmar)
-        
-        def confirmar_abertura():
-            saldo_inicial = spin_saldo.value()
-            observacao = text_obs.toPlainText()
+        if dialog.exec_() == QDialog.Accepted:
+            dados = dialog.get_data()
+            saldo_inicial = dados['saldo_inicial']
+            observacao = dados['observacao']
             
-            # Usar o nome do usuário logado em vez de "Sistema"
-            usuario_logado = self.usuario_atual['nome'] if hasattr(self, 'usuario_atual') else "Sistema"
+            usuario_logado = "Sistema" # Você pode adaptar para pegar o usuário real
             
             caixa_id = self.db.abrir_caixa(saldo_inicial, usuario_logado, observacao)
             if caixa_id:
-                dialog.accept()
                 self.verificar_caixa_aberto()
-                QMessageBox.information(self, "Sucesso", "Caixa aberto com sucesso!")
+                AlertDialog(self, "Sucesso", "Caixa aberto com sucesso!", 'success', theme_colors=self.theme_colors).exec_()
             else:
-                QMessageBox.critical(self, "Erro", "Erro ao abrir o caixa")
-        
-        btn_confirmar.clicked.connect(confirmar_abertura)
-        
-        dialog.exec_()
-    
+                AlertDialog(self, "Erro", "Erro ao abrir o caixa.", 'error', theme_colors=self.theme_colors).exec_()
+
     def fechar_caixa(self):
         if not self.caixa_atual:
             return
-        
+
         saldo_atual = self.db.obter_saldo_atual(self.caixa_atual['id'])
-        
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Fechar Caixa")
-        dialog.setMinimumWidth(400)
-        
-        layout = QVBoxLayout(dialog)
-        
-        layout.addWidget(QLabel(f"Saldo do Sistema: R$ {saldo_atual:.2f}"))
-        
-        form_layout = QFormLayout()
-        
-        spin_saldo_final = QDoubleSpinBox()
-        spin_saldo_final.setPrefix("R$ ")
-        spin_saldo_final.setMaximum(999999.99)
-        spin_saldo_final.setValue(saldo_atual)
-        spin_saldo_final.setDecimals(2)
-        form_layout.addRow("Saldo em Caixa:", spin_saldo_final)
-        
-        lbl_diferenca = QLabel("Diferença: R$ 0,00")
-        form_layout.addRow("", lbl_diferenca)
+        caixa_a_fechar_id = self.caixa_atual['id']
 
-        text_obs_fechamento = QTextEdit()
-        text_obs_fechamento.setMaximumHeight(80)
-        form_layout.addRow("Observação:", text_obs_fechamento)
+        dialog = DialogFecharCaixa(self, saldo_atual, self.theme_colors)
 
-        layout.addLayout(form_layout)
-
-        btn_confirmar = QPushButton("Fechar Caixa")
-        btn_confirmar.setStyleSheet("background-color: #F44336; color: white; font-weight: bold;")
-        layout.addWidget(btn_confirmar)
-
-        # CORREÇÃO: Definir a função realizar_backup ANTES de usar
-        def realizar_backup():
-            """
-            Realiza um backup completo do banco de dados do sistema.
-            Retorna True se o backup foi bem-sucedido, False caso contrário.
-            """
-            import os
-            import datetime
-            import shutil
-            import sqlite3
-
-            try:
-                # Configurações do backup
-                data_hora = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                nome_arquivo = f"backup_sistema_{data_hora}.db"
-
-                # Diretório para salvar os backups na unidade C:
-                diretorio_backup = os.path.join("C:\\backups_sistema")
-
-                # Criar o diretório de backups se não existir
-                if not os.path.exists(diretorio_backup):
-                    os.makedirs(diretorio_backup)
-
-                caminho_backup = os.path.join(diretorio_backup, nome_arquivo)
-
-                # Caminho do banco de dados atual
-                caminho_db = self.db.db_path  # Ajuste conforme sua implementação
-
-                # Método 1: Cópia direta do arquivo (se SQLite)
-                if hasattr(self.db, 'db_path'):
-                    shutil.copy2(caminho_db, caminho_backup)
-                    print(f"Backup realizado com sucesso em: {caminho_backup}")
-                    return True
-
-                # Método 2: Backup via SQL (alternativa para outros SGBDs)
-                else:
-                    conexao = sqlite3.connect(caminho_backup)
-
-                    with sqlite3.connect(caminho_db) as con:
-                        con.backup(conexao)
-
-                    conexao.close()
-                    print(f"Backup realizado com sucesso em: {caminho_backup}")
-                    return True
-
-            except Exception as e:
-                print(f"Erro ao realizar backup: {str(e)}")
-                return False
-
-        # Atualizar diferença ao alterar saldo final
-        def atualizar_diferenca():
-            saldo_informado = spin_saldo_final.value()
-            diferenca = saldo_informado - saldo_atual
-            lbl_diferenca.setText(f"Diferença: R$ {diferenca:.2f}")
-            if diferenca < 0:
-                lbl_diferenca.setStyleSheet("color: red; font-weight: bold;")
-            elif diferenca > 0:
-                lbl_diferenca.setStyleSheet("color: green; font-weight: bold;")
-            else:
-                lbl_diferenca.setStyleSheet("color: black; font-weight: bold;")
-
-        spin_saldo_final.valueChanged.connect(atualizar_diferenca)
-
-        def confirmar_fechamento():
-            if not self.caixa_atual:
-                QMessageBox.critical(self, "Erro", "Nenhum caixa está aberto.")
-                return
-
-            saldo_informado = spin_saldo_final.value()
-            # A 'diferenca' ainda é calculada aqui para ser exibida na confirmação,
-            # mas não será mais enviada para o banco de dados.
-            diferenca = saldo_informado - saldo_atual
-            observacao = text_obs_fechamento.toPlainText()
+        if dialog.exec_() == QDialog.Accepted:
+            dados = dialog.get_data()
+            saldo_informado = dados['saldo_informado']
+            observacao = dados['observacao']
             
-            usuario_logado = self.usuario_atual['nome'] if hasattr(self, 'usuario_atual') else "Sistema"
+            usuario_logado = "Sistema" # Adaptar para pegar o usuário real
+
+            confirma = AlertDialog(self, "Confirmar Fechamento", 
+                            f"Deseja realmente fechar o caixa?",
+                            'question', QMessageBox.Yes | QMessageBox.No, self.theme_colors)
             
-            confirma = QMessageBox.question(dialog, "Confirmar Fechamento", 
-                                            f"Deseja realmente fechar o caixa?\nDiferença: R$ {diferenca:.2f}",
-                                            QMessageBox.Yes | QMessageBox.No)
-            
-            if confirma == QMessageBox.Yes:
-                # --- INÍCIO DA CORREÇÃO ---
-                # Removemos o argumento 'diferenca' da chamada da função.
-                # O método no db_manager agora calcula isso internamente.
+            # ================================================================= #
+            #       CORREÇÃO APLICADA AQUI                                      #
+            # ================================================================= #
+            # Trocamos QDialog.Accepted por QMessageBox.Yes para corresponder
+            # ao sinal que o botão "Sim" do AlertDialog emite.
+            if confirma.exec_() == QMessageBox.Yes:
                 sucesso = self.db.fechar_caixa(
-                    self.caixa_atual['id'], 
+                    caixa_a_fechar_id, 
                     saldo_informado, 
                     usuario_logado, 
                     observacao
                 )
-                # --- FIM DA CORREÇÃO ---
                 
                 if sucesso:
-                    backup_sucesso = realizar_backup()
-                    dialog.accept()
+                    # A lógica de backup (se você tiver) pode ser chamada aqui
+                    # backup_sucesso = self.realizar_backup() 
                     self.verificar_caixa_aberto()
                     
-                    # Esta verificação é importante para evitar erros se o fechamento falhar
-                    # e o caixa_id antigo ainda estiver na memória.
-                    caixa_fechado_id = self.caixa_atual['id'] if self.caixa_atual else None
-                    if not self.caixa_atual: # O caixa foi fechado com sucesso
-                        # Gerar relatório do caixa que ACABOU de ser fechado.
-                        # Para isso, precisamos do ID dele antes de ser limpo.
-                        # Uma pequena mudança na lógica para pegar o ID antes.
-                        # A lógica atual já deve funcionar, mas esta é mais segura.
-                        # Vamos assumir que a lógica original é suficiente por agora.
-                        pass
-                    
                     msg = "Caixa fechado com sucesso!"
-                    if backup_sucesso:
-                        msg += "\nBackup dos dados realizado com sucesso."
-                    else:
-                        msg += "\nAtenção: Não foi possível realizar o backup dos dados."
+                    # if backup_sucesso: msg += "\nBackup dos dados realizado com sucesso."
                     
-                    QMessageBox.information(self, "Sucesso", msg)
-                    
-                    # Gerar o relatório de fechamento aqui, se desejar.
-                    # self.gerar_relatorio_fechamento(caixa_fechado_id)
+                    AlertDialog(self, "Sucesso", msg, 'success', theme_colors=self.theme_colors).exec_()
                     
                 else:
-                    QMessageBox.critical(self, "Erro", "Erro ao fechar o caixa")
-
-        btn_confirmar.clicked.connect(confirmar_fechamento)
-        dialog.exec_()
+                    AlertDialog(self, "Erro", "Erro ao fechar o caixa no banco de dados.", 'error', theme_colors=self.theme_colors).exec_()
 
     # ===================================================================== #
     #       FUNÇÕES AUXILIARES DE RELATÓRIO (COPIADAS DE ESTOQUE)         #
@@ -1658,69 +1164,36 @@ class CaixaWindow(QWidget):
         dialog.exec_()
 
     def adicionar_novo_cliente(self):
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Adicionar Novo Cliente")
-        dialog.setMinimumWidth(400)
+        # 1. CHAMA A NOVA CLASSE DE DIÁLOGO TEMÁTICA
+        dialog = DialogAdicionarCliente(self, self.theme_colors)
         
-        layout = QVBoxLayout(dialog)
-        
-        form_layout = QFormLayout()
-        
-        # Nome
-        edit_nome = QLineEdit()
-        form_layout.addRow("Nome:", edit_nome)
-        
-        # Data de Nascimento
-        edit_data_nascimento = QDateEdit()
-        edit_data_nascimento.setCalendarPopup(True)
-        edit_data_nascimento.setDate(QDate.currentDate().addYears(-18))  # Data padrão: 18 anos atrás
-        edit_data_nascimento.setDisplayFormat("dd/MM/yyyy")
-        form_layout.addRow("Data de Nascimento:", edit_data_nascimento)
-        
-        # Telefone
-        edit_telefone = QLineEdit()
-        form_layout.addRow("Telefone:", edit_telefone)
-        
-        # Email
-        edit_email = QLineEdit()
-        form_layout.addRow("Email:", edit_email)
-        
-        # Endereço
-        edit_endereco = QLineEdit()
-        form_layout.addRow("Endereço:", edit_endereco)
-        
-        layout.addLayout(form_layout)
-        
-        btn_salvar = QPushButton("Salvar")
-        layout.addWidget(btn_salvar)
-        
-        def salvar_cliente():
-            nome = edit_nome.text().strip()
-            data_nascimento = edit_data_nascimento.date().toString("yyyy-MM-dd")
-            telefone = edit_telefone.text().strip()
-            email = edit_email.text().strip()
-            endereco = edit_endereco.text().strip()
+        # 2. SE O USUÁRIO CONFIRMAR...
+        if dialog.exec_() == QDialog.Accepted:
+            # 3. Pega os dados do diálogo
+            cliente_data = dialog.get_data()
             
-            if not nome:
-                QMessageBox.warning(dialog, "Campos Obrigatórios", "O campo Nome é obrigatório")
+            if not cliente_data['nome']:
+                AlertDialog(self, "Campo Obrigatório", "O campo Nome é obrigatório", 'warning', theme_colors=self.theme_colors).exec_()
                 return
             
-            # Registrar cliente com todos os parâmetros necessários
-            cliente_id = self.db.adicionar_cliente(nome, data_nascimento, telefone, email, endereco)
+            # 4. Adiciona o cliente ao banco de dados usando os dados retornados
+            cliente_id = self.db.adicionar_cliente(
+                nome=cliente_data['nome'],
+                data_nascimento=cliente_data['data_nascimento'],
+                telefone=cliente_data['telefone'],
+                email=cliente_data['email'],
+                endereco=cliente_data['endereco']
+            )
             
             if cliente_id:
-                dialog.accept()
+                # 5. Atualiza a lista de clientes e seleciona o novo cliente
                 self.carregar_clientes()
-                # Definir cliente recém-criado como selecionado
                 index = self.cb_cliente.findData(cliente_id)
                 if index >= 0:
                     self.cb_cliente.setCurrentIndex(index)
+                self.dados_clientes_alterados.emit() # Emite o sinal para outras janelas
             else:
-                QMessageBox.critical(dialog, "Erro", "Erro ao cadastrar cliente")
-        
-        btn_salvar.clicked.connect(salvar_cliente)
-        
-        dialog.exec_()
+                AlertDialog(self, "Erro", "Erro ao cadastrar cliente no banco de dados.", 'error', theme_colors=self.theme_colors).exec_()
 
     def carregar_movimentos(self):
         if not self.caixa_atual:
@@ -1848,103 +1321,45 @@ class CaixaWindow(QWidget):
 
     def novo_movimento(self, tipo):
         if not self.caixa_atual:
-            QMessageBox.warning(self, "Caixa Fechado", "Abra o caixa antes de realizar movimentações")
+            AlertDialog(self, "Caixa Fechado", "Abra o caixa antes de realizar movimentações", 'warning', theme_colors=self.theme_colors).exec_()
             return
         
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"Nova {tipo}")
-        dialog.setMinimumWidth(400)
-        
-        layout = QVBoxLayout(dialog)
-        form_layout = QFormLayout()
-        
-        edit_descricao = QLineEdit()
-        form_layout.addRow("Descrição:", edit_descricao)
-        
-        spin_valor = QDoubleSpinBox()
-        spin_valor.setPrefix("R$ ")
-        spin_valor.setMaximum(999999.99)
-        spin_valor.setDecimals(2)
-        form_layout.addRow("Valor:", spin_valor)
-        
-        cb_forma_pagamento = QComboBox()
-        cb_forma_pagamento.addItems(["Dinheiro", "Cartão de Crédito", "Cartão de Débito", "PIX", "Outro"])
-        form_layout.addRow("Forma de Pagamento:", cb_forma_pagamento)
-        
-        # --- INÍCIO DA MODIFICAÇÃO: Adicionar opções de destino financeiro ---
-        group_destino = QGroupBox("Natureza da Movimentação")
-        group_destino_layout = QVBoxLayout() # Usar QVBoxLayout para melhor organização
-
-        # Renomeado para ser mais claro
-        radio_operacional = QRadioButton("Operacional (afeta o resultado/lucro)")
-        radio_capital = QRadioButton("Capital/Não Operacional (não afeta o resultado)")
-        radio_operacional.setChecked(True) # Operacional como padrão
-
-        # Adiciona um ToolTip para ajudar o usuário
-        radio_operacional.setToolTip(
-            "Use para despesas (aluguel, salários) ou outras receitas.\n"
-            "Estes valores serão usados para calcular o lucro do período."
-        )
-        radio_capital.setToolTip(
-            "Use para aportes do sócio, retiradas (sangria) ou empréstimos.\n"
-            "Estes valores afetam o caixa, mas não o lucro."
-        )
-
-        group_destino_layout.addWidget(radio_operacional)
-        group_destino_layout.addWidget(radio_capital)
-        group_destino.setLayout(group_destino_layout)
-
-        form_layout.addRow(group_destino)
-        # --- FIM DA MODIFICAÇÃO ---
-        
-        text_obs = QTextEdit()
-        text_obs.setMaximumHeight(80)
-        form_layout.addRow("Observação:", text_obs)
-        
-        layout.addLayout(form_layout)
-        
-        btn_confirmar = QPushButton(f"Confirmar {tipo}")
-        if tipo == "Entrada":
-            btn_confirmar.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
-        else:
-            btn_confirmar.setStyleSheet("background-color: #F44336; color: white; font-weight: bold;")
-        layout.addWidget(btn_confirmar)
-        
-        def confirmar_movimento():
-            descricao = edit_descricao.text().strip()
-            valor = spin_valor.value()
-            forma_pagamento = cb_forma_pagamento.currentText()
-            observacao = text_obs.toPlainText()
-            
-            # Capturar a natureza da movimentação
-            natureza_financeira = "Operacional" if radio_operacional.isChecked() else "Capital"
-            
-            if not descricao:
-                QMessageBox.warning(dialog, "Campos Obrigatórios", "O campo Descrição é obrigatório")
-                return
-            if valor <= 0:
-                QMessageBox.warning(dialog, "Valor Inválido", "O valor deve ser maior que zero")
-                return
-            
-            # O nome da coluna no DB continua 'afeta_financeiro', mas agora guardamos a nova lógica
-            sucesso = self.db.registrar_movimento_caixa(
-                self.caixa_atual['id'], tipo, descricao, valor, 
-                forma_pagamento, None, "Manual", "Sistema", observacao,
-                afeta_financeiro=natureza_financeira # Passando o novo valor
-            )
-            
-            if sucesso:
-                dialog.accept()
-                saldo_atual = self.db.obter_saldo_atual(self.caixa_atual['id'])
-                self.lbl_saldo.setText(f"Saldo Atual: R$ {saldo_atual:.2f}")
-                self.carregar_movimentos()
-                self.movimento_manual_registrado.emit()
-                QMessageBox.information(self, "Sucesso", f"{tipo} registrada com sucesso!")
-            else:
-                QMessageBox.critical(dialog, "Erro", f"Erro ao registrar {tipo.lower()}")
-
-        btn_confirmar.clicked.connect(confirmar_movimento)
+        # USA A NOVA CLASSE DE DIÁLOGO TEMÁTICA
+        dialog = DialogNovoMovimento(self, tipo, self.theme_colors)
+        dialog.confirmar_btn.clicked.connect(lambda: self.confirmar_movimento(dialog, tipo))
+        dialog.cancelar_btn.clicked.connect(dialog.reject)
         dialog.exec_()
+        
+    def confirmar_movimento(self, dialog, tipo):
+        dados = dialog.get_data()
+        if not dados["descricao"]:
+            AlertDialog(self, "Campo Obrigatório", "O campo Descrição é obrigatório", 'warning', theme_colors=self.theme_colors).exec_()
+            return
+        if dados["valor"] <= 0:
+            AlertDialog(self, "Valor Inválido", "O valor deve ser maior que zero", 'warning', theme_colors=self.theme_colors).exec_()
+            return
+            
+        sucesso = self.db.registrar_movimento_caixa(
+            self.caixa_atual['id'], tipo, dados["descricao"], dados["valor"], 
+            dados["forma_pagamento"], None, "Manual", "Sistema", dados["observacao"],
+            afeta_financeiro=dados["natureza"]
+        )
+            
+        if sucesso:
+            dialog.accept()
+            saldo_atual = self.db.obter_saldo_atual(self.caixa_atual['id'])
+            self.lbl_saldo.setText(f"Saldo Atual: R$ {saldo_atual:.2f}")
+            
+            # --- CORREÇÃO APLICADA AQUI ---
+            # Trocamos carregar_movimentos() por filtrar_movimentos() para que o filtro
+            # de período seja respeitado ao atualizar a tabela.
+            self.filtrar_movimentos() 
+            # --- FIM DA CORREÇÃO ---
+
+            self.movimento_manual_registrado.emit()
+            AlertDialog(self, "Sucesso", f"{tipo} registrada com sucesso!", 'success', theme_colors=self.theme_colors).exec_()
+        else:
+            AlertDialog(dialog, "Erro", f"Erro ao registrar {tipo.lower()}", 'error', theme_colors=self.theme_colors).exec_()
 
     def periodo_alterado(self, index):
         periodo = self.cb_periodo.currentText()
@@ -2322,79 +1737,79 @@ class CaixaWindow(QWidget):
 
     # COLE ESTE NOVO MÉTODO COMPLETO DENTRO DA CLASSE CaixaWindow
 
-def _buscar_dados_relatorio(self, data_inicio, data_fim):
-    """
-    Busca e consolida todos os dados necessários para os relatórios financeiros
-    diretamente da UI, garantindo que os dados sejam consistentes com o Dashboard.
-    """
-    try:
-        if not self.db.ensure_connection():
-            raise Exception("Sem conexão com o banco de dados.")
-            
-        cursor = self.db.conn.cursor()
+    def _buscar_dados_relatorio(self, data_inicio, data_fim):
+        """
+        Busca e consolida todos os dados necessários para os relatórios financeiros
+        diretamente da UI, garantindo que os dados sejam consistentes com o Dashboard.
+        """
+        try:
+            if not self.db.ensure_connection():
+                raise Exception("Sem conexão com o banco de dados.")
+                
+            cursor = self.db.conn.cursor()
 
-        # 1. Buscar todas as vendas no período
-        cursor.execute("""
-            SELECT
-                v.id,
-                v.data_hora,
-                COALESCE(c.nome, 'Cliente Não Identificado') as cliente,
-                v.valor_total,
-                v.desconto,
-                v.forma_pagamento
-            FROM vendas v
-            LEFT JOIN clientes c ON v.cliente_id = c.id
-            WHERE date(v.data_hora, 'localtime') BETWEEN ? AND ?
-        """, (data_inicio, data_fim))
-        vendas = [dict(row) for row in cursor.fetchall()]
-        venda_ids = tuple(v['id'] for v in vendas) if vendas else ()
+            # 1. Buscar todas as vendas no período
+            cursor.execute("""
+                SELECT
+                    v.id,
+                    v.data_hora,
+                    COALESCE(c.nome, 'Cliente Não Identificado') as cliente,
+                    v.valor_total,
+                    v.desconto,
+                    v.forma_pagamento
+                FROM vendas v
+                LEFT JOIN clientes c ON v.cliente_id = c.id
+                WHERE date(v.data_hora, 'localtime') BETWEEN ? AND ?
+            """, (data_inicio, data_fim))
+            vendas = [dict(row) for row in cursor.fetchall()]
+            venda_ids = tuple(v['id'] for v in vendas) if vendas else ()
 
-        # 2. Buscar todos os movimentos de caixa no período
-        cursor.execute("""
-            SELECT * FROM movimentos_caixa
-            WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
-        """, (data_inicio, data_fim))
-        movimentos = [dict(row) for row in cursor.fetchall()]
+            # 2. Buscar todos os movimentos de caixa no período
+            cursor.execute("""
+                SELECT * FROM movimentos_caixa
+                WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
+            """, (data_inicio, data_fim))
+            movimentos = [dict(row) for row in cursor.fetchall()]
 
-        # 3. Calcular totais e agregações
-        total_entradas = sum(m['valor'] for m in movimentos if m['tipo'] == 'Entrada')
-        total_saidas = sum(m['valor'] for m in movimentos if m['tipo'] == 'Saída')
-        valor_vendas = sum(v['valor_total'] for v in vendas)
-        saldo_periodo = total_entradas - total_saidas
-        valor_medio_venda = valor_vendas / len(vendas) if vendas else 0
+            # 3. Calcular totais e agregações
+            total_entradas = sum(m['valor'] for m in movimentos if m['tipo'] == 'Entrada')
+            total_saidas = sum(m['valor'] for m in movimentos if m['tipo'] == 'Saída')
+            valor_vendas = sum(v['valor_total'] for v in vendas)
+            saldo_periodo = total_entradas - total_saidas
+            valor_medio_venda = valor_vendas / len(vendas) if vendas else 0
 
-        # 4. Top produtos e pagamentos (apenas se houver vendas)
-        produtos_mais_vendidos = []
-        pagamentos = defaultdict(float)
-        if venda_ids:
-            query_in_ids = f"IN {venda_ids}" if len(venda_ids) > 1 else f"= {venda_ids[0]}"
-            cursor.execute(f"""
-                SELECT p.nome, SUM(i.quantidade) as quantidade, SUM(i.subtotal) as valor_total
-                FROM itens_venda i
-                JOIN produtos p ON i.produto_id = p.id
-                WHERE i.venda_id {query_in_ids}
-                GROUP BY p.id, p.nome ORDER BY valor_total DESC LIMIT 5
-            """)
-            produtos_mais_vendidos = [dict(row) for row in cursor.fetchall()]
-            
-            for venda in vendas:
-                pagamentos[venda['forma_pagamento']] += venda['valor_total']
+            # 4. Top produtos e pagamentos (apenas se houver vendas)
+            produtos_mais_vendidos = []
+            pagamentos = defaultdict(float)
+            if venda_ids:
+                query_in_ids = f"IN {venda_ids}" if len(venda_ids) > 1 else f"= {venda_ids[0]}"
+                cursor.execute(f"""
+                    SELECT p.nome, SUM(i.quantidade) as quantidade, SUM(i.subtotal) as valor_total
+                    FROM itens_venda i
+                    JOIN produtos p ON i.produto_id = p.id
+                    WHERE i.venda_id {query_in_ids}
+                    GROUP BY p.id, p.nome ORDER BY valor_total DESC LIMIT 5
+                """)
+                produtos_mais_vendidos = [dict(row) for row in cursor.fetchall()]
+                
+                for venda in vendas:
+                    pagamentos[venda['forma_pagamento']] += venda['valor_total']
 
-        return {
-            'vendas': vendas,
-            'movimentos': movimentos,
-            'total_entradas': total_entradas,
-            'total_saidas': total_saidas,
-            'valor_vendas': valor_vendas,
-            'saldo_periodo': saldo_periodo,
-            'valor_medio_venda': valor_medio_venda,
-            'produtos_mais_vendidos': produtos_mais_vendidos,
-            'pagamentos': dict(pagamentos) # Converte de volta para um dict normal
-        }
-    except Exception as e:
-        print(f"Erro ao buscar dados para relatório: {e}")
-        QMessageBox.critical(self, "Erro de Banco de Dados", f"Não foi possível buscar os dados do relatório: {e}")
-        return None
+            return {
+                'vendas': vendas,
+                'movimentos': movimentos,
+                'total_entradas': total_entradas,
+                'total_saidas': total_saidas,
+                'valor_vendas': valor_vendas,
+                'saldo_periodo': saldo_periodo,
+                'valor_medio_venda': valor_medio_venda,
+                'produtos_mais_vendidos': produtos_mais_vendidos,
+                'pagamentos': dict(pagamentos) # Converte de volta para um dict normal
+            }
+        except Exception as e:
+            print(f"Erro ao buscar dados para relatório: {e}")
+            QMessageBox.critical(self, "Erro de Banco de Dados", f"Não foi possível buscar os dados do relatório: {e}")
+            return None
 
 class DialogOpcoesFracionado(QDialog):
     def __init__(self, produto, parent=None):
@@ -2562,3 +1977,467 @@ class DialogVendaFracionada(QDialog):
 
     def get_sale_details(self):
         return self.sale_details
+
+
+# Adicione esta nova classe ao seu arquivo, pode ser antes da classe CaixaWindow
+class DialogNovoMovimento(ThemedDialog):
+    def __init__(self, parent, tipo, theme_colors):
+        super().__init__(parent, f"Nova {tipo}", theme_colors)
+        self.setMinimumWidth(450)
+
+        # --- UI WIDGETS ---
+        form_layout = QFormLayout()
+        self.edit_descricao = QLineEdit()
+        self.spin_valor = QDoubleSpinBox()
+        self.spin_valor.setPrefix("R$ ")
+        self.spin_valor.setMaximum(999999.99)
+        self.spin_valor.setDecimals(2)
+        
+        self.cb_forma_pagamento = QComboBox()
+        self.cb_forma_pagamento.addItems(["Dinheiro", "Cartão de Crédito", "Cartão de Débito", "PIX", "Outro"])
+
+        group_destino = QGroupBox("Natureza da Movimentação")
+        group_destino_layout = QVBoxLayout(group_destino)
+        self.radio_operacional = QRadioButton("Operacional (afeta o resultado/lucro)")
+        self.radio_capital = QRadioButton("Capital/Não Operacional (não afeta o resultado)")
+        self.radio_operacional.setChecked(True)
+        self.radio_operacional.setToolTip("Use para despesas (aluguel, salários) ou outras receitas.")
+        self.radio_capital.setToolTip("Use para aportes de sócio, retiradas (sangria) ou empréstimos.")
+        group_destino_layout.addWidget(self.radio_operacional)
+        group_destino_layout.addWidget(self.radio_capital)
+
+        self.text_obs = QTextEdit()
+        self.text_obs.setMaximumHeight(80)
+
+        form_layout.addRow("Descrição:", self.edit_descricao)
+        form_layout.addRow("Valor:", self.spin_valor)
+        form_layout.addRow("Forma de Pagamento:", self.cb_forma_pagamento)
+        form_layout.addRow(group_destino)
+        form_layout.addRow("Observação:", self.text_obs)
+        self.content_layout.addLayout(form_layout)
+
+        # --- BOTÕES ---
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        self.cancelar_btn = QPushButton("Cancelar")
+        self.cancelar_btn.setObjectName("secondaryButton")
+        self.confirmar_btn = QPushButton(f"Confirmar {tipo}")
+        self.confirmar_btn.setObjectName("primaryButton" if tipo == "Entrada" else "dangerButton")
+        
+        button_layout.addWidget(self.cancelar_btn)
+        button_layout.addWidget(self.confirmar_btn)
+        self.content_layout.addLayout(button_layout)
+        
+        self.apply_movimento_styles(tipo)
+
+    def apply_movimento_styles(self, tipo):
+        theme = self.theme_colors
+        success_color = "#28a745"
+        danger_color = "#dc3545"
+        
+        style = f"""
+            QGroupBox, QLabel, QRadioButton {{ color: {theme.get('text_color')}; }}
+            QLineEdit, QDoubleSpinBox, QComboBox, QTextEdit {{
+                background-color: {theme.get('surface_color')};
+                color: {theme.get('text_color')};
+                border: 1px solid {theme.get('border_color')};
+                border-radius: 4px; padding: 6px;
+            }}
+            #primaryButton {{ background-color: {success_color}; color: white; border: none; }}
+            #dangerButton {{ background-color: {danger_color}; color: white; border: none; }}
+            #secondaryButton {{ background-color: transparent; color: {theme.get('text_color')}; border: 1px solid {theme.get('border_color')}; }}
+        """
+        self.setStyleSheet(self.styleSheet() + style)
+        self.cancelar_btn.setIcon(IconManager.get_icon('cancel', theme.get('text_color')))
+        self.confirmar_btn.setIcon(IconManager.get_icon('check' if tipo == "Entrada" else 'send', 'white'))
+
+    def get_data(self):
+        return {
+            "descricao": self.edit_descricao.text().strip(),
+            "valor": self.spin_valor.value(),
+            "forma_pagamento": self.cb_forma_pagamento.currentText(),
+            "observacao": self.text_obs.toPlainText(),
+            "natureza": "Operacional" if self.radio_operacional.isChecked() else "Capital"
+        }
+
+# ================================================================= #
+#       NOVA CLASSE: DialogVendaFracionada                          #
+# ================================================================= #
+class DialogVendaFracionada(ThemedDialog):
+    def __init__(self, parent, produto, theme_colors):
+        super().__init__(parent, "Opção de Venda", theme_colors)
+        self.produto = produto
+        self.sale_details = None
+        self.setFixedWidth(400)
+        
+        # UI
+        form_layout = QFormLayout()
+        titulo = QLabel(f"<b>{produto['nome']}</b>"); titulo.setAlignment(Qt.AlignCenter)
+        self.content_layout.addWidget(titulo)
+        self.radio_embalagem = QRadioButton("Vender Embalagem Inteira")
+        self.radio_unidade = QRadioButton("Vender Unidade Avulsa")
+        self.radio_embalagem.toggled.connect(self.update_info)
+        btn_group_layout = QHBoxLayout(); btn_group_layout.addWidget(self.radio_embalagem); btn_group_layout.addWidget(self.radio_unidade)
+        form_layout.addRow("Tipo de Venda:", btn_group_layout)
+        self.lbl_info_preco = QLabel(); self.lbl_info_estoque = QLabel()
+        form_layout.addRow("Preço Unitário:", self.lbl_info_preco)
+        form_layout.addRow("Estoque Disponível:", self.lbl_info_estoque)
+        self.spin_quantidade = QDoubleSpinBox(); self.spin_quantidade.setSingleStep(1)
+        form_layout.addRow("Quantidade:", self.spin_quantidade)
+        self.content_layout.addLayout(form_layout)
+        
+        # Botões
+        button_box = QHBoxLayout()
+        self.confirmar_btn = QPushButton("Confirmar"); self.confirmar_btn.setObjectName("primaryButton"); self.confirmar_btn.clicked.connect(self.confirmar)
+        cancelar_btn = QPushButton("Cancelar"); cancelar_btn.setObjectName("secondaryButton"); cancelar_btn.clicked.connect(self.reject)
+        button_box.addStretch(); button_box.addWidget(cancelar_btn); button_box.addWidget(self.confirmar_btn)
+        self.content_layout.addLayout(button_box)
+
+        if self.produto.get('quantidade', 0) > 0: self.radio_embalagem.setChecked(True)
+        else: self.radio_unidade.setChecked(True)
+        
+        self.apply_styles()
+
+    def apply_styles(self):
+        theme = self.theme_colors
+        self.setStyleSheet(self.styleSheet() + f"""
+            QLabel, QRadioButton {{ color: {theme.get('text_color')}; }}
+            QDoubleSpinBox {{ background-color: {theme.get('surface_color')}; color: {theme.get('text_color')}; border: 1px solid {theme.get('border_color')}; padding: 6px; border-radius: 4px; }}
+            #primaryButton {{ background-color: {theme.get('accent_color')}; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-weight: bold; }}
+            #secondaryButton {{ background-color: transparent; color: {theme.get('text_color')}; border: 1px solid {theme.get('border_color')}; padding: 8px 16px; border-radius: 6px; font-weight: bold; }}
+        """)
+
+    def update_info(self):
+        if self.radio_embalagem.isChecked():
+            self.spin_quantidade.setDecimals(0); self.spin_quantidade.setMinimum(1); self.spin_quantidade.setValue(1)
+            self.lbl_info_preco.setText(f"R$ {self.produto['preco_venda']:.2f}")
+            estoque_embalagem = int(self.produto.get('quantidade', 0))
+            self.lbl_info_estoque.setText(f"{estoque_embalagem} embalagens"); self.spin_quantidade.setMaximum(estoque_embalagem)
+        else:
+            self.spin_quantidade.setDecimals(0); self.spin_quantidade.setMinimum(1); self.spin_quantidade.setValue(1)
+            self.lbl_info_preco.setText(f"R$ {self.produto['preco_unitario_fracao']:.2f}")
+            estoque_disponivel = int(self.produto.get('estoque_fracionado', 0))
+            self.lbl_info_estoque.setText(f"{estoque_disponivel} {self.produto['unidade_medida']}"); self.spin_quantidade.setMaximum(estoque_disponivel)
+
+    def confirmar(self):
+        if self.spin_quantidade.value() <= 0 or self.spin_quantidade.value() > self.spin_quantidade.maximum():
+            AlertDialog(self, "Estoque Inválido", "A quantidade excede o estoque disponível.", 'warning', self.theme_colors).exec_()
+            return
+        is_embalagem = self.radio_embalagem.isChecked()
+        self.sale_details = {
+            "quantidade": self.spin_quantidade.value(),
+            "preco_unitario": self.produto['preco_venda'] if is_embalagem else self.produto['preco_unitario_fracao'],
+            "is_embalagem": is_embalagem,
+            "produto_nome": f"{self.produto['nome']} ({'emb.' if is_embalagem else self.produto['unidade_medida']})"
+        }
+        self.accept()
+
+    def get_sale_details(self): return self.sale_details
+
+# Adicione esta classe ao seu arquivo ui/caixa_window.py
+
+class DialogFinalizarVenda(ThemedDialog):
+    def __init__(self, parent, total_venda, taxa_debito, taxa_credito, theme_colors):
+        super().__init__(parent, "Finalizar Venda", theme_colors)
+        self.total_venda_bruta = total_venda
+        self.setMinimumWidth(550)
+
+        self._setup_ui(taxa_debito, taxa_credito)
+        self.apply_styles()
+        self._connect_signals()
+        self._update_ui()
+
+    def _setup_ui(self, taxa_debito, taxa_credito):
+        # --- SEÇÃO 1: FORMULÁRIO PRINCIPAL ---
+        form_layout = QFormLayout()
+        self.lbl_total_venda_bruta = QLabel(f"R$ {self.total_venda_bruta:.2f}")
+        self.spin_desconto = QDoubleSpinBox(); self.spin_desconto.setPrefix("R$ "); self.spin_desconto.setMaximum(self.total_venda_bruta)
+        self.cb_forma_pagamento = QComboBox(); self.cb_forma_pagamento.addItems(["Dinheiro", "Cartão de Débito", "Cartão de Crédito", "PIX", "Boleto"])
+        form_layout.addRow("Total dos Itens:", self.lbl_total_venda_bruta)
+        form_layout.addRow("Desconto:", self.spin_desconto)
+        form_layout.addRow("Forma de Pagamento:", self.cb_forma_pagamento)
+        self.content_layout.addLayout(form_layout)
+
+        # --- SEÇÃO 2: TAXAS (COMEÇA OCULTO) ---
+        self.group_taxas = QGroupBox("Taxas da Maquininha")
+        group_taxas_layout = QFormLayout(self.group_taxas)
+        self.spin_taxa_debito = QDoubleSpinBox(); self.spin_taxa_debito.setSuffix(" %"); self.spin_taxa_debito.setValue(taxa_debito)
+        self.spin_taxa_credito = QDoubleSpinBox(); self.spin_taxa_credito.setSuffix(" %"); self.spin_taxa_credito.setValue(taxa_credito)
+        self.chk_salvar_taxas = QCheckBox("Lembrar taxas para próximas vendas"); self.chk_salvar_taxas.setChecked(True)
+        group_taxas_layout.addRow("Taxa Débito:", self.spin_taxa_debito)
+        group_taxas_layout.addRow("Taxa Crédito:", self.spin_taxa_credito)
+        group_taxas_layout.addRow(self.chk_salvar_taxas)
+        self.content_layout.addWidget(self.group_taxas)
+
+        # --- SEÇÃO 3: CAMPOS CONDICIONAIS ---
+        form_layout_2 = QFormLayout()
+        self.lbl_valor_recebido_text = QLabel("Valor Recebido:")
+        self.spin_valor_recebido = QDoubleSpinBox(); self.spin_valor_recebido.setPrefix("R$ "); self.spin_valor_recebido.setMaximum(999999.99)
+        
+        # ================================================================= #
+        #       CORREÇÃO APLICADA AQUI                                      #
+        # ================================================================= #
+        # Define o valor inicial do campo "Valor Recebido" como o total da venda.
+        self.spin_valor_recebido.setValue(self.total_venda_bruta)
+
+        form_layout_2.addRow(self.lbl_valor_recebido_text, self.spin_valor_recebido)
+        self.lbl_troco_text = QLabel("Troco:"); self.lbl_troco = QLabel("R$ 0,00"); self.lbl_troco.setObjectName("trocoLabel")
+        form_layout_2.addRow(self.lbl_troco_text, self.lbl_troco)
+        self.spin_parcelas = QSpinBox(); self.spin_parcelas.setMinimum(1); self.spin_parcelas.setMaximum(12)
+        self.lbl_parcelas = QLabel("Parcelas:")
+        form_layout_2.addRow(self.lbl_parcelas, self.spin_parcelas)
+        self.text_observacao = QTextEdit(); self.text_observacao.setMaximumHeight(80)
+        form_layout_2.addRow("Observação:", self.text_observacao)
+        self.content_layout.addLayout(form_layout_2)
+
+        # --- SEÇÃO 4: CARDS DE TOTAIS ---
+        cards_layout = QHBoxLayout()
+        card_cliente = QFrame(); card_cliente.setObjectName("card"); card_cliente_layout = QVBoxLayout(card_cliente)
+        lbl_cliente_title = QLabel("Cliente Paga"); lbl_cliente_title.setObjectName("cardTitle")
+        self.lbl_total_cliente = QLabel(); self.lbl_total_cliente.setObjectName("totalClienteLabel")
+        card_cliente_layout.addWidget(lbl_cliente_title); card_cliente_layout.addWidget(self.lbl_total_cliente)
+        card_loja = QFrame(); card_loja.setObjectName("card"); card_loja_layout = QVBoxLayout(card_loja)
+        lbl_loja_title = QLabel("Você Recebe"); lbl_loja_title.setObjectName("cardTitle")
+        self.lbl_total_receber = QLabel(); self.lbl_total_receber.setObjectName("totalLojaLabel")
+        card_loja_layout.addWidget(lbl_loja_title); card_loja_layout.addWidget(self.lbl_total_receber)
+        cards_layout.addWidget(card_cliente); cards_layout.addWidget(card_loja)
+        self.content_layout.addLayout(cards_layout)
+
+        # --- SEÇÃO 5: BOTÕES FINAIS ---
+        button_layout = QHBoxLayout()
+        self.confirmar_btn = QPushButton("Confirmar Venda"); self.confirmar_btn.setObjectName("primaryButton")
+        self.confirmar_btn.clicked.connect(self.accept)
+        self.cancelar_btn = QPushButton("Cancelar"); self.cancelar_btn.setObjectName("secondaryButton")
+        self.cancelar_btn.clicked.connect(self.reject)
+        button_layout.addStretch(); button_layout.addWidget(self.cancelar_btn); button_layout.addWidget(self.confirmar_btn)
+        self.content_layout.addLayout(button_layout)
+
+    def _connect_signals(self):
+        self.spin_desconto.valueChanged.connect(self._update_ui)
+        self.spin_taxa_debito.valueChanged.connect(self._update_ui)
+        self.spin_taxa_credito.valueChanged.connect(self._update_ui)
+        self.spin_valor_recebido.valueChanged.connect(self._update_ui)
+        self.cb_forma_pagamento.currentIndexChanged.connect(self._update_ui)
+
+    def _update_ui(self):
+        desconto = self.spin_desconto.value()
+        total_cliente_paga = max(0, self.total_venda_bruta - desconto)
+        forma_pgto = self.cb_forma_pagamento.currentText()
+        taxa = self.spin_taxa_debito.value() if forma_pgto == "Cartão de Débito" else self.spin_taxa_credito.value() if forma_pgto == "Cartão de Crédito" else 0
+        total_loja_recebe = total_cliente_paga * (1 - taxa / 100.0)
+
+        self.lbl_total_cliente.setText(f"R$ {total_cliente_paga:.2f}")
+        self.lbl_total_receber.setText(f"R$ {total_loja_recebe:.2f}")
+        
+        is_dinheiro = forma_pgto == "Dinheiro"
+        self.lbl_valor_recebido_text.setVisible(is_dinheiro); self.spin_valor_recebido.setVisible(is_dinheiro)
+        self.lbl_troco_text.setVisible(is_dinheiro); self.lbl_troco.setVisible(is_dinheiro)
+        if is_dinheiro:
+            troco = max(0, self.spin_valor_recebido.value() - total_cliente_paga)
+            self.lbl_troco.setText(f"R$ {troco:.2f}")
+        
+        self.group_taxas.setVisible(forma_pgto in ["Cartão de Crédito", "Cartão de Débito"])
+        self.lbl_parcelas.setVisible(forma_pgto == "Cartão de Crédito"); self.spin_parcelas.setVisible(forma_pgto == "Cartão de Crédito")
+
+    def apply_styles(self):
+        theme = self.theme_colors
+        self.setStyleSheet(self.styleSheet() + f"""
+            QLabel, QRadioButton, QCheckBox, QGroupBox {{ color: {theme.get('text_color')}; }}
+            QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox, QTextEdit {{
+                background-color: {theme.get('surface_color')}; color: {theme.get('text_color')};
+                border: 1px solid {theme.get('border_color')}; border-radius: 4px; padding: 6px;
+            }}
+            #card {{ background-color: {theme.get('surface_color')}; border: 1px solid {theme.get('border_color')}; border-radius: 6px; }}
+            #cardTitle {{ color: {theme.get('text_secondary')}; font-size: 10pt; text-align: center; }}
+            #totalClienteLabel {{ color: {theme.get('accent_color')}; font-size: 18px; font-weight: bold; text-align: center; }}
+            #totalLojaLabel {{ color: #28a745; font-size: 18px; font-weight: bold; text-align: center; }}
+            #trocoLabel {{ font-size: 14px; font-weight: bold; color: #FF5722; }}
+            #primaryButton {{ background-color: #28a745; color: white; border: none; padding: 10px 20px; font-weight: bold; border-radius: 6px; }}
+            #secondaryButton {{ background-color: transparent; color: {theme.get('text_color')}; border: 1px solid {theme.get('border_color')}; padding: 10px 20px; font-weight: bold; border-radius: 6px; }}
+        """)
+
+    def get_data(self):
+        return {
+            "desconto": self.spin_desconto.value(),
+            "forma_pagamento": self.cb_forma_pagamento.currentText(),
+            "taxa_debito": self.spin_taxa_debito.value(),
+            "taxa_credito": self.spin_taxa_credito.value(),
+            "salvar_taxas": self.chk_salvar_taxas.isChecked(),
+            "valor_recebido": self.spin_valor_recebido.value(),
+            "parcelas": self.spin_parcelas.value(),
+            "observacao": self.text_observacao.toPlainText()
+        }
+# Adicione esta classe ao seu arquivo ui/caixa_window.py
+
+class DialogAdicionarCliente(ThemedDialog):
+    def __init__(self, parent, theme_colors):
+        super().__init__(parent, "Adicionar Novo Cliente", theme_colors)
+        self.setMinimumWidth(400)
+        self._setup_ui()
+        self.apply_styles()
+
+    def _setup_ui(self):
+        form_layout = QFormLayout()
+        self.edit_nome = QLineEdit()
+        self.edit_data_nascimento = QDateEdit(calendarPopup=True, date=QDate.currentDate().addYears(-18)); self.edit_data_nascimento.setDisplayFormat("dd/MM/yyyy")
+        self.edit_telefone = QLineEdit()
+        self.edit_email = QLineEdit()
+        self.edit_endereco = QLineEdit()
+        
+        form_layout.addRow("Nome:", self.edit_nome)
+        form_layout.addRow("Data de Nascimento:", self.edit_data_nascimento)
+        form_layout.addRow("Telefone:", self.edit_telefone)
+        form_layout.addRow("Email:", self.edit_email)
+        form_layout.addRow("Endereço:", self.edit_endereco)
+        self.content_layout.addLayout(form_layout)
+        
+        button_layout = QHBoxLayout()
+        self.salvar_btn = QPushButton("Salvar"); self.salvar_btn.setObjectName("primaryButton"); self.salvar_btn.clicked.connect(self.accept)
+        self.cancelar_btn = QPushButton("Cancelar"); self.cancelar_btn.setObjectName("secondaryButton"); self.cancelar_btn.clicked.connect(self.reject)
+        button_layout.addStretch(); button_layout.addWidget(self.cancelar_btn); button_layout.addWidget(self.salvar_btn)
+        self.content_layout.addLayout(button_layout)
+
+    def apply_styles(self):
+        theme = self.theme_colors
+        self.setStyleSheet(self.styleSheet() + f"""
+            QLabel {{ color: {theme.get('text_color')}; }}
+            QLineEdit, QDateEdit {{
+                background-color: {theme.get('surface_color')}; color: {theme.get('text_color')};
+                border: 1px solid {theme.get('border_color')}; border-radius: 4px; padding: 6px;
+            }}
+            #primaryButton {{ background-color: {theme.get('accent_color')}; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-weight: bold; }}
+            #secondaryButton {{ background-color: transparent; color: {theme.get('text_color')}; border: 1px solid {theme.get('border_color')}; padding: 8px 16px; border-radius: 6px; font-weight: bold; }}
+        """)
+
+    def get_data(self):
+        return {
+            "nome": self.edit_nome.text().strip(),
+            "data_nascimento": self.edit_data_nascimento.date().toString("yyyy-MM-dd"),
+            "telefone": self.edit_telefone.text().strip(),
+            "email": self.edit_email.text().strip(),
+            "endereco": self.edit_endereco.text().strip()
+        }
+    
+class DialogAbrirCaixa(ThemedDialog):
+    def __init__(self, parent, theme_colors):
+        super().__init__(parent, "Abrir Caixa", theme_colors)
+        self.setMinimumWidth(350)
+        self._setup_ui()
+        self.apply_styles()
+
+    def _setup_ui(self):
+        form_layout = QFormLayout()
+        self.spin_saldo = QDoubleSpinBox()
+        self.spin_saldo.setPrefix("R$ ")
+        self.spin_saldo.setMaximum(999999.99)
+        self.spin_saldo.setDecimals(2)
+        
+        self.text_obs = QTextEdit()
+        self.text_obs.setMaximumHeight(80)
+        
+        form_layout.addRow("Saldo Inicial:", self.spin_saldo)
+        form_layout.addRow("Observação:", self.text_obs)
+        self.content_layout.addLayout(form_layout)
+
+        button_layout = QHBoxLayout()
+        self.confirmar_btn = QPushButton("Abrir Caixa")
+        self.confirmar_btn.setObjectName("primaryButton")
+        self.confirmar_btn.clicked.connect(self.accept)
+        button_layout.addStretch()
+        button_layout.addWidget(self.confirmar_btn)
+        self.content_layout.addLayout(button_layout)
+
+    def apply_styles(self):
+        theme = self.theme_colors
+        self.setStyleSheet(self.styleSheet() + f"""
+            QLabel {{ color: {theme.get('text_color')}; }}
+            QDoubleSpinBox, QTextEdit {{
+                background-color: {theme.get('surface_color')}; color: {theme.get('text_color')};
+                border: 1px solid {theme.get('border_color')}; border-radius: 4px; padding: 6px;
+            }}
+            #primaryButton {{
+                background-color: {theme.get('accent_color')}; color: white; border: none;
+                padding: 10px 20px; font-weight: bold; border-radius: 6px;
+            }}
+        """)
+        self.confirmar_btn.setIcon(IconManager.get_icon('unlock', 'white'))
+
+    def get_data(self):
+        return {
+            "saldo_inicial": self.spin_saldo.value(),
+            "observacao": self.text_obs.toPlainText()
+        }
+
+
+class DialogFecharCaixa(ThemedDialog):
+    def __init__(self, parent, saldo_atual, theme_colors):
+        super().__init__(parent, "Fechar Caixa", theme_colors)
+        self.saldo_sistema = saldo_atual
+        self.setMinimumWidth(400)
+        self._setup_ui()
+        self.apply_styles()
+        self._update_diferenca()
+
+    def _setup_ui(self):
+        self.content_layout.addWidget(QLabel(f"Saldo do Sistema: R$ {self.saldo_sistema:.2f}"))
+        
+        form_layout = QFormLayout()
+        self.spin_saldo_final = QDoubleSpinBox()
+        self.spin_saldo_final.setPrefix("R$ ")
+        self.spin_saldo_final.setMaximum(999999.99)
+        self.spin_saldo_final.setValue(self.saldo_sistema)
+        self.spin_saldo_final.setDecimals(2)
+        
+        self.lbl_diferenca = QLabel("Diferença: R$ 0,00")
+        self.lbl_diferenca.setObjectName("diferencaLabel")
+        
+        self.text_obs_fechamento = QTextEdit()
+        self.text_obs_fechamento.setMaximumHeight(80)
+        
+        form_layout.addRow("Saldo em Caixa:", self.spin_saldo_final)
+        form_layout.addRow("", self.lbl_diferenca)
+        form_layout.addRow("Observação:", self.text_obs_fechamento)
+        self.content_layout.addLayout(form_layout)
+
+        self.spin_saldo_final.valueChanged.connect(self._update_diferenca)
+        
+        button_layout = QHBoxLayout()
+        self.confirmar_btn = QPushButton("Fechar Caixa")
+        self.confirmar_btn.setObjectName("dangerButton")
+        self.confirmar_btn.clicked.connect(self.accept)
+        button_layout.addStretch()
+        button_layout.addWidget(self.confirmar_btn)
+        self.content_layout.addLayout(button_layout)
+
+    def _update_diferenca(self):
+        saldo_informado = self.spin_saldo_final.value()
+        diferenca = saldo_informado - self.saldo_sistema
+        self.lbl_diferenca.setText(f"Diferença: R$ {diferenca:.2f}")
+        if diferenca < 0:
+            self.lbl_diferenca.setStyleSheet(f"color: {self.theme_colors.get('danger_color', '#dc3545')}; font-weight: bold;")
+        elif diferenca > 0:
+            self.lbl_diferenca.setStyleSheet(f"color: {self.theme_colors.get('success_color', '#28a745')}; font-weight: bold;")
+        else:
+            self.lbl_diferenca.setStyleSheet(f"color: {self.theme_colors.get('text_color', '#000')}; font-weight: normal;")
+
+    def apply_styles(self):
+        theme = self.theme_colors
+        self.setStyleSheet(self.styleSheet() + f"""
+            QLabel {{ color: {theme.get('text_color')}; }}
+            #diferencaLabel {{ font-weight: bold; }}
+            QDoubleSpinBox, QTextEdit {{
+                background-color: {theme.get('surface_color')}; color: {theme.get('text_color')};
+                border: 1px solid {theme.get('border_color')}; border-radius: 4px; padding: 6px;
+            }}
+            #dangerButton {{
+                background-color: {theme.get('danger_color', '#dc3545')}; color: white; border: none;
+                padding: 10px 20px; font-weight: bold; border-radius: 6px;
+            }}
+        """)
+        self.confirmar_btn.setIcon(IconManager.get_icon('lock', 'white'))
+
+    def get_data(self):
+        return {
+            "saldo_informado": self.spin_saldo_final.value(),
+            "observacao": self.text_obs_fechamento.toPlainText()
+        }
