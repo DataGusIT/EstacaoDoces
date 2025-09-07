@@ -245,16 +245,16 @@ class ThemedDialog(QDialog):
             self.move(event.globalPos() - self.drag_position)
             event.accept()
 
-class AdminWindow(ThemedDialog): # <--- MUDANÇA 1: Herda da nova classe
+class AdminWindow(ThemedDialog):
     logo_alterado = pyqtSignal()
 
-    def __init__(self, db_manager, usuario, theme_colors, parent=None):
-        # --- MUDANÇA 2: Passa os parâmetros para o construtor da classe base ---
+    def __init__(self, db_manager, usuario, settings, theme_colors, parent=None):
         super().__init__(parent, "Painel de Administração", theme_colors)
         
         self.db = db_manager
         self.usuario = usuario
-        self.local_settings = QSettings("SuaEmpresa", "SeuERP")
+        self.settings = settings  # <-- A LINHA CRUCIAL QUE FALTAVA
+        # self.local_settings = QSettings("SuaEmpresa", "SeuERP")
         
         if self.usuario.get('tipo') != 'admin':
             self.db.registrar_log('WARNING', self.usuario.get('login'), 'ACESSO_ADMIN', 'Tentativa de acesso não autorizado.')
@@ -553,29 +553,35 @@ class AdminWindow(ThemedDialog): # <--- MUDANÇA 1: Herda da nova classe
                 # Ação corrigida: Usa AlertDialog
                 AlertDialog(self, "Erro", msg, alert_type='error', theme_colors=self.theme_colors).exec_()
 
-    # ===================================================================
-    # ABA DE CONFIGURAÇÕES
+     # ===================================================================
+    # ABA DE CONFIGURAÇÕES (CORRIGIDA E FINAL)
     # ===================================================================
     def criar_tab_config(self):
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(10, 10, 10, 10)
-        form_layout = QFormLayout()
-
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setAlignment(Qt.AlignTop)
+        
+        group_produtos = QGroupBox("Configurações de Produtos e Estoque")
+        group_produtos_layout = QFormLayout(group_produtos)
+        
         self.margem_lucro_padrao = QDoubleSpinBox(suffix=" %")
         self.alerta_estoque_padrao = QSpinBox(suffix=" unidades")
         self.alerta_validade_dias = QSpinBox(suffix=" dias")
+        self.fator_reposicao_estoque = QSpinBox(prefix="+ ", suffix=" unidades")
+        self.fator_reposicao_estoque.setToolTip("Valor a ser somado ao estoque mínimo para a sugestão de compra no relatório.")
         
-        form_layout.addRow(QLabel("<b>Configurações de Produtos:</b>"), None)
-        form_layout.addRow("Margem de Lucro Padrão:", self.margem_lucro_padrao)
-        form_layout.addRow("Alerta de Estoque Baixo Padrão:", self.alerta_estoque_padrao)
-        form_layout.addRow("Alerta de Vencimento (antecedência):", self.alerta_validade_dias)
+        group_produtos_layout.addRow("Margem de Lucro Padrão:", self.margem_lucro_padrao)
+        group_produtos_layout.addRow("Alerta de Estoque Baixo Padrão:", self.alerta_estoque_padrao)
+        group_produtos_layout.addRow("Alerta de Vencimento (antecedência):", self.alerta_validade_dias)
+        group_produtos_layout.addRow("Fator de Reposição (Sugestão de Compra):", self.fator_reposicao_estoque)
 
+        layout.addWidget(group_produtos)
+        
         save_button = QPushButton(IconManager.get_icon('save', color='white'), " Salvar Configurações")
-        save_button.setObjectName("primaryButton") # Aplica o estilo de botão primário
+        save_button.setObjectName("primaryButton")
         save_button.clicked.connect(self.salvar_configuracoes)
 
-        layout.addLayout(form_layout)
         layout.addStretch()
         layout.addWidget(save_button, alignment=Qt.AlignRight)
 
@@ -586,15 +592,18 @@ class AdminWindow(ThemedDialog): # <--- MUDANÇA 1: Herda da nova classe
         self.margem_lucro_padrao.setValue(float(self.db.obter_configuracao('margem_lucro_padrao', 30.0)))
         self.alerta_estoque_padrao.setValue(int(self.db.obter_configuracao('alerta_estoque_padrao', 10)))
         self.alerta_validade_dias.setValue(int(self.db.obter_configuracao('alerta_validade_dias', 30)))
+        self.fator_reposicao_estoque.setValue(int(self.db.obter_configuracao('fator_reposicao_estoque', 5)))
         
     def salvar_configuracoes(self):
         try:
-            # ... (código para salvar configurações) ...
-            self.db.registrar_log('ADMIN', self.usuario.get('login'), 'SETTINGS_UPDATE', 'Configurações alteradas.')
-            # Ação corrigida: Usa AlertDialog
+            self.db.definir_configuracao('margem_lucro_padrao', self.margem_lucro_padrao.value())
+            self.db.definir_configuracao('alerta_estoque_padrao', self.alerta_estoque_padrao.value())
+            self.db.definir_configuracao('alerta_validade_dias', self.alerta_validade_dias.value())
+            self.db.definir_configuracao('fator_reposicao_estoque', self.fator_reposicao_estoque.value())
+            
+            self.db.registrar_log('ADMIN', self.usuario.get('login'), 'SETTINGS_UPDATE', 'Configurações gerais alteradas.')
             AlertDialog(self, "Sucesso", "Configurações salvas com sucesso!", alert_type='success', theme_colors=self.theme_colors).exec_()
         except Exception as e:
-            # Ação corrigida: Usa AlertDialog
             AlertDialog(self, "Erro", f"Erro ao salvar configurações: {str(e)}", alert_type='error', theme_colors=self.theme_colors).exec_()
 
 
@@ -663,8 +672,8 @@ class AdminWindow(ThemedDialog): # <--- MUDANÇA 1: Herda da nova classe
         except Exception as e:
             AlertDialog(self, "Erro", f"Erro ao carregar logs: {str(e)}", alert_type='error', theme_colors=self.theme_colors).exec_()
 
-     # ===================================================================
-    # NOVA ABA DE PERSONALIZAÇÃO
+      # ===================================================================
+    # ABA DE PERSONALIZAÇÃO (VERSÃO ÚNICA E CORRETA)
     # ===================================================================
     def criar_tab_personalizacao(self):
         tab = QWidget()
@@ -673,86 +682,115 @@ class AdminWindow(ThemedDialog): # <--- MUDANÇA 1: Herda da nova classe
         layout.setSpacing(15)
         layout.setAlignment(Qt.AlignTop)
 
-        # Grupo para a logo
-        logo_group = QGroupBox("Logo da Empresa")
-        logo_group.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        # Bloco 1: Grupo para a logo
+        logo_group = QGroupBox("Logo da Empresa para Relatórios")
         logo_layout = QVBoxLayout(logo_group)
 
-        # Label para mostrar a pré-visualização da logo
         self.logo_preview_label = QLabel("A logo será exibida aqui.")
         self.logo_preview_label.setAlignment(Qt.AlignCenter)
         self.logo_preview_label.setMinimumSize(300, 150)
         self.logo_preview_label.setObjectName("logoPreview")
         logo_layout.addWidget(self.logo_preview_label)
 
-        # Botões de ação
-        botoes_layout = QHBoxLayout()
+        botoes_logo_layout = QHBoxLayout()
         self.change_logo_button = QPushButton(IconManager.get_icon('edit', self.theme_colors['text_color']), " Alterar Logo")
         self.remove_logo_button = QPushButton(IconManager.get_icon('delete', self.theme_colors['text_color']), " Remover Logo")
-        
         self.change_logo_button.clicked.connect(self.alterar_logo)
         self.remove_logo_button.clicked.connect(self.remover_logo)
-
-        botoes_layout.addStretch()
-        botoes_layout.addWidget(self.change_logo_button)
-        botoes_layout.addWidget(self.remove_logo_button)
-        botoes_layout.addStretch()
-        logo_layout.addLayout(botoes_layout)
+        botoes_logo_layout.addStretch()
+        botoes_logo_layout.addWidget(self.change_logo_button)
+        botoes_logo_layout.addWidget(self.remove_logo_button)
+        botoes_logo_layout.addStretch()
+        logo_layout.addLayout(botoes_logo_layout)
         
-        layout.addWidget(logo_group)
+        # Bloco 2: Grupo de informações da empresa
+        info_group = QGroupBox("Informações da Empresa para Relatórios")
+        info_layout = QFormLayout(info_group)
+        
+        self.empresa_nome_input = QLineEdit()
+        self.empresa_endereco_input = QLineEdit()
+        self.empresa_telefone_input = QLineEdit()
+        self.empresa_email_input = QLineEdit()
+        self.empresa_cnpj_input = QLineEdit()
 
-        self.carregar_logo_atual() # Carrega a logo atual na pré-visualização
+        info_layout.addRow("Nome da Empresa:", self.empresa_nome_input)
+        info_layout.addRow("Endereço:", self.empresa_endereco_input)
+        info_layout.addRow("Telefone:", self.empresa_telefone_input)
+        info_layout.addRow("Email:", self.empresa_email_input)
+        info_layout.addRow("CNPJ:", self.empresa_cnpj_input)
+
+        self.save_info_button = QPushButton(IconManager.get_icon('save', 'white'), " Salvar Informações")
+        self.save_info_button.setObjectName("primaryButton")
+        self.save_info_button.clicked.connect(self.salvar_informacoes_empresa)
+        info_layout.addRow("", self.save_info_button)
+
+        layout.addWidget(logo_group)
+        layout.addWidget(info_group)
+
+        self.carregar_logo_atual()
+        self.carregar_informacoes_empresa()
         return tab
 
+    def carregar_informacoes_empresa(self):
+        info = self.db.obter_informacoes_empresa()
+        self.empresa_nome_input.setText(info.get('empresa_nome', ''))
+        self.empresa_endereco_input.setText(info.get('empresa_endereco', ''))
+        self.empresa_telefone_input.setText(info.get('empresa_telefone', ''))
+        self.empresa_email_input.setText(info.get('empresa_email', ''))
+        self.empresa_cnpj_input.setText(info.get('empresa_cnpj', ''))
+
+    def salvar_informacoes_empresa(self):
+        try:
+            self.db.definir_configuracao('empresa_nome', self.empresa_nome_input.text())
+            self.db.definir_configuracao('empresa_endereco', self.empresa_endereco_input.text())
+            self.db.definir_configuracao('empresa_telefone', self.empresa_telefone_input.text())
+            self.db.definir_configuracao('empresa_email', self.empresa_email_input.text())
+            self.db.definir_configuracao('empresa_cnpj', self.empresa_cnpj_input.text())
+            
+            self.db.registrar_log('ADMIN', self.usuario.get('login'), 'COMPANY_INFO_UPDATE', 'Informações da empresa alteradas.')
+            AlertDialog(self, "Sucesso", "Informações da empresa salvas com sucesso!", alert_type='success', theme_colors=self.theme_colors).exec_()
+        except Exception as e:
+            AlertDialog(self, "Erro", f"Erro ao salvar informações: {str(e)}", alert_type='error', theme_colors=self.theme_colors).exec_()
+
     def carregar_logo_atual(self):
-        """Carrega a logo (personalizada ou padrão) no widget de pré-visualização."""
-        # CORREÇÃO: Usar self.local_settings.value()
-        logo_path = self.local_settings.value("custom_logo_path", "")
+        logo_path = self.settings.get_value("custom_logo_path", "")
         
         if not logo_path or not os.path.exists(logo_path):
-            logo_path = "assets/img/GestorX (2).png" 
+            logo_path = "assets/img/Logo2.png" 
         
         pixmap = QPixmap(logo_path)
         self.logo_preview_label.setPixmap(pixmap.scaled(300, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
     def alterar_logo(self):
-        """Abre um diálogo para o usuário selecionar e salvar uma nova logo."""
         caminho_origem, _ = QFileDialog.getOpenFileName(self, "Selecionar nova logo", "", "Imagens (*.png *.jpg *.jpeg)")
         
         if caminho_origem:
             try:
-                # ... (lógica de cópia do arquivo como estava) ...
                 pasta_destino = "assets/custom"
                 os.makedirs(pasta_destino, exist_ok=True)
                 extensao = os.path.splitext(caminho_origem)[1]
                 caminho_destino = os.path.join(pasta_destino, f"logo_personalizado{extensao}")
                 shutil.copy(caminho_origem, caminho_destino)
                 
-                # CORREÇÃO: Usar self.local_settings.setValue()
-                self.local_settings.setValue("custom_logo_path", caminho_destino)
+                self.settings.set_value("custom_logo_path", caminho_destino)
                 
-                # Ação corrigida: Usa AlertDialog
                 AlertDialog(self, "Sucesso", "Logo alterada com sucesso!", alert_type='success', theme_colors=self.theme_colors).exec_()
                 self.carregar_logo_atual()
                 self.logo_alterado.emit()
             except Exception as e:
-                # Ação corrigida: Usa AlertDialog
                 AlertDialog(self, "Erro", f"Não foi possível salvar a nova logo: {e}", alert_type='error', theme_colors=self.theme_colors).exec_()
 
     def remover_logo(self):
-        if not self.local_settings.value("custom_logo_path", ""):
-            # Ação corrigida: Usa AlertDialog
+        if not self.settings.get_value("custom_logo_path", ""):
             AlertDialog(self, "Aviso", "Nenhuma logo personalizada está em uso.", alert_type='info', theme_colors=self.theme_colors).exec_()
             return
 
-        # Ação corrigida: Usa AlertDialog
         dialog = AlertDialog(self, "Confirmar Remoção",
                              "Deseja remover a logo personalizada e voltar para a padrão?",
                              alert_type='question', buttons=QMessageBox.Yes | QMessageBox.No, theme_colors=self.theme_colors)
         
         if dialog.exec_() == QMessageBox.Yes:
-            self.local_settings.remove("custom_logo_path")
-            # Ação corrigida: Usa AlertDialog
+            self.settings.remove("custom_logo_path")
             AlertDialog(self, "Sucesso", "Logo personalizada removida.", alert_type='success', theme_colors=self.theme_colors).exec_()
             self.carregar_logo_atual()
             self.logo_alterado.emit()

@@ -28,6 +28,12 @@ class IconManager:
         'atualizar': 'fa5s.sync-alt',
         'arquivo': 'fa5s.file-alt',
         'ajuda': 'fa5s.question-circle',
+        'notification': 'fa5s.bell', 
+        'search': 'fa5s.search', # <-- Garanta que esta linha exista
+        'produto': 'fa5s.box-open', # Ícone para resultados de produto
+        'cliente': 'fa5s.user',     # Ícone para resultados de cliente
+        'fornecedor': 'fa5s.truck', # Ícone para resultados de fornecedor
+        'promocao': 'fa5s.tag',     # Ícone para resultados de promoção
 
         # === CONTROLES DE JANELA ===
         'minimizar': 'fa5.window-minimize',
@@ -66,6 +72,7 @@ class IconManager:
         'lock': 'fa5s.lock',
         'unlock': 'fa5s.unlock',
         'login': 'fa5s.sign-in-alt',
+        'profile_type': 'fa5s.id-badge', # <<< NOVO ÍCONE ADICIONADO
         
         # === PAGINAÇÃO E SETAS ===
         'angle-left': 'fa5s.angle-left',

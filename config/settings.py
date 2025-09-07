@@ -1,10 +1,53 @@
+
 from PyQt5.QtCore import QSettings
 from PyQt5.QtGui import QColor, QPalette
 from PyQt5.QtWidgets import QApplication
 
 class Settings:
     def __init__(self):
-        self.settings = QSettings("SistemaEstoque", "Config")
+        # O nome da sua empresa e do app para salvar as configurações
+        self.settings = QSettings("SuaEmpresa", "SeuERP")
+
+    # ===================================================================
+    #       INÍCIO DA CORREÇÃO: MÉTODOS GENÉRICOS ADICIONADOS
+    # ===================================================================
+    
+     # ===================================================================
+    #       INÍCIO DA CORREÇÃO: ADICIONAR ESTE MÉTODO
+    # ===================================================================
+    def get_value(self, key, default_value=None):
+        """
+        Método genérico para buscar qualquer configuração.
+        É um atalho para o método .value() do QSettings.
+        """
+        # A lógica aqui é garantir que o tipo do valor padrão seja usado na conversão,
+        # se fornecido. Isso evita problemas com boolianos e inteiros.
+        if isinstance(default_value, bool):
+            return self.settings.value(key, default_value, type=bool)
+        if isinstance(default_value, int):
+            return self.settings.value(key, default_value, type=int)
+        return self.settings.value(key, default_value)
+    # ===================================================================
+    #       FIM DA CORREÇÃO
+    # ===================================================================
+
+    def set_value(self, key, value):
+        """
+        Método genérico para salvar qualquer configuração.
+        É um atalho para o método .setValue() do QSettings.
+        """
+        self.settings.setValue(key, value)
+
+    def remove(self, key):
+        """
+        Método genérico para remover uma configuração.
+        É um atalho para o método .remove() do QSettings.
+        """
+        self.settings.remove(key)
+
+    # ===================================================================
+    #       FIM DA CORREÇÃO
+    # ===================================================================
     
     def get_theme(self):
         """Retorna o tema atual (claro/escuro)."""

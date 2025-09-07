@@ -12,6 +12,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
+from reportlab.platypus import Image 
 from collections import defaultdict
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
 import csv
@@ -251,12 +252,20 @@ class ThemedProgressDialog(QDialog):
 # ================================================================= #
 # Substitua a sua classe CsvImportWorker inteira por esta
 
+# ================================================================= #
+#       CLASSE CSV IMPORT WORKER - CORREÇÃO DE DELIMITADOR          #
+# ================================================================= #
+# Substitua a sua classe CsvImportWorker inteira por esta versão
+
+# ================================================================= #
+#       CLASSE CSV IMPORT WORKER - CORREÇÃO FINAL DE DUPLICATAS     #
+# ================================================================= #
+# Substitua a sua classe CsvImportWorker inteira por esta versão
+
 class CsvImportWorker(QThread):
-    """
-    Executa a importação de CSV em uma thread para não congelar a UI.
-    """
     progress = pyqtSignal(int)
-    finished = pyqtSignal(int, int, list)
+    # Adicionamos 'atualizados' ao sinal de conclusão
+    finished = pyqtSignal(int, int, int, list) # importados, atualizados, erros, detalhes
 
     def __init__(self, db_path, file_path):
         super().__init__()
@@ -264,122 +273,139 @@ class CsvImportWorker(QThread):
         self.file_path = file_path
         self.local_db = None
 
-    def run(self):
-        produtos_importados = 0
-        produtos_erro = 0
-        erros_detalhes = []
-
+    # --- FUNÇÕES AUXILIARES (sem alteração) ---
+    def _extrair_preco(self, value_str, default=0.0):
         try:
-            self.local_db = DatabaseManager(self.db_path)
+            if isinstance(value_str, (int, float)): return float(value_str)
+            s = str(value_str).strip().replace("R$", "").strip()
+            if not s: return default
+            if ',' in s and '.' in s:
+                if s.rfind(',') > s.rfind('.'): s = s.replace('.', '').replace(',', '.')
+                else: s = s.replace(',', '')
+            else: s = s.replace(',', '.')
+            return float(s)
+        except (ValueError, TypeError): return default
+            
+    def _extrair_margem(self, value_str, default=0.0):
+        s = str(value_str).replace('%', '').strip()
+        return self._extrair_preco(s, default)
 
-            with open(self.file_path, 'r', encoding='utf-8') as f:
-                linhas = list(f)
-                total_linhas = max(1, len(linhas) - 1)
-
-            with open(self.file_path, 'r', encoding='utf-8') as csvfile:
-                reader = csv.DictReader(csvfile)
-                
-                self.local_db.begin_transaction() 
-
-                for i, row in enumerate(reader):
-                    try:
-                        if not row.get('nome', '').strip():
-                            raise ValueError("Nome do produto é obrigatório")
-
-                        is_fracionado = int(row.get('fracionado', '0') or 0)
-                        
-                        produto_data = {
-                            'codigo_barras': row.get('codigo_barras', '').strip(),
-                            'nome': row.get('nome', '').strip(),
-                            'descricao': row.get('descricao', ''),
-                            'quantidade': self._extrair_quantidade_do_estoque_detalhado(row.get('estoque_detalhado', '0')),
-                            'estoque_minimo': int(row.get('estoque_minimo', '0') or 0),
-                            'preco_compra': self._extrair_preco(row.get('preco_compra', '0')),
-                            'margem_lucro': self._extrair_margem(row.get('margem', '0')),
-                            'preco_venda': self._extrair_preco(row.get('preco_venda', '0')),
-                            'data_validade': self._formatar_data_validade(row.get('validade', '')),
-                            'localizacao': row.get('localizacao', '').strip() or None,
-                            'fornecedor_id': None,
-                            'categoria': row.get('categoria', '').strip() or None,
-                            'fracionado': is_fracionado,
-                            'unidade_medida': row.get('unidade_medida', 'unidade').strip() if is_fracionado else 'unidade',
-                            'qtd_por_embalagem': int(row.get('qtd_por_embalagem', '1') or 1) if is_fracionado else 1,
-                            'preco_unitario_fracao': self._extrair_preco(row.get('preco_unitario_fracao', '0')) if is_fracionado else 0.0,
-                            
-                            # --- A CORREÇÃO ESTÁ AQUI ---
-                            # Trocamos int() por float() para aceitar números decimais como 0.5
-                            'estoque_fracionado': float(row.get('estoque_fracionado', '0.0') or 0.0) if is_fracionado else 0.0
-                        }
-                        
-                        produto_existente = None
-                        if produto_data['codigo_barras']:
-                            produto_existente = self.local_db.buscar_produto_por_codigo_barras(produto_data['codigo_barras'])
-                        if not produto_existente:
-                            produto_existente = self.local_db.buscar_produto_por_nome_exato(produto_data['nome'])
-
-                        if produto_existente:
-                            self.local_db.atualizar_produto(produto_existente['id'], **produto_data)
-                        else:
-                            self.local_db.adicionar_produto(**produto_data)
-                        
-                        produtos_importados += 1
-                    except Exception as e:
-                        produtos_erro += 1
-                        erros_detalhes.append(f"Linha {i+2}: {row.get('nome', 'N/A')} - {str(e)}")
-                    
-                    self.progress.emit(int(((i + 1) / total_linhas) * 100))
-                
-                self.local_db.commit_transaction()
-
-        except Exception as e:
-            if self.local_db:
-                self.local_db.rollback_transaction()
-            erros_detalhes.append(f"Erro geral: {str(e)}")
-        finally:
-            if self.local_db:
-                self.local_db.fechar()
-
-        self.finished.emit(produtos_importados, produtos_erro, erros_detalhes)
-    
-    # Métodos auxiliares (sem alterações)
-    def _extrair_quantidade_do_estoque_detalhado(self, estoque_str):
+    def _parse_int(self, value_str, default=0):
         try:
-            if estoque_str.isdigit(): return int(estoque_str)
+            if isinstance(value_str, (int, float)): return int(value_str)
             import re
-            numeros = re.findall(r'\d+', estoque_str)
-            return int(numeros[0]) if numeros else 0
-        except: return 0
+            match = re.match(r'\d+', str(value_str).strip())
+            return int(match.group(0)) if match else default
+        except (ValueError, TypeError): return default
 
-    def _extrair_preco(self, preco_str):
+    def _formatar_codigo_barras(self, value_str):
         try:
-            return float(preco_str.replace('R$', '').replace(' ', '').replace(',', '.'))
-        except: return 0.0
+            s = str(value_str).strip()
+            if 'e' not in s.lower(): return s
+            s_corrigido = s.replace(',', '.')
+            numero_completo = int(float(s_corrigido))
+            return str(numero_completo)
+        except (ValueError, TypeError):
+            return str(value_str).strip()
 
-    def _extrair_margem(self, margem_str):
-        try:
-            return float(margem_str.replace('%', '').replace(' ', '').replace(',', '.'))
-        except: return 0.0
+    def _get_column_mapping(self, fieldnames):
+        POSSIBLE_MAPPINGS = { 'nome': ['nome', 'Nome', 'produto', 'Produto', 'Descrição do Produto'], 'codigo_barras': ['codigo_barras', 'Código de Barras', 'EAN', 'codigo'], 'descricao': ['descricao', 'Descrição'], 'quantidade': ['quantidade', 'Quantidade', 'estoque', 'Estoque', 'estoque_detalhado'], 'estoque_minimo': ['estoque_minimo', 'Estoque Mínimo', 'Estoque Minimo'], 'preco_compra': ['preco_compra', 'Preço de Compra', 'Preco de Compra', 'Custo'], 'margem_lucro': ['margem_lucro', 'margem', 'Margem', 'Margem de Lucro (%)'], 'preco_venda': ['preco_venda', 'Preço de Venda', 'Preco de Venda'], 'data_validade': ['data_validade', 'validade', 'Validade', 'Data de Validade'], 'localizacao': ['localizacao', 'Localização', 'Localizacao'], 'categoria': ['categoria', 'Categoria'], 'fracionado': ['fracionado', 'Fracionado'], 'unidade_medida': ['unidade_medida', 'Unidade de Medida'], 'qtd_por_embalagem': ['qtd_por_embalagem', 'Qtd por Embalagem', 'Quantidade por Embalagem', '_por_embalagem'], 'preco_unitario_fracao': ['preco_unitario_fracao', 'Preço Unitário Fração', 'Preco Unitario Fracao', '_unitario_fracao'], 'estoque_fracionado': ['estoque_fracionado', 'Estoque Fracionado'] }
+        header_map = {}
+        lower_fieldnames = {name.lower().strip(): name for name in fieldnames}
+        for internal_key, possible_names in POSSIBLE_MAPPINGS.items():
+            for name in possible_names:
+                if name.lower() in lower_fieldnames: header_map[internal_key] = lower_fieldnames[name.lower()]; break
+        if 'nome' not in header_map: raise ValueError("A coluna 'nome' do produto é obrigatória no CSV.")
+        return header_map
 
     def _formatar_data_validade(self, data_str):
-        if not data_str or not data_str.strip(): return None
+        if not data_str or not str(data_str).strip(): return None
         try:
+            data_str = str(data_str).strip()
             if '/' in data_str: return datetime.strptime(data_str, "%d/%m/%Y").strftime("%Y-%m-%d")
             return datetime.strptime(data_str, "%Y-%m-%d").strftime("%Y-%m-%d")
         except: return None
+
+    def run(self):
+        importados, atualizados, erros = 0, 0, 0
+        erros_detalhes = []
+        total_linhas = 0
+        try:
+            self.local_db = DatabaseManager(self.db_path)
+            
+            with open(self.file_path, 'r', encoding='utf-8-sig') as f:
+                sample_lines = [next(f, '') for _ in range(10)]
+                f.seek(0)
+                total_linhas = max(1, sum(1 for line in f) - 1)
+                sample = "".join(sample_lines)
+            try:
+                dialect = csv.Sniffer().sniff(sample, delimiters=',;')
+            except csv.Error:
+                header_line = sample.splitlines()[0] if sample.splitlines() else ""
+                if ';' in header_line:
+                    dialect = csv.excel; dialect.delimiter = ';'
+                else:
+                    dialect = csv.excel; dialect.delimiter = ','
+
+            with open(self.file_path, 'r', encoding='utf-8-sig') as csvfile:
+                reader = csv.DictReader(csvfile, dialect=dialect)
+                header_map = self._get_column_mapping(reader.fieldnames)
+                get_val = lambda row_data, key, default='': row_data.get(header_map.get(key), default)
+                
+                self.local_db.begin_transaction()
+                for i, row in enumerate(reader):
+                    try:
+                        nome_produto = get_val(row, 'nome').strip()
+                        if not nome_produto and not any(row.values()): continue
+                        if not nome_produto: raise ValueError("Nome do produto é obrigatório")
+                        
+                        produto_data = {
+                            'codigo_barras': self._formatar_codigo_barras(get_val(row, 'codigo_barras')), 'nome': nome_produto, 'descricao': get_val(row, 'descricao'), 'quantidade': self._parse_int(get_val(row, 'quantidade', '0')), 'estoque_minimo': self._parse_int(get_val(row, 'estoque_minimo', '0')), 'preco_compra': self._extrair_preco(get_val(row, 'preco_compra', '0')), 'margem_lucro': self._extrair_margem(get_val(row, 'margem_lucro', '0')), 'preco_venda': self._extrair_preco(get_val(row, 'preco_venda', '0')), 'data_validade': self._formatar_data_validade(get_val(row, 'data_validade', '')), 'localizacao': get_val(row, 'localizacao').strip() or None, 'fornecedor_id': None, 'categoria': get_val(row, 'categoria').strip() or None, 'fracionado': self._parse_int(get_val(row, 'fracionado', '0')), 'unidade_medida': get_val(row, 'unidade_medida', 'unidade').strip(), 'qtd_por_embalagem': self._parse_int(get_val(row, 'qtd_por_embalagem', '1'), 1), 'preco_unitario_fracao': self._extrair_preco(get_val(row, 'preco_unitario_fracao', '0')), 'estoque_fracionado': self._extrair_preco(get_val(row, 'estoque_fracionado', '0.0'))
+                        }
+
+                        produto_existente = None
+                        codigo_barras_atual = produto_data.get('codigo_barras')
+                        
+                        if codigo_barras_atual:
+                            produto_existente = self.local_db.buscar_produto_por_codigo_barras(codigo_barras_atual)
+
+                        if produto_existente:
+                            self.local_db.atualizar_produto(produto_existente['id'], **produto_data)
+                            atualizados += 1
+                        else:
+                            self.local_db.adicionar_produto(**produto_data)
+                            importados += 1
+                        
+                    except Exception as e:
+                        erros += 1
+                        erros_detalhes.append(f"Linha {i+2}: {get_val(row, 'nome', 'N/A')} - {str(e)}")
+                    
+                    if total_linhas > 0: self.progress.emit(int(((i + 1) / total_linhas) * 100))
+                
+                self.local_db.commit_transaction()
+        except Exception as e:
+            if self.local_db: self.local_db.rollback_transaction()
+            erros_detalhes.append(f"Erro crítico na importação: {str(e)}")
+        finally:
+            if self.local_db: self.local_db.fechar()
+        
+        self.finished.emit(importados, atualizados, erros, erros_detalhes)
     
 # Substitua a classe EstoqueWindow inteira em seu arquivo.
 class EstoqueWindow(QWidget):
     dados_produtos_alterados = pyqtSignal()
-    def __init__(self, db, theme_colors, logo_pixmap=None): 
+    def __init__(self, db, theme_colors, settings, logo_pixmap=None):
         super().__init__()
         self.db = db
         self.theme_colors = theme_colors
+        self.settings = settings  # Armazena o objeto de configurações corretamente
         self.logo_pixmap = logo_pixmap
         self.pagina_atual = 1
         self.itens_por_pagina = 100 
         self.total_paginas = 1
 
-        self.logo_path = "assets/img/GestorX (2).png"
+        # O resto do seu método __init__ continua igual...
+        self.logo_path = "assets/img/Logo2.png"
         self.company_info = {
             "nome": "Estação Doces",
             "endereco": "Rua do Comércio, 123 - Centro",
@@ -973,52 +999,78 @@ class EstoqueWindow(QWidget):
         ]))
         return kpi_table
 
-    def _gerar_pdf_com_template(self, file_path, report_title, elementos):
+    # Em estoque_window.py E caixa_window.py
+    # SUBSTITUA este método inteiro em AMBOS os arquivos
+
+    def _gerar_pdf_com_template(self, file_path, report_title, elementos, company_info, custom_logo_path):
         try:
-            left_margin = 2*cm
-            right_margin = 2*cm
-            top_margin = 3*cm
-            bottom_margin = 1.5*cm
+            left_margin, right_margin, top_margin, bottom_margin = 2*cm, 2*cm, 3.5*cm, 1.5*cm
 
             def header_footer(canvas, doc):
                 canvas.saveState()
                 
-                if os.path.exists(self.logo_path):
-                    canvas.drawImage(self.logo_path, doc.leftMargin, doc.height + doc.topMargin,
-                                     width=120, height=45, preserveAspectRatio=True, mask='auto')
+                # --- INÍCIO DA CORREÇÃO: Lógica de Cabeçalho com Tabela ---
                 
-                canvas.setFont('Helvetica', 9)
-                canvas.drawRightString(doc.width + doc.leftMargin, doc.height + doc.topMargin + 20, self.company_info['nome'])
-                canvas.drawRightString(doc.width + doc.leftMargin, doc.height + doc.topMargin + 5, self.company_info['endereco'])
-                canvas.drawRightString(doc.width + doc.leftMargin, doc.height + doc.topMargin - 10, self.company_info['contato'])
+                # 1. Prepara os elementos para o cabeçalho
+                styles = getSampleStyleSheet()
+                style_info = ParagraphStyle(name='Info', parent=styles['Normal'], alignment=TA_RIGHT, fontSize=9, leading=12)
+                
+                # Elemento 1: Logo do Sistema
+                system_logo_path = "assets/img/Logo2.png"
+                logo_sistema = Image(system_logo_path, width=2.5*cm, height=1.2*cm, kind='proportional') if os.path.exists(system_logo_path) else Spacer(0,0)
+                
+                # Elemento 2: Logo Personalizada
+                logo_cliente = Image(custom_logo_path, width=2.5*cm, height=1.2*cm, kind='proportional') if custom_logo_path and os.path.exists(custom_logo_path) else Spacer(0,0)
 
-                canvas.setStrokeColorRGB(0.9, 0.9, 0.9)
-                canvas.line(doc.leftMargin, doc.height + doc.topMargin - 20, doc.width + doc.leftMargin, doc.height + doc.topMargin - 20)
+                # Elemento 3: Bloco de Informações da Empresa (como Parágrafos)
+                info_elements = []
+                if company_info.get('empresa_nome'):
+                    info_elements.append(Paragraph(company_info['empresa_nome'], style_info))
+                if company_info.get('empresa_endereco'):
+                    info_elements.append(Paragraph(company_info['empresa_endereco'], style_info))
+                if company_info.get('empresa_telefone') or company_info.get('empresa_email'):
+                    contato_str = f"Telefone: {company_info.get('empresa_telefone', '')} | Email: {company_info.get('empresa_email', '')}"
+                    info_elements.append(Paragraph(contato_str, style_info))
+                if company_info.get('empresa_cnpj'):
+                    info_elements.append(Paragraph(f"CNPJ: {company_info.get('empresa_cnpj')}", style_info))
+
+                # 2. Monta a tabela do cabeçalho com 3 colunas
+                header_data = [[logo_sistema, logo_cliente, info_elements]]
                 
+                # A largura total disponível é a largura da página menos as margens
+                available_width = doc.width
+                
+                header_table = Table(header_data, colWidths=[3*cm, 3*cm, available_width - 6*cm])
+                header_table.setStyle(TableStyle([
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), # ALINHAMENTO VERTICAL CENTRALIZADO
+                    ('ALIGN', (0, 0), (1, 0), 'LEFT'),      # Logos alinhadas à esquerda
+                    ('ALIGN', (2, 0), (2, 0), 'RIGHT'),     # Bloco de texto alinhado à direita
+                ]))
+                
+                # 3. Desenha a tabela no canvas
+                w, h = header_table.wrap(doc.width, doc.topMargin)
+                header_table.drawOn(canvas, doc.leftMargin, doc.height + doc.topMargin - h + 0.5*cm) # Ajuste fino da posição vertical
+                
+                # 4. Desenha a linha ABAIXO da tabela
+                line_y = doc.height + doc.topMargin - h
+                canvas.setStrokeColorRGB(0.9, 0.9, 0.9)
+                canvas.line(doc.leftMargin, line_y, doc.width + doc.leftMargin, line_y)
+
+                # --- FIM DA CORREÇÃO ---
+
+                # Rodapé (sem alteração)
                 canvas.setFont('Helvetica-Oblique', 8)
                 canvas.drawRightString(doc.width + doc.leftMargin, doc.bottomMargin - 20, f"Página {canvas.getPageNumber()} | {report_title}")
                 canvas.restoreState()
 
-            doc = SimpleDocTemplate(
-                file_path,
-                pagesize=A4,
-                topMargin=top_margin,
-                bottomMargin=bottom_margin,
-                leftMargin=left_margin,
-                rightMargin=right_margin
-            )
-            
+            doc = SimpleDocTemplate(file_path, pagesize=A4, topMargin=top_margin, bottomMargin=bottom_margin, leftMargin=left_margin, rightMargin=right_margin)
             doc.build(elementos, onFirstPage=header_footer, onLaterPages=header_footer)
             
-            AlertDialog(self, "Sucesso", f"Relatório salvo com sucesso em:\n{file_path}", 
-                        alert_type='success', theme_colors=self.theme_colors).exec_()
+            AlertDialog(self, "Sucesso", f"Relatório salvo com sucesso em:\n{file_path}", alert_type='success', theme_colors=self.theme_colors).exec_()
 
-        except FileNotFoundError:
-            AlertDialog(self, "Erro de Logo", f"Arquivo de logo não encontrado em:\n{self.logo_path}", 
-                        alert_type='error', theme_colors=self.theme_colors).exec_()
         except Exception as e:
-            AlertDialog(self, "Erro ao Gerar PDF", f"Ocorreu um erro inesperado: {str(e)}", 
-                        alert_type='error', theme_colors=self.theme_colors).exec_()
+            AlertDialog(self, "Erro ao Gerar PDF", f"Ocorreu um erro inesperado: {str(e)}", alert_type='error', theme_colors=self.theme_colors).exec_()
+
 
     def relatorio_vencimentos(self):
         produtos = self.db.verificar_produtos_vencendo(dias=30)
@@ -1027,11 +1079,17 @@ class EstoqueWindow(QWidget):
                         alert_type='info', theme_colors=self.theme_colors).exec_()
             return
 
-        file_path, _ = QFileDialog.getSaveFileName(self, "Salvar Relatório de Vencimentos", os.path.expanduser("~/relatorio_vencimentos.pdf"), "PDF Files (*.pdf)")
+        file_path, _ = QFileDialog.getSaveFileName(self, "Salvar Relatório...", os.path.expanduser("~/relatorio_vencimentos.pdf"), "PDF Files (*.pdf)")
         if file_path:
-            self.gerar_pdf_vencimentos(produtos, file_path)
+            # Passa os novos dados para a função de geração
+            company_info = self.db.obter_informacoes_empresa()
+            custom_logo_path = self.settings.get_value("custom_logo_path", "")
+            self.gerar_pdf_vencimentos(produtos, file_path, company_info, custom_logo_path)
 
-    def gerar_pdf_vencimentos(self, produtos, file_path):
+    # No arquivo ui/estoque_window.py, dentro da classe EstoqueWindow
+# SUBSTITUA este método inteiro
+
+    def gerar_pdf_vencimentos(self, produtos, file_path, company_info, custom_logo_path):
         styles = getSampleStyleSheet()
         elementos = []
 
@@ -1042,6 +1100,13 @@ class EstoqueWindow(QWidget):
         hoje = datetime.now().date()
         total_unidades = sum(p['quantidade'] for p in produtos)
         valor_custo_risco = sum(p['quantidade'] * (p['preco_compra'] or 0) for p in produtos)
+        
+        # Garante que a lista de produtos não está vazia antes de usar min()
+        if not produtos:
+            # Se por algum motivo a função for chamada com uma lista vazia, evitamos um erro.
+            # Idealmente, a verificação anterior já impede isso.
+            return 
+            
         produto_mais_critico = min(produtos, key=lambda p: (datetime.strptime(p['data_validade'], "%Y-%m-%d").date() - hoje).days)
 
         left_margin, right_margin = 2*cm, 2*cm
@@ -1097,7 +1162,8 @@ class EstoqueWindow(QWidget):
 
         elementos.append(tabela)
         
-        self._gerar_pdf_com_template(file_path, "Relatório de Vencimentos", elementos)
+        # A chamada final agora passa corretamente todos os parâmetros recebidos
+        self._gerar_pdf_com_template(file_path, "Relatório de Vencimentos", elementos, company_info, custom_logo_path)
 
     def relatorio_estoque_baixo(self):
         produtos = self.db.verificar_produtos_estoque_baixo()
@@ -1106,9 +1172,9 @@ class EstoqueWindow(QWidget):
                         alert_type='info', theme_colors=self.theme_colors).exec_()
             return
 
-        file_path, _ = QFileDialog.getSaveFileName(self, "Salvar Relatório de Estoque Baixo", os.path.expanduser("~/relatorio_estoque_baixo.pdf"), "PDF Files (*.pdf)")
+        file_path, _ = QFileDialog.getSaveFileName(self, "Salvar Relatório...", os.path.expanduser("~/relatorio_estoque_baixo.pdf"), "PDF Files (*.pdf)")
         if file_path:
-            self.gerar_pdf_estoque_baixo(produtos, file_path)
+            self.gerar_pdf_estoque_baixo(produtos, file_path) # Este já chama o template corretamente
 
     def _format_currency_brl(self, value):
         """Formata um número float para o padrão monetário brasileiro (1.234,56)."""
@@ -1131,6 +1197,19 @@ class EstoqueWindow(QWidget):
         for p in produtos: produtos_por_fornecedor[p['fornecedor_nome'] or "Fornecedor Não Definido"].append(p)
         custo_reposicao = sum(p['preco_compra'] * ((p['estoque_minimo'] * 2) - p['quantidade']) for p in produtos if p['preco_compra'] and (p['estoque_minimo'] * 2) > p['quantidade'])
         
+         # --- LÓGICA CORRIGIDA E PERSONALIZÁVEL ---
+        fator_reposicao = int(self.db.obter_configuracao('fator_reposicao_estoque', 5))
+        
+        produtos_por_fornecedor = defaultdict(list)
+        for p in produtos: produtos_por_fornecedor[p['fornecedor_nome'] or "Fornecedor Não Definido"].append(p)
+        
+        # Recalcula o custo com base na nova sugestão de compra
+        custo_reposicao = sum(
+            p['preco_compra'] * (max(0, (p['estoque_minimo'] + fator_reposicao) - p['quantidade']))
+            for p in produtos if p['preco_compra']
+        )
+        # --- FIM DA CORREÇÃO ---
+
         left_margin, right_margin = 2*cm, 2*cm
         doc_width = A4[0] - left_margin - right_margin
 
@@ -1152,7 +1231,9 @@ class EstoqueWindow(QWidget):
             total_custo_fornecedor = 0
             
             for p in sorted(itens, key=lambda i: i['nome']):
-                qtd_sugerida = max(0, (p['estoque_minimo'] * 2) - p['quantidade'])
+                # --- LÓGICA CORRIGIDA AQUI ---
+                qtd_sugerida = max(0, (p['estoque_minimo'] + fator_reposicao) - p['quantidade'])
+                # --- FIM DA CORREÇÃO ---
                 custo_item = qtd_sugerida * (p['preco_compra'] or 0)
                 total_custo_fornecedor += custo_item
                 
@@ -1187,47 +1268,59 @@ class EstoqueWindow(QWidget):
             tabela.setStyle(style)
             elementos.append(tabela)
             
-        self._gerar_pdf_com_template(file_path, "Plano de Reposição de Estoque", elementos)
+        # Pega as informações e a logo para passar para o template
+        company_info = self.db.obter_informacoes_empresa()
+        custom_logo_path = self.settings.get_value("custom_logo_path", "")
+        self._gerar_pdf_com_template(file_path, "Plano de Reposição de Estoque", elementos, company_info, custom_logo_path)
 
     def exportar_csv(self):
         try:
             file_path, _ = QFileDialog.getSaveFileName(
                 self, "Exportar Estoque para CSV", 
-                os.path.expanduser("~/estoque_export.csv"),
+                os.path.expanduser(f"~/estoque_{datetime.now().strftime('%Y%m%d')}.csv"),
                 "CSV Files (*.csv)"
             )
             
-            if not file_path: return
+            if not file_path:
+                return
             
-            produtos = []
-            for row in range(self.tabela.rowCount()):
-                produto = {}
-                produto['id'] = self.tabela.item(row, 0).text() if self.tabela.item(row, 0) else ""
-                produto['codigo_barras'] = self.tabela.item(row, 1).text() if self.tabela.item(row, 1) else ""
-                produto['nome'] = self.tabela.item(row, 2).text() if self.tabela.item(row, 2) else ""
-                produto['categoria'] = self.tabela.item(row, 3).text() if self.tabela.item(row, 3) else ""
-                produto['estoque_detalhado'] = self.tabela.item(row, 4).text() if self.tabela.item(row, 4) else ""
-                produto['estoque_minimo'] = self.tabela.item(row, 5).text() if self.tabela.item(row, 5) else ""
-                produto['preco_compra'] = self.tabela.item(row, 6).text() if self.tabela.item(row, 6) else ""
-                produto['margem'] = self.tabela.item(row, 7).text() if self.tabela.item(row, 7) else ""
-                produto['preco_venda'] = self.tabela.item(row, 8).text() if self.tabela.item(row, 8) else ""
-                produto['validade'] = self.tabela.item(row, 9).text() if self.tabela.item(row, 9) else ""
-                produto['localizacao'] = self.tabela.item(row, 10).text() if self.tabela.item(row, 10) else ""
-                produto['fornecedor'] = self.tabela.item(row, 11).text() if self.tabela.item(row, 11) else ""
-                produtos.append(produto)
-            
+            produtos = self.db.listar_produtos()
+            if not produtos:
+                AlertDialog(self, "Exportação", "Não há produtos para exportar.", 
+                            alert_type='info', theme_colors=self.theme_colors).exec_()
+                return
+
             with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
-                fieldnames = ['id', 'codigo_barras', 'nome', 'categoria', 'estoque_detalhado', 
-                            'estoque_minimo', 'preco_compra', 'margem', 'preco_venda', 
-                            'validade', 'localizacao', 'fornecedor']
+                fieldnames = [
+                    'nome', 'codigo_barras', 'descricao', 'categoria', 'quantidade', 'estoque_minimo',
+                    'preco_compra', 'margem_lucro', 'preco_venda', 'data_validade', 'localizacao', 
+                    'fornecedor_nome', 'fracionado', 'unidade_medida', 'qtd_por_embalagem', 
+                    'preco_unitario_fracao', 'estoque_fracionado'
+                ]
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
-                for produto in produtos: writer.writerow(produto)
+                
+                for produto in produtos:
+                    produto_dict = dict(produto)
+                    row_data = {}
+                    for key in fieldnames:
+                        value = produto_dict.get(key)
+                        # --- CORREÇÃO PRINCIPAL DA EXPORTAÇÃO ---
+                        # Formata explicitamente os campos de preço/float para usar ponto.
+                        if key in ['preco_compra', 'margem_lucro', 'preco_venda', 'preco_unitario_fracao', 'estoque_fracionado']:
+                            # Usa f-string para formatar com 2 casas decimais
+                            row_data[key] = f"{float(value or 0.0):.2f}"
+                        else:
+                            row_data[key] = value if value is not None else ''
+                    
+                    writer.writerow(row_data)
             
-            QMessageBox.information(self, "Sucesso", f"Dados exportados com sucesso para:\n{file_path}")
+            AlertDialog(self, "Sucesso", f"Dados exportados com sucesso para:\n{file_path}", 
+                        alert_type='success', theme_colors=self.theme_colors).exec_()
             
         except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Erro ao exportar CSV: {str(e)}")
+            AlertDialog(self, "Erro", f"Erro ao exportar CSV: {str(e)}", 
+                        alert_type='error', theme_colors=self.theme_colors).exec_()
 
     def importar_csv(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -1258,22 +1351,28 @@ class EstoqueWindow(QWidget):
             self.import_thread.terminate()
             QMessageBox.warning(self, "Cancelado", "A importação foi cancelada pelo usuário.")
 
-    def importacao_concluida(self, importados, erros, detalhes_erros):
+    def importacao_concluida(self, importados, atualizados, erros, detalhes_erros):
         self.progress_dialog.close()
         self.atualizar_visualizacao_dados()
 
-        if importados > 0:
+        if importados > 0 or atualizados > 0:
             print("DEBUG: Importação CSV concluída. Emitindo sinal 'dados_produtos_alterados'.")
             self.dados_produtos_alterados.emit()
 
-        mensagem = f"Importação concluída!\n\n- Produtos importados/atualizados: {importados}\n- Linhas com erro: {erros}"
+        mensagem = (f"Importação concluída!\n\n"
+                    f"✔ Produtos novos criados: {importados}\n"
+                    f"✔ Produtos existentes atualizados: {atualizados}\n"
+                    f"❌ Linhas com erro: {erros}")
         
-        if erros > 0:
-            detalhes = "\n\nDetalhes dos erros:\n" + "\n".join(detalhes_erros[:5])
+        if detalhes_erros:
+            detalhes = "\n\nDetalhes dos problemas:\n" + "\n".join(detalhes_erros[:5])
             mensagem += detalhes
-            AlertDialog(self, "Importação Concluída com Erros", mensagem, alert_type='warning', theme_colors=self.theme_colors).exec_()
+            
+            alert_type = 'warning' if (importados > 0 or atualizados > 0) else 'error'
+            titulo = "Importação Finalizada com Avisos" if alert_type == 'warning' else "Importação Falhou"
+            AlertDialog(self, titulo, mensagem, alert_type=alert_type, theme_colors=self.theme_colors).exec_()
         else:
-            AlertDialog(self, "Importação Concluída", mensagem, alert_type='success', theme_colors=self.theme_colors).exec_()
+            AlertDialog(self, "Importação Concluída com Sucesso", mensagem, alert_type='success', theme_colors=self.theme_colors).exec_()
 
     def _extrair_quantidade_do_estoque_detalhado(self, estoque_str):
         try:
@@ -1311,6 +1410,17 @@ class EstoqueWindow(QWidget):
                 return data_obj.strftime("%Y-%m-%d")
             return None
         except: return None
+    
+    def selecionar_item_por_id(self, item_id):
+        """Encontra e seleciona um item na tabela com base no seu ID."""
+        for row in range(self.tabela.rowCount()):
+            item = self.tabela.item(row, 0)
+            if item: # Garante que a célula não está vazia
+                id_na_tabela = item.data(Qt.UserRole)
+                if id_na_tabela == item_id:
+                    self.tabela.selectRow(row)
+                    self.tabela.scrollToItem(item, QTableWidget.ScrollHint.PositionAtCenter)
+                    break
 
 # Nenhuma alteração necessária nas classes FormularioProduto e DialogQuebrarEmbalagem
 # Substitua a classe FormularioProduto inteira em estoque_window.py

@@ -1,3 +1,5 @@
+# scheduler.py
+
 from PyQt5.QtCore import QThread, pyqtSignal, QTime, QDate
 import time
 
@@ -14,12 +16,13 @@ class Scheduler(QThread):
     def run(self):
         """O corpo da thread. Roda em loop verificando o horário."""
         self.log_message.emit("Agendador de notificações iniciado.")
+        
+        # --- LÓGICA PRINCIPAL CORRIGIDA ---
         while self._is_running:
             try:
+                # Se as notificações estão desativadas, apenas dorme e continua.
                 if not self.settings.get_notification_enabled():
-                    # Se as notificações estão desativadas, dorme por mais tempo para economizar recursos.
-                    # Vamos verificar a cada 5 minutos se elas foram reativadas.
-                    time.sleep(300) 
+                    time.sleep(1) 
                     continue
 
                 now = QTime.currentTime()
@@ -35,19 +38,17 @@ class Scheduler(QThread):
                         self.notification_triggered.emit()
                         self.last_sent_date = today # Marca que o e-mail de hoje foi enviado
 
-                # A thread dorme por quase 60 segundos. A verificação é feita uma vez por minuto.
-                # O loop verifica a flag _is_running a cada segundo para uma parada mais responsiva.
-                for _ in range(60):
-                    if not self._is_running:
-                        break
-                    time.sleep(1)
+                # A thread dorme por 1 segundo, tornando a verificação de _is_running
+                # muito responsiva e garantindo uma parada quase instantânea.
+                time.sleep(1)
 
             except Exception as e:
                 self.log_message.emit(f"Erro no loop do agendador: {e}")
-                time.sleep(60) # Espera um minuto antes de tentar novamente
+                # Em caso de erro, espera um pouco mais para não sobrecarregar
+                time.sleep(5) 
+        # --- FIM DA CORREÇÃO ---
 
         self.log_message.emit("Agendador de notificações parado.")
-
 
     def stop(self):
         """Sinaliza para a thread parar de forma segura."""
@@ -59,14 +60,9 @@ class Scheduler(QThread):
         as novas configurações.
         """
         self.log_message.emit("Reiniciando o agendador com novas configurações...")
-        
-        # 1. Sinaliza para a thread atual parar
         self.stop()
+        self.wait(2000) # Espera no máximo 2 segundos para a thread antiga terminar
         
-        # 2. Espera até 5 segundos para a thread terminar seu ciclo atual.
-        # Isso é crucial para evitar iniciar uma nova thread enquanto a antiga ainda está rodando.
-        self.wait(5000)
-        
-        # 3. Reseta a flag e inicia a thread novamente.
         self._is_running = True
+        self.last_sent_date = None # Reseta a data para garantir que funcione no mesmo dia se a hora for alterada
         self.start()

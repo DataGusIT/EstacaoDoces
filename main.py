@@ -298,7 +298,7 @@ if __name__ == "__main__":
             theme_colors = {
                 'bg_color': "#1c2128", 'surface_color': "#22272e", 'menu_color': "#22272e",
                 'text_color': "#cdd9e5", 'text_secondary': "#768390", 'border_color': "#373e47",
-                'button_hover': "#373e4g", 'accent_color': "#007AFF"
+                'button_hover': "#373e47", 'accent_color': "#007AFF"
             }
         else:
             theme_colors = {

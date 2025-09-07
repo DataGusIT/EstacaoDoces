@@ -1,9 +1,11 @@
+# main.py
+
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QPushButton, 
                             QLabel, QStackedWidget, QHBoxLayout, QFrame,
                             QAction, QMenu, QToolBar, QDialog, QFormLayout,
-                            QComboBox, QSpinBox, QMessageBox, QStatusBar, QSizePolicy, QTimeEdit, QLineEdit, QCheckBox, QGroupBox, QDateEdit, QTextEdit)
+                            QComboBox, QSpinBox, QMessageBox, QStatusBar, QSizePolicy, QTimeEdit, QLineEdit, QCheckBox, QGroupBox, QDateEdit, QTextEdit, QTableWidgetItem,  QTabWidget, QTableWidget, QHeaderView,  QListWidget, QListWidgetItem)
 from PyQt5.QtGui import QFont, QIcon, QPixmap, QCursor, QPainter, QColor, QBrush, QPainterPath
-from PyQt5.QtCore import Qt, QDate, QSize, QByteArray, QPropertyAnimation, QEasingCurve, pyqtSignal, QTime, QTimer, QSettings
+from PyQt5.QtCore import Qt, QDate, QSize, QByteArray, QPropertyAnimation, QEasingCurve, pyqtSignal, QTime, QTimer, QSettings, QPoint
 from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication
 import os
@@ -20,6 +22,33 @@ from ui.icon_manager import IconManager
 from scheduler import Scheduler
 from notification_manager import NotificationManager
 
+# ====================================================================
+#       1. ADICIONE ESTA NOVA CLASSE AO FINAL DO ARQUIVO
+# ====================================================================
+class SearchInputWidget(QFrame):
+    """Um widget customizado que combina um ícone e um QLineEdit."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("searchInputFrame")
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 0, 5, 0)
+        layout.setSpacing(8)
+
+        self.icon_label = QLabel(self)
+        
+        self.line_edit = QLineEdit(self)
+        self.line_edit.setObjectName("globalSearchInput")
+        self.line_edit.setPlaceholderText("Buscar produto, cliente, promo...")
+
+        layout.addWidget(self.icon_label)
+        layout.addWidget(self.line_edit)
+
+    def set_icon(self, icon):
+        self.icon_label.setPixmap(icon.pixmap(16, 16))
+
+
+
 class MainWindow(QMainWindow):
     def __init__(self, db, settings, theme_colors):
         super().__init__()
@@ -28,8 +57,15 @@ class MainWindow(QMainWindow):
         self.theme_colors = theme_colors 
         self.menu_collapsed = True
         self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
+        
+        # Primeiro, carregamos a logo para que self.logo_pixmap exista
+        self.carregar_logo() 
+        
+        # Agora, podemos construir a UI que depende da logo
         self.initUI()
         self.check_promocoes_ativas()
+
+    # main.py
 
     def initUI(self):
         self.setWindowTitle("Sistema de Estoque - GestorX")
@@ -43,8 +79,6 @@ class MainWindow(QMainWindow):
 
         theme_colors = self._get_theme_colors()
 
-        # ... (todo o código de criação de widgets do CABEÇALHO e CONTEÚDO PRINCIPAL permanece o mesmo) ...
-        # ... (vou omitir por brevidade, apenas cole a classe inteira) ...
         # ===== CABEÇALHO UNIFICADO =====
         header_frame = QFrame()
         header_frame.setObjectName("headerFrame")
@@ -54,10 +88,9 @@ class MainWindow(QMainWindow):
         header_layout.setSpacing(10)
         
         self.app_logo = QLabel()
-        logo_pixmap = self.carregar_logo_pixmap() 
-        if logo_pixmap:
-            self.app_logo.setPixmap(logo_pixmap)
-            
+        # Agora usamos diretamente o atributo da classe que foi carregado no __init__
+        if not self.logo_pixmap.isNull():
+            self.app_logo.setPixmap(self.logo_pixmap.scaled(60, 60, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         self.app_logo.setFixedSize(60, 60)
 
         app_title = QLabel("Sistema de Estoque - GestorX")
@@ -102,13 +135,30 @@ class MainWindow(QMainWindow):
             header_layout.addWidget(btn)
 
         header_layout.addStretch()
+
+        # --- BARRA DE BUSCA GLOBAL (USANDO O NOVO WIDGET) ---
+        self.search_widget = SearchInputWidget()
+        self.search_widget.setMinimumWidth(300)
+        self.search_widget.setMaximumWidth(400)
+        self.search_widget.line_edit.textChanged.connect(self.atualizar_busca_global)
+        header_layout.addWidget(self.search_widget)
+
+        header_layout.addStretch()
         
         self.refresh_button = QPushButton("Atualizar")
-        self.refresh_button.setObjectName("primaryActionButton") # CORREÇÃO
+        self.refresh_button.setObjectName("primaryActionButton")
         self.refresh_button.setCursor(Qt.PointingHandCursor)
         self.refresh_button.clicked.connect(self.atualizar_dados)
         header_layout.addWidget(self.refresh_button)
         
+        self.notification_btn = QPushButton()
+        self.notification_btn.setObjectName("headerIconButton")
+        self.notification_btn.setFixedSize(36, 36)
+        self.notification_btn.setCursor(Qt.PointingHandCursor)
+        self.notification_btn.setToolTip("Configurar Notificações")
+        self.notification_btn.clicked.connect(self.abrir_configuracoes_notificacao)
+        header_layout.addWidget(self.notification_btn)
+
         self.user_menu_placeholder = QFrame()
         header_layout.addWidget(self.user_menu_placeholder)
 
@@ -144,6 +194,13 @@ class MainWindow(QMainWindow):
         header_frame.mousePressEvent = self.start_window_drag
         header_frame.mouseMoveEvent = self.window_drag
         self.drag_position = None
+
+        self.search_results_popup = QListWidget(self)
+        self.search_results_popup.setObjectName("searchResultsPopup")
+        self.search_results_popup.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
+        self.search_results_popup.setFocusPolicy(Qt.NoFocus)
+        self.search_results_popup.itemClicked.connect(self.item_busca_selecionado)
+        self.search_results_popup.hide()
 
         # ===== CONTEÚDO PRINCIPAL =====
         content_frame = QFrame()
@@ -217,11 +274,16 @@ class MainWindow(QMainWindow):
         content_container_layout.addWidget(self.stack)
 
         self.dashboard_page = DashboardWindow(self.db, theme_colors)
-        self.estoque_page = EstoqueWindow(self.db, theme_colors, self.carregar_logo_pixmap())
+        self.estoque_page = EstoqueWindow(self.db, theme_colors, self.settings, self.logo_pixmap)
         self.fornecedor_page = FornecedorWindow(self.db, theme_colors, self.settings)
         self.promocoes_page = PromocoesWindow(self.db, theme_colors)
         self.clientes_page = ClientesWindow(self.db, theme_colors)
-        self.caixa_page = CaixaWindow(self.db, theme_colors)
+        self.caixa_page = CaixaWindow(self.db, theme_colors, self.settings)
+
+        # ==================== INÍCIO DA CORREÇÃO ====================
+        # Corrigido para usar os nomes de atributo corretos: _page em vez de _window
+        self.caixa_page.venda_finalizada.connect(self.dashboard_page.carregar_dados)
+        # ===================== FIM DA CORREÇÃO ======================
 
         self.stack.addWidget(self.dashboard_page)
         self.stack.addWidget(self.estoque_page)
@@ -245,17 +307,37 @@ class MainWindow(QMainWindow):
         self.statusBar.setObjectName("statusBar")
         self.statusBar.setFixedHeight(25)
         self.setStatusBar(self.statusBar)
+
+        self.user_status_widget = QFrame()
+        self.user_status_widget.setObjectName("userStatusWidget")
+        status_layout = QHBoxLayout(self.user_status_widget)
+        status_layout.setContentsMargins(8, 2, 8, 2)
+        status_layout.setSpacing(6)
+
+        self.status_user_icon = QLabel()
+        status_layout.addWidget(self.status_user_icon)
+        self.status_user_label = QLabel("Usuário")
+        self.status_user_label.setObjectName("statusLabel")
+        status_layout.addWidget(self.status_user_label)
+
+        separator = QFrame()
+        separator.setFrameShape(QFrame.VLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        separator.setObjectName("statusSeparator")
+        status_layout.addWidget(separator)
+        
+        self.status_profile_icon = QLabel()
+        status_layout.addWidget(self.status_profile_icon)
+        self.status_profile_label = QLabel("Perfil")
+        self.status_profile_label.setObjectName("statusLabel")
+        status_layout.addWidget(self.status_profile_label)
+        
+        self.statusBar.addPermanentWidget(self.user_status_widget)
         
         self.toggle_menu()
         self.switch_page(0)
-        
-        # --- ALTERAÇÃO 1: REMOVA A LÓGICA DE POSICIONAMENTO E ANIMAÇÃO DAQUI ---
-        # A lógica de centralizar e a animação de fade-in foram movidas
-        # para o novo método showEvent para garantir que executem toda vez que a janela for exibida.
-        
         self.aplicar_tema()
 
-        # --- CONEXÕES PARA ATUALIZAÇÃO AUTOMÁTICA ---
         if hasattr(self.clientes_page, 'dados_clientes_alterados'):
             self.clientes_page.dados_clientes_alterados.connect(self.on_dados_clientes_changed)
         if hasattr(self.estoque_page, 'dados_produtos_alterados'):
@@ -265,15 +347,12 @@ class MainWindow(QMainWindow):
         if hasattr(self.caixa_page, 'movimento_manual_registrado'):
             self.caixa_page.movimento_manual_registrado.connect(self.dashboard_page.carregar_dados)
         
-        # --- INICIA O GERENCIADOR DE NOTIFICAÇÕES E O AGENDADOR ---
         self.notification_manager = NotificationManager(self.db, self.settings)
         self.scheduler = Scheduler(self.settings)
         self.scheduler.notification_triggered.connect(self.notification_manager.check_and_send_notifications)
         self.scheduler.log_message.connect(self.log_scheduler_message)
         self.scheduler.start()
 
-        # --- ALTERAÇÃO 2: CHAME self.show() AQUI PARA INICIAR O PROCESSO ---
-        # Esta chamada irá acionar o novo método showEvent pela primeira vez.
         self.show()
 
     def showEvent(self, event):
@@ -352,13 +431,18 @@ class MainWindow(QMainWindow):
         self.statusBar.showMessage(message, 5000)
 
     def carregar_logo(self):
-        """Carrega a logo como QIcon para uso na barra de título"""
-        logo_path = os.path.join("assets", "img", "Logo2.png")
-        if os.path.exists(logo_path):
-            return QIcon(logo_path)
-        else:
-            # Retorna um ícone padrão se a logo não for encontrada
-            return QIcon()
+        """Carrega a logo personalizada ou a padrão e armazena em self.logo_pixmap."""
+        logo_path = self.settings.get_value("custom_logo_path", "")
+        
+        # Se o caminho personalizado não for válido, usa o caminho padrão
+        if not logo_path or not os.path.exists(logo_path):
+            logo_path = "assets/img/Logo2.png"  # Certifique-se que este é o caminho correto do seu logo padrão
+        
+        self.logo_pixmap = QPixmap(logo_path)
+        
+        # Opcional: Atualiza o ícone da própria janela principal
+        if not self.logo_pixmap.isNull():
+            self.setWindowIcon(QIcon(self.logo_pixmap))
     
     def carregar_logo_pixmap(self):
         """Carrega a logo (personalizada ou padrão) como QPixmap para uso no cabeçalho."""
@@ -651,6 +735,70 @@ class MainWindow(QMainWindow):
                 'button_hover': "#e9ecef",   # Hover do botão: Cinza um pouco mais escuro
                 'accent_color': "#007AFF"    # Cor de destaque: Permanece a mesma
             }
+
+     # Adicione este novo método DENTRO da classe MainWindow
+    def atualizar_busca_global(self, texto):
+        """Chamado sempre que o texto na barra de busca muda."""
+        if len(texto) < 2:
+            self.search_results_popup.hide()
+            return
+
+        resultados = self.db.busca_global(texto)
+        self.search_results_popup.clear()
+
+        if not resultados:
+            self.search_results_popup.hide()
+            return
+        
+        icon_map = {
+            'produto': 'produto', 'cliente': 'cliente',
+            'fornecedor': 'fornecedor', 'promocao': 'promocao'
+        }
+        
+        for res in resultados:
+            icon_name = icon_map.get(res['tipo'], 'search')
+            icon = IconManager.get_icon(icon_name, color=self.theme_colors.get('text_color'))
+            
+            item = QListWidgetItem(icon, res['texto'])
+            item_data = {'id': res['id'], 'tipo': res['tipo']}
+            item.setData(Qt.UserRole, item_data)
+            self.search_results_popup.addItem(item)
+            
+        # --- CORREÇÃO APLICADA AQUI ---
+        # A posição e a largura agora são baseadas no self.search_widget (o frame)
+        point = self.search_widget.mapToGlobal(QPoint(0, self.search_widget.height()))
+        self.search_results_popup.move(point)
+        self.search_results_popup.setFixedWidth(self.search_widget.width())
+        self.search_results_popup.show()
+
+    # SUBSTITUA ESTE MÉTODO INTEIRO TAMBÉM
+    def item_busca_selecionado(self, item):
+        """Chamado quando um item do dropdown de busca é clicado."""
+        data = item.data(Qt.UserRole)
+        item_id = data['id']
+        item_tipo = data['tipo']
+
+        self.search_results_popup.hide()
+        # --- CORREÇÃO APLICADA AQUI ---
+        # Limpa o texto do QLineEdit que está DENTRO do search_widget
+        self.search_widget.line_edit.clear()
+
+        page_map = {
+            'produto': (1, self.estoque_page),
+            'cliente': (4, self.clientes_page),
+            'fornecedor': (2, self.fornecedor_page),
+            'promocao': (3, self.promocoes_page)
+        }
+
+        if item_tipo in page_map:
+            page_index, page_widget = page_map[item_tipo]
+            
+            self.switch_page(page_index)
+            
+            if hasattr(page_widget, 'selecionar_item_por_id'):
+                QTimer.singleShot(100, lambda: page_widget.selecionar_item_por_id(item_id))
+            else:
+                print(f"AVISO: O método 'selecionar_item_por_id' não foi encontrado em {page_widget.__class__.__name__}")
     
     def aplicar_tema(self):
         """Aplica o tema atual a todos os componentes, centralizando o estilo."""
@@ -664,15 +812,20 @@ class MainWindow(QMainWindow):
         border_color = theme['border_color']
         button_hover = theme['button_hover']
 
-        # Ícones dinâmicos que DEVEM mudar com o tema
+        icon_color = theme.get('text_secondary', '#768390')
+        self.status_user_icon.setPixmap(IconManager.get_icon('user', color=icon_color).pixmap(14, 14))
+        self.status_profile_icon.setPixmap(IconManager.get_icon('profile_type', color=icon_color).pixmap(14, 14))
+
         self.hamburger_btn.setIcon(IconManager.get_icon('menu', text_color))
-        # --- CORREÇÃO 1: A cor do ícone agora é sempre branca, pois o fundo é o accent_color ---
         self.refresh_button.setIcon(IconManager.get_icon('atualizar', 'white')) 
+        self.notification_btn.setIcon(IconManager.get_icon('notification', text_secondary))
         self.minimize_btn.setIcon(IconManager.get_icon('minimizar', text_secondary))
         self.maximize_btn.setIcon(IconManager.get_icon('maximizar' if not self.isMaximized() else 'restaurar', text_secondary))
         self.close_btn.setIcon(IconManager.get_icon('fechar', text_secondary))
         
-        # Atualiza os ícones do menu lateral para a cor correta (inativa/ativa)
+        # Define o ícone da busca no novo widget
+        self.search_widget.set_icon(IconManager.get_icon('search', color=text_secondary))
+        
         self.switch_page(self.stack.currentIndex())
         
         # Aplica a folha de estilo principal
@@ -681,7 +834,55 @@ class MainWindow(QMainWindow):
                 background-color: {bg_color};
                 color: {text_color};
             }}
-            
+
+             QStatusBar {{
+                background-color: {theme['menu_color']};
+                border-top: 1px solid {theme['border_color']};
+            }}
+            QStatusBar::item {{ border: none; }}
+            #userStatusWidget {{
+                background-color: {theme['surface_color']};
+                border: 1px solid {theme['border_color']};
+                border-radius: 8px;
+                margin-right: 5px;
+            }}
+            #statusLabel {{
+                color: {theme['text_color']};
+                font-weight: bold;
+                font-size: 8pt;
+            }}
+            #statusSeparator {{ background-color: {theme['border_color']}; }}
+
+            /* CORREÇÃO E MELHORIA DA BARRA DE BUSCA */
+            /* ESTILO CORRIGIDO E ROBUSTO PARA A BARRA DE BUSCA */
+            #searchInputFrame {{
+                background-color: {bg_color};
+                border: 1px solid {border_color};
+                border-radius: 8px;
+                padding: 2px;
+            }}
+            #searchInputFrame:focus-within {{
+                border: 1px solid {accent_color};
+            }}
+            #globalSearchInput {{
+                background-color: transparent;
+                border: none;
+                font-size: 10pt;
+                padding: 6px;
+            }}
+
+            /* ESTILO PARA O DROPDOWN DE RESULTADOS */
+            #searchResultsPopup {{
+                background-color: {surface_color};
+                color: {text_color};
+                border: 1px solid {accent_color};
+                border-radius: 6px;
+                padding: 4px;
+            }}
+            #searchResultsPopup::item {{ padding: 8px; border-radius: 4px; }}
+            #searchResultsPopup::item:hover {{ background-color: {button_hover}; }}
+            #searchResultsPopup::item:selected {{ background-color: {accent_color}; color: white; }}
+
             QMenu {{
                 background-color: {theme['menu_color']};
                 color: {text_color};
@@ -815,6 +1016,25 @@ class MainWindow(QMainWindow):
             #primaryActionButton:hover {{
                 background-color: #0069d9;
             }}
+
+            /* ========================================================= */
+            /*       INÍCIO DA MODIFICAÇÃO: ESTILO DO BOTÃO DE SINO      */
+            /* ========================================================= */
+            #headerIconButton {{
+                background-color: transparent;
+                border: 1px solid {border_color};
+                border-radius: 6px;
+            }}
+            #headerIconButton:hover {{
+                background-color: {button_hover};
+                border-color: {accent_color};
+            }}
+            #headerIconButton:pressed {{
+                background-color: {border_color};
+            }}
+            /* ========================================================= */
+            /*       FIM DA MODIFICAÇÃO                                  */
+            /* ========================================================= */
             
             /* --- OUTROS COMPONENTES --- */
             QGroupBox {{
@@ -904,6 +1124,54 @@ class MainWindow(QMainWindow):
         """Aplica tema em todos os widgets, incluindo janela principal"""
         self.aplicar_tema()
     
+    # =========================================================
+    #       INÍCIO DA MODIFICAÇÃO: NOVO MÉTODO
+    # =========================================================
+    def abrir_configuracoes_notificacao(self):
+        """Abre a janela de configurações de notificação."""
+        theme_colors = self._get_theme_colors()
+        dialog = NotificationConfigDialog(self.settings, theme_colors, self)
+
+        if dialog.exec_() == QDialog.Accepted:
+            # Reinicia o agendador para aplicar novas configurações de notificação
+            self.scheduler.restart()
+            alert = AlertDialog(self, 
+                                "Configurações Salvas", 
+                                "As configurações de notificação foram atualizadas com sucesso!",
+                                alert_type="info", 
+                                theme_colors=self._get_theme_colors())
+            alert.exec_()
+    # =========================================================
+    #       FIM DA MODIFICAÇÃO
+    # =========================================================
+
+    # =================================================================================
+    #       INÍCIO DA SUGESTÃO: ADICIONE ESTE NOVO MÉTODO DENTRO DA CLASSE MAINWINDOW
+    # =================================================================================
+    def executar_busca_global(self):
+        """Executa a busca com o termo do QLineEdit e exibe os resultados."""
+        termo = self.global_search_input.text().strip()
+        if not termo:
+            return
+
+        print(f"Buscando por: '{termo}'...")
+        self.statusBar.showMessage(f"Buscando por: '{termo}'...", 2000)
+        
+        resultados = self.db.busca_global(termo)
+        
+        total_encontrado = len(resultados['produtos']) + len(resultados['clientes']) + len(resultados['fornecedores'])
+        
+        if total_encontrado == 0:
+            QMessageBox.information(self, "Busca", f"Nenhum resultado encontrado para '{termo}'.")
+            return
+        
+        dialog = GlobalSearchResultsDialog(resultados, self._get_theme_colors(), self)
+        dialog.exec_()
+
+    # =================================================================================
+    #       FIM DO NOVO MÉTODO
+    # =================================================================================
+
     def abrir_configuracoes(self):
         """Abre a janela de configurações."""
         
@@ -918,12 +1186,12 @@ class MainWindow(QMainWindow):
             # Pede para a janela principal se redesenhar com o novo tema
             self.aplicar_tema() 
             
-            # Reinicia o agendador para aplicar novas configurações de notificação
-            self.scheduler.restart()
+            # ATENÇÃO: A linha abaixo foi movida para 'abrir_configuracoes_notificacao'
+            # self.scheduler.restart()
 
             alert = AlertDialog(self, 
                                 "Configurações Salvas", 
-                                "O novo tema foi aplicado! Algumas outras configurações podem exigir uma reinicialização para ter efeito completo.",
+                                "O novo tema foi aplicado!",
                                 alert_type="info", 
                                 theme_colors=self._get_theme_colors())
             alert.exec_()
@@ -1074,14 +1342,15 @@ class MainWindow(QMainWindow):
     
     def closeEvent(self, event):
         """Evento chamado quando a janela é fechada."""
-        # --- PARA A THREAD DO AGENDADOR DE FORMA SEGURA ---
-        print("Parando o agendador de notificações...")
+        print("Sinalizando para o agendador de notificações parar...")
+        # Apenas avisamos a thread para parar. Não esperamos por ela.
         self.scheduler.stop()
-        self.scheduler.wait() # Espera a thread terminar
-        print("Agendador parado.")
         
+        # O .wait() foi REMOVIDO daqui. Esta é a correção principal para o travamento.
+        
+        print("Fechando a conexão com o banco de dados.")
         self.db.fechar()
-        event.accept()
+        event.accept() # Aceita o evento de fechamento, permitindo que a janela feche imediatamente.
 
     # Em main.py, dentro da classe MainWindow
 
@@ -1433,6 +1702,8 @@ class UserMenuWidget(QFrame):
 
 # Em main.py
 
+# Em main.py
+
 class UserManager:
     """Gerenciador principal do usuário na aplicação"""
 
@@ -1441,43 +1712,37 @@ class UserManager:
         self.db = db
         self.usuario = None
         self.user_menu_widget = None
-        self.user_status_label = None
         self.active_dialogs = {}
     
+    # =========================================================
+    #       CORREÇÃO 1: MÉTODO FALTANDO ADICIONADO AQUI
+    # =========================================================
     def setup_for_user(self, usuario):
         """Configura a interface para o usuário logado"""
-        # --- CORREÇÃO PRINCIPAL (PARTE 1) ---
-        # Verificamos e corrigimos o objeto 'usuario' assim que ele é recebido do login.
-        # Se a chave 'tipo' não existir, for None ou uma string vazia, definimos como 'Comum'.
+        # Garante que o usuário sempre tenha um 'tipo'
         if not usuario.get('tipo'):
             usuario['tipo'] = 'Comum'
         
         self.usuario = usuario
         self.setup_status_bar()
-        # O restante da lógica de permissões já está na MainWindow.setup_for_user, o que é o correto.
 
+    # =========================================================
+    #       CORREÇÃO 2: REMOVIDA A VERSÃO DUPLICADA E ANTIGA DO MÉTODO
+    # =========================================================
     def setup_status_bar(self):
         """Configura a barra de status com informações do usuário"""
         try:
-            # Agora que garantimos que self.usuario['tipo'] sempre terá um valor,
-            # este código funcionará sem problemas.
-            nome_usuario = self.usuario.get('nome', 'Usuário Desconhecido')
-            tipo_usuario = self.usuario.get('tipo', 'Indefinido') # Mantemos o .get() por segurança
+            # Pega os dados do usuário logado
+            nome_usuario = self.usuario.get('nome', 'Desconhecido')
+            tipo_usuario = self.usuario.get('tipo', 'Indefinido')
 
-            user_info = f"Usuário: {nome_usuario} | Perfil: {tipo_usuario.capitalize()}"
-
-            if self.user_status_label is None:
-                self.user_status_label = QLabel(user_info)
-                self.user_status_label.setStyleSheet("padding-right: 10px;")
-                self.main_window.statusBar.addPermanentWidget(self.user_status_label)
-            else:
-                self.user_status_label.setText(user_info)
-
+            # Atualiza os labels corretos que estão na MainWindow
+            self.main_window.status_user_label.setText(nome_usuario)
+            self.main_window.status_profile_label.setText(tipo_usuario.capitalize())
+            
         except Exception as e:
             print(f"Erro ao configurar barra de status: {e}")
     
-    # Em main.py, dentro da classe UserManager
-
     def open_profile(self):
         """Abre a janela de perfil do usuário"""
         try:
@@ -1489,12 +1754,7 @@ class UserManager:
                 self.usuario['tipo'] = 'Comum'
 
             from ui.profile_window import ProfileWindow
-
-            # --- CORREÇÃO APLICADA AQUI ---
-            # 1. Carregamos o pixmap do logo usando um método da MainWindow
             logo_pixmap = self.main_window.carregar_logo_pixmap()
-
-            # 2. Passamos o logo para o construtor da ProfileWindow
             profile_dialog = ProfileWindow(self.db, self.usuario, self.main_window.theme_colors, logo_pixmap)
             
             self.active_dialogs['profile'] = profile_dialog
@@ -1506,8 +1766,6 @@ class UserManager:
         except Exception as e:
             QMessageBox.critical(self.main_window, "Erro", f"Erro ao abrir perfil: {str(e)}")
     
-    # Em main.py, dentro da classe UserManager
-
     def change_password(self):
         """Abre a janela de alteração de senha"""
         try:
@@ -1516,8 +1774,6 @@ class UserManager:
                 return
             
             from ui.change_password_window import ChangePasswordWindow
-            
-            # --- CORREÇÃO APLICADA AQUI ---
             logo_pixmap = self.main_window.carregar_logo_pixmap()
             password_dialog = ChangePasswordWindow(self.db, self.usuario['id'], self.main_window.theme_colors, logo_pixmap)
             
@@ -1528,16 +1784,18 @@ class UserManager:
         except Exception as e:
             QMessageBox.critical(self.main_window, "Erro", f"Erro ao abrir alteração de senha: {str(e)}")
     
+    # Em UserManager (main.py ou ui/main_window.py)
     def open_admin(self):
         """Abre a janela de administração."""
         try:
             user_type = self.usuario.get('tipo') or ''
             if user_type.lower() != 'admin':
-                QMessageBox.warning(self.main_window, "Acesso Negado", "Você não tem permissão para acessar esta área.")
+                # ... (código de acesso negado) ...
                 return
 
             from ui.admin_window import AdminWindow
-            admin_dialog = AdminWindow(self.db, self.usuario, self.main_window.theme_colors)
+            # A chamada agora inclui o objeto 'settings' da MainWindow
+            admin_dialog = AdminWindow(self.db, self.usuario, self.main_window.settings, self.main_window.theme_colors)
             admin_dialog.logo_alterado.connect(self.main_window.recarregar_logo_dinamico)
 
             self.active_dialogs['admin'] = admin_dialog
@@ -1598,16 +1856,11 @@ class UserManager:
         try:
             self.usuario = self.db.obter_usuario_por_id(self.usuario['id'])
 
-            # --- CORREÇÃO PRINCIPAL (PARTE 3) ---
-            # Após recarregar os dados do banco, aplicamos a mesma verificação.
             if self.usuario and not self.usuario.get('tipo'):
                 self.usuario['tipo'] = 'Comum'
             
-            if self.user_status_label:
-                nome_usuario = self.usuario.get('nome', 'Usuário Desconhecido')
-                tipo_usuario = self.usuario.get('tipo', 'Indefinido')
-                user_info = f"Usuário: {nome_usuario} | Perfil: {tipo_usuario.capitalize()}"
-                self.user_status_label.setText(user_info)
+            # Reutiliza a mesma lógica para atualizar a barra de status
+            self.setup_status_bar()
             
             if self.user_menu_widget:
                 self.user_menu_widget.usuario = self.usuario
@@ -1642,7 +1895,6 @@ class UserManager:
             import os
             os._exit(0)
     
-     # NOVO MÉTODO ADICIONADO AQUI
     def update_ui_for_theme(self, theme_colors):
         """
         Atualiza todos os componentes da UI gerenciados pelo UserManager para refletir a mudança de tema.
@@ -1655,12 +1907,10 @@ class UserManager:
                 self.user_menu_widget.avatar_widget.theme_colors = theme_colors
                 self.user_menu_widget.avatar_widget.create_avatar()
 
-        # --- CORREÇÃO: Aplica o estilo diretamente no label da barra de status ---
-        if self.user_status_label:
-            text_color = theme_colors.get('text_color', '#000')
-            self.user_status_label.setStyleSheet(f"color: {text_color}; padding-right: 10px;")
-
-class ConfigDialog(QDialog):
+# =================================================================================
+#       INÍCIO DA MODIFICAÇÃO: NOVA CLASSE NotificationConfigDialog
+# =================================================================================
+class NotificationConfigDialog(QDialog):
     def __init__(self, settings, theme_colors, parent=None):
         super().__init__(parent)
         self.settings = settings
@@ -1668,46 +1918,26 @@ class ConfigDialog(QDialog):
         
         self.initUI()
         self.apply_styles()
-        # --- INÍCIO DA MODIFICAÇÃO 1 ---
-        # Conecta o checkbox a uma função para habilitar/desabilitar os campos de email
         self.enable_notifications_check.toggled.connect(self.toggle_email_fields)
-        # Chama a função uma vez para definir o estado inicial correto
         self.toggle_email_fields(self.enable_notifications_check.isChecked())
-        # --- FIM DA MODIFICAÇÃO 1 ---
 
     def initUI(self):
-        self.setWindowTitle("Configurações")
+        self.setWindowTitle("Configurar Notificações")
         self.setMinimumWidth(550)
-        self.setObjectName("configDialog")
+        self.setObjectName("configDialog") # Reutiliza o estilo do diálogo principal
         
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(15, 15, 15, 15)
         main_layout.setSpacing(20)
 
-        title_label = QLabel("Configurações do Sistema")
+        title_label = QLabel("Notificações por E-mail")
         title_label.setFont(QFont("Segoe UI", 16, QFont.Bold))
         title_label.setObjectName("dialogTitle")
         title_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(title_label)
 
-        appearance_group = QGroupBox("Aparência")
-        appearance_group.setFont(QFont("Segoe UI", 10, QFont.Bold))
-        appearance_layout = QFormLayout(appearance_group)
-        appearance_layout.setLabelAlignment(Qt.AlignLeft)
-        appearance_layout.setSpacing(10)
-        
-        self.tema_combo = QComboBox()
-        self.tema_combo.addItem(IconManager.get_icon('estoque', color=self.theme_colors.get('text_color', '#000')), "Tema Claro", "light")
-        self.tema_combo.addItem(IconManager.get_icon('estoque', color=self.theme_colors.get('text_color', '#000')), "Tema Escuro", "dark")
-        current_theme = self.settings.get_theme()
-        index = self.tema_combo.findData(current_theme)
-        if index != -1:
-            self.tema_combo.setCurrentIndex(index)
-        
-        appearance_layout.addRow(self.create_label_with_icon("Tema:", "config"), self.tema_combo)
-        main_layout.addWidget(appearance_group)
-
-        notification_group = QGroupBox("Notificações por E-mail")
+        # Grupo de configurações
+        notification_group = QGroupBox("Configurações de Envio")
         notification_group.setFont(QFont("Segoe UI", 10, QFont.Bold))
         notification_layout = QVBoxLayout(notification_group)
         notification_layout.setSpacing(10)
@@ -1727,23 +1957,10 @@ class ConfigDialog(QDialog):
         smtp_form_layout = QFormLayout()
         smtp_config = self.settings.get_smtp_config()
         
-        # --- INÍCIO DA MODIFICAÇÃO 2 ---
-        # Os campos de host e porta foram removidos da interface
-        # self.smtp_host_edit = QLineEdit(smtp_config['host'])
-        # self.smtp_port_edit = QSpinBox()
-        # ...
-        # --- FIM DA MODIFICAÇÃO 2 ---
-        
         self.smtp_user_edit = QLineEdit(smtp_config.get('user', ''))
         self.smtp_pass_edit = QLineEdit(smtp_config.get('password', ''))
         self.smtp_pass_edit.setEchoMode(QLineEdit.Password)
         self.smtp_recipient_edit = QLineEdit(smtp_config.get('recipient', ''))
-        
-        # --- INÍCIO DA MODIFICAÇÃO 3 ---
-        # As linhas que adicionavam os campos de host e porta ao layout foram removidas
-        # smtp_form_layout.addRow("Servidor SMTP:", self.smtp_host_edit)
-        # smtp_form_layout.addRow("Porta:", self.smtp_port_edit)
-        # --- FIM DA MODIFICAÇÃO 3 ---
         
         smtp_form_layout.addRow("Usuário (e-mail):", self.smtp_user_edit)
         smtp_form_layout.addRow("Senha:", self.smtp_pass_edit)
@@ -1751,6 +1968,151 @@ class ConfigDialog(QDialog):
         notification_layout.addLayout(smtp_form_layout)
         
         main_layout.addWidget(notification_group)
+        main_layout.addStretch()
+
+        # Botões de Ação
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        self.cancelar_btn = QPushButton("Cancelar")
+        self.cancelar_btn.setObjectName("cancelButton")
+        self.cancelar_btn.setIcon(IconManager.get_icon('cancel', color=self.theme_colors.get('text_color', '#000')))
+        self.cancelar_btn.clicked.connect(self.reject)
+        
+        self.salvar_btn = QPushButton("Salvar Alterações")
+        self.salvar_btn.setObjectName("saveButton")
+        self.salvar_btn.setIcon(IconManager.get_icon('save', color='white'))
+        self.salvar_btn.clicked.connect(self.salvar_configuracoes)
+
+        button_layout.addWidget(self.cancelar_btn)
+        button_layout.addWidget(self.salvar_btn)
+        main_layout.addLayout(button_layout)
+    
+    def toggle_email_fields(self, enabled):
+        """Habilita ou desabilita os campos de e-mail com base no estado do checkbox."""
+        self.time_edit.setEnabled(enabled)
+        self.smtp_user_edit.setEnabled(enabled)
+        self.smtp_pass_edit.setEnabled(enabled)
+        self.smtp_recipient_edit.setEnabled(enabled)
+
+    def create_label_with_icon(self, text, icon_name):
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        
+        icon_label = QLabel()
+        icon_color = self.theme_colors.get('text_secondary', '#6d6d70')
+        icon = IconManager.get_icon(icon_name, color=icon_color).pixmap(16, 16)
+        icon_label.setPixmap(icon)
+        
+        text_label = QLabel(text)
+        
+        layout.addWidget(icon_label)
+        layout.addWidget(text_label)
+        layout.addStretch()
+        
+        return widget
+
+    def apply_styles(self):
+        theme = self.theme_colors
+        style = f"""
+            #configDialog {{ background-color: {theme.get('bg_color', '#fff')}; }}
+            #dialogTitle {{ color: {theme.get('text_color', '#000')}; margin-bottom: 10px; }}
+            QGroupBox {{
+                color: {theme.get('text_color', '#000')};
+                border: 1px solid {theme.get('border_color', '#ccc')};
+                border-radius: 8px; margin-top: 10px; padding: 10px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin; subcontrol-position: top left;
+                padding: 0 5px 5px 10px; color: {theme.get('accent_color', '#007aff')};
+            }}
+            QLabel, QCheckBox {{ color: {theme.get('text_color', '#000')}; font-size: 10pt; }}
+            QLineEdit, QComboBox, QSpinBox, QTimeEdit {{
+                background-color: {theme.get('surface_color', '#eee')};
+                color: {theme.get('text_color', '#000')};
+                border: 1px solid {theme.get('border_color', '#ccc')};
+                border-radius: 4px; padding: 6px; font-size: 10pt;
+            }}
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QTimeEdit:focus {{ border: 1px solid {theme.get('accent_color', '#007aff')}; }}
+            #saveButton {{
+                background-color: {theme.get('accent_color', '#007aff')}; color: white;
+                border: none; padding: 8px 16px; border-radius: 4px; font-weight: bold;
+            }}
+            #saveButton:hover {{ background-color: #0069d9; }}
+            #cancelButton {{
+                background-color: transparent; color: {theme.get('text_color', '#000')};
+                border: 1px solid {theme.get('border_color', '#ccc')};
+                padding: 8px 16px; border-radius: 4px; font-weight: bold;
+            }}
+            #cancelButton:hover {{ background-color: {theme.get('button_hover', '#ddd')}; border-color: {theme.get('text_color', '#000')}; }}
+        """
+        self.setStyleSheet(style)
+
+    def salvar_configuracoes(self):
+        self.settings.set_notification_enabled(self.enable_notifications_check.isChecked())
+        self.settings.set_notification_time(self.time_edit.time().toString("HH:mm"))
+
+        new_smtp_config = {
+            "host": "smtp.gmail.com",
+            "port": 587,
+            "user": self.smtp_user_edit.text(),
+            "password": self.smtp_pass_edit.text(),
+            "recipient": self.smtp_recipient_edit.text()
+        }
+        self.settings.set_smtp_config(new_smtp_config)
+        
+        self.accept()
+# =================================================================================
+#       FIM DA MODIFICAÇÃO
+# =================================================================================
+
+
+class ConfigDialog(QDialog):
+    def __init__(self, settings, theme_colors, parent=None):
+        super().__init__(parent)
+        self.settings = settings
+        self.theme_colors = theme_colors
+        
+        self.initUI()
+        self.apply_styles()
+
+    def initUI(self):
+        self.setWindowTitle("Configurações")
+        self.setMinimumWidth(550)
+        self.setObjectName("configDialog")
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        main_layout.setSpacing(20)
+
+        title_label = QLabel("Configurações do Sistema")
+        title_label.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        title_label.setObjectName("dialogTitle")
+        title_label.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(title_label)
+
+        # =========================================================
+        #       INÍCIO DA MODIFICAÇÃO: REMOVER GRUPO DE NOTIFICAÇÃO
+        # =========================================================
+        appearance_group = QGroupBox("Aparência")
+        appearance_group.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        appearance_layout = QFormLayout(appearance_group)
+        appearance_layout.setLabelAlignment(Qt.AlignLeft)
+        appearance_layout.setSpacing(10)
+        
+        self.tema_combo = QComboBox()
+        self.tema_combo.addItem(IconManager.get_icon('estoque', color=self.theme_colors.get('text_color', '#000')), "Tema Claro", "light")
+        self.tema_combo.addItem(IconManager.get_icon('estoque', color=self.theme_colors.get('text_color', '#000')), "Tema Escuro", "dark")
+        current_theme = self.settings.get_theme()
+        index = self.tema_combo.findData(current_theme)
+        if index != -1:
+            self.tema_combo.setCurrentIndex(index)
+        
+        appearance_layout.addRow(self.create_label_with_icon("Tema:", "config"), self.tema_combo)
+        main_layout.addWidget(appearance_group)
+        
         main_layout.addStretch()
 
         button_layout = QHBoxLayout()
@@ -1769,16 +2131,9 @@ class ConfigDialog(QDialog):
         button_layout.addWidget(self.cancelar_btn)
         button_layout.addWidget(self.salvar_btn)
         main_layout.addLayout(button_layout)
-    
-    # --- INÍCIO DA MODIFICAÇÃO 4 ---
-    # Nova função para controlar a visibilidade dos campos de e-mail
-    def toggle_email_fields(self, enabled):
-        """Habilita ou desabilita os campos de e-mail com base no estado do checkbox."""
-        self.time_edit.setEnabled(enabled)
-        self.smtp_user_edit.setEnabled(enabled)
-        self.smtp_pass_edit.setEnabled(enabled)
-        self.smtp_recipient_edit.setEnabled(enabled)
-    # --- FIM DA MODIFICAÇÃO 4 ---
+        # =========================================================
+        #       FIM DA MODIFICAÇÃO
+        # =========================================================
 
     def create_label_with_icon(self, text, icon_name):
         widget = QWidget()
@@ -1839,22 +2194,16 @@ class ConfigDialog(QDialog):
         tema = self.tema_combo.currentData()
         self.settings.set_theme(tema)
 
-        self.settings.set_notification_enabled(self.enable_notifications_check.isChecked())
-        self.settings.set_notification_time(self.time_edit.time().toString("HH:mm"))
-
-        # --- INÍCIO DA MODIFICAÇÃO 5 ---
-        # Ao salvar, os valores de host e porta são definidos de forma fixa (hardcoded),
-        # garantindo que o sistema sempre saiba como se conectar.
-        new_smtp_config = {
-            "host": "smtp.gmail.com",
-            "port": 587,
-            "user": self.smtp_user_edit.text(),
-            "password": self.smtp_pass_edit.text(),
-            "recipient": self.smtp_recipient_edit.text()
-        }
-        # --- FIM DA MODIFICAÇÃO 5 ---
-        
-        self.settings.set_smtp_config(new_smtp_config)
+        # =========================================================
+        #       INÍCIO DA MODIFICAÇÃO: REMOVER SALVAMENTO DE NOTIFICAÇÃO
+        # =========================================================
+        # As linhas abaixo foram removidas daqui e movidas para o novo diálogo
+        # self.settings.set_notification_enabled(...)
+        # self.settings.set_notification_time(...)
+        # self.settings.set_smtp_config(...)
+        # =========================================================
+        #       FIM DA MODIFICAÇÃO
+        # =========================================================
         
         self.accept()
 
@@ -2028,3 +2377,107 @@ class AlertDialog(QDialog):
         border_color = self.theme_colors['surface_color'] if self.pulse_state else self.alert_info['color']
         self.apply_style(border_color)
         self.pulse_state = not self.pulse_state
+
+# =================================================================================
+#       INÍCIO DA SUGESTÃO: ADICIONE ESTA NOVA CLASSE AO FINAL DO ARQUIVO main.py
+# =================================================================================
+class GlobalSearchResultsDialog(QDialog):
+    """Uma janela de diálogo para exibir os resultados da busca global em abas."""
+    def __init__(self, resultados, theme_colors, parent=None):
+        super().__init__(parent)
+        self.resultados = resultados
+        self.theme_colors = theme_colors
+        self.setWindowTitle("Resultados da Busca")
+        self.setMinimumSize(800, 500)
+        self.setObjectName("searchResultsDialog")
+        self.initUI()
+        self.apply_styles()
+
+    def initUI(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+
+        title_label = QLabel("Resultados da Busca Global")
+        title_label.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        title_label.setObjectName("dialogTitle")
+        main_layout.addWidget(title_label)
+
+        self.tabs = QTabWidget()
+        main_layout.addWidget(self.tabs)
+
+        self.setup_produtos_tab()
+        self.setup_clientes_tab()
+        self.setup_fornecedores_tab()
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        close_button = QPushButton("Fechar")
+        close_button.setObjectName("primaryActionButton") # Reutiliza estilo
+        close_button.clicked.connect(self.accept)
+        button_layout.addWidget(close_button)
+        main_layout.addLayout(button_layout)
+
+    def create_table(self, headers):
+        table = QTableWidget()
+        table.setColumnCount(len(headers))
+        table.setHorizontalHeaderLabels(headers)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectRows)
+        table.verticalHeader().setVisible(False)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        return table
+
+    def setup_produtos_tab(self):
+        produtos = self.resultados.get('produtos', [])
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        table = self.create_table(["Nome", "Código de Barras", "Preço de Venda"])
+        table.setRowCount(len(produtos))
+        for row, item in enumerate(produtos):
+            table.setItem(row, 0, QTableWidgetItem(item.get('nome')))
+            table.setItem(row, 1, QTableWidgetItem(item.get('codigo_barras')))
+            table.setItem(row, 2, QTableWidgetItem(f"R$ {item.get('preco_venda', 0):.2f}"))
+        layout.addWidget(table)
+        self.tabs.addTab(widget, f"Produtos ({len(produtos)})")
+
+    def setup_clientes_tab(self):
+        clientes = self.resultados.get('clientes', [])
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        table = self.create_table(["Nome", "Telefone", "Email"])
+        table.setRowCount(len(clientes))
+        for row, item in enumerate(clientes):
+            table.setItem(row, 0, QTableWidgetItem(item.get('nome')))
+            table.setItem(row, 1, QTableWidgetItem(item.get('telefone')))
+            table.setItem(row, 2, QTableWidgetItem(item.get('email')))
+        layout.addWidget(widget)
+        self.tabs.addTab(widget, f"Clientes ({len(clientes)})")
+
+    def setup_fornecedores_tab(self):
+        fornecedores = self.resultados.get('fornecedores', [])
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        table = self.create_table(["Empresa", "Representante", "Telefone"])
+        table.setRowCount(len(fornecedores))
+        for row, item in enumerate(fornecedores):
+            table.setItem(row, 0, QTableWidgetItem(item.get('empresa')))
+            table.setItem(row, 1, QTableWidgetItem(item.get('representante')))
+            table.setItem(row, 2, QTableWidgetItem(item.get('telefone')))
+        layout.addWidget(widget)
+        self.tabs.addTab(widget, f"Fornecedores ({len(fornecedores)})")
+
+    def apply_styles(self):
+        # Reutiliza o estilo dos componentes já definidos na folha de estilo principal
+        self.setStyleSheet(f"""
+            #searchResultsDialog {{
+                background-color: {self.theme_colors['bg_color']};
+            }}
+            #dialogTitle {{
+                color: {self.theme_colors['text_color']};
+                margin-bottom: 10px;
+            }}
+        """)
+# =================================================================================
+#       FIM DA NOVA CLASSE
+# =================================================================================

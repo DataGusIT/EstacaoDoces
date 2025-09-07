@@ -121,9 +121,11 @@ class ThemedProgressDialog(QDialog):
 #       CLASSE WORKER PARA IMPORTAÇÃO DE CSV EM THREAD              #
 # ================================================================= #
 
+
 class PromocaoCsvImportWorker(QThread):
     progress = pyqtSignal(int)
-    finished = pyqtSignal(int, int, list)
+    # Adicionamos o contador de 'atualizados' ao sinal
+    finished = pyqtSignal(int, int, int, list)  # importadas, atualizadas, erros, detalhes
 
     def __init__(self, db_path, file_path):
         super().__init__()
@@ -131,57 +133,100 @@ class PromocaoCsvImportWorker(QThread):
         self.file_path = file_path
         self.local_db = None
 
+    def _parse_flexible_date(self, date_string):
+        """Tenta analisar uma string de data com vários formatos comuns."""
+        if not date_string: return None
+        formats_to_try = ['%d/%m/%Y', '%Y-%m-%d']
+        for fmt in formats_to_try:
+            try:
+                return datetime.strptime(date_string, fmt).strftime('%Y-%m-%d')
+            except ValueError:
+                continue
+        raise ValueError(f"a data '{date_string}' não corresponde a nenhum formato esperado (DD/MM/YYYY ou YYYY-MM-DD)")
+
     def run(self):
         importadas = 0
+        atualizadas = 0
         erros = 0
         detalhes_erros = []
         try:
             self.local_db = DatabaseManager(self.db_path)
             
-            with open(self.file_path, 'r', encoding='utf-8') as f:
-                total_linhas = max(1, sum(1 for _ in f) - 1)
+            # Otimização: Carrega promoções e produtos existentes para busca rápida
+            promocoes_existentes = {p['id'] for p in self.local_db.listar_promocoes()}
+            
+            # Lê o arquivo CSV para a memória de uma vez
+            with open(self.file_path, mode='r', encoding='utf-8-sig') as csvfile:
+                leitor = csv.reader(csvfile)
+                try:
+                    todas_as_linhas = list(leitor)
+                except csv.Error as e:
+                    detalhes_erros.append(f"Erro de formatação no CSV: {e}")
+                    self.finished.emit(0, 0, 1, detalhes_erros)
+                    return
 
-            with open(self.file_path, 'r', encoding='utf-8') as csvfile:
-                reader = csv.DictReader(csvfile)
-                self.local_db.begin_transaction()
-                
-                for i, row in enumerate(reader):
-                    try:
-                        produto_nome = row.get('Produto', '').strip()
-                        if not produto_nome:
-                            raise ValueError("Nome do produto é obrigatório.")
-                        
-                        produto = self.local_db.buscar_produto_por_nome_exato(produto_nome)
-                        if not produto:
-                            raise ValueError(f"Produto '{produto_nome}' não encontrado.")
+            if len(todas_as_linhas) < 2:
+                detalhes_erros.append("Arquivo CSV vazio ou com apenas o cabeçalho.")
+                self.finished.emit(0, 0, 0, detalhes_erros)
+                return
 
-                        preco_antigo = float(row['Preço Antigo'].replace(',', '.'))
-                        preco_promo = float(row['Preço Promocional'].replace(',', '.'))
-                        data_inicio = datetime.strptime(row['Data Início'], '%d/%m/%Y').strftime('%Y-%m-%d')
-                        data_fim = datetime.strptime(row['Data Fim'], '%d/%m/%Y').strftime('%Y-%m-%d')
+            cabecalho_raw = todas_as_linhas[0]
+            linhas_de_dados = todas_as_linhas[1:]
+            cabecalho = [str(h).lower().strip() for h in cabecalho_raw]
+            total_linhas = len(linhas_de_dados)
 
-                        self.local_db.adicionar_promocao(
-                            produto_id=produto['id'],
-                            preco_antigo=preco_antigo,
-                            preco_promocional=preco_promo,
-                            data_inicio=data_inicio,
-                            data_fim=data_fim,
-                            descricao=row.get('Descrição', '').strip()
-                        )
+            self.local_db.begin_transaction()
+            
+            for i, valores_linha in enumerate(linhas_de_dados):
+                try:
+                    row_dict = dict(zip(cabecalho, valores_linha))
+                    
+                    produto_nome = row_dict.get('produto', '').strip()
+                    if not produto_nome:
+                        raise ValueError("A coluna 'produto' é obrigatória.")
+                    
+                    produto = self.local_db.buscar_produto_por_nome_exato(produto_nome)
+                    if not produto:
+                        raise ValueError(f"Produto '{produto_nome}' não encontrado no banco de dados.")
+
+                    dados_promocao = {
+                        'produto_id': produto['id'],
+                        'preco_antigo': float(row_dict.get('preço antigo', '0').replace(',', '.')),
+                        'preco_promocional': float(row_dict.get('preço promocional', '0').replace(',', '.')),
+                        'data_inicio': self._parse_flexible_date(row_dict.get('data início', '')),
+                        'data_fim': self._parse_flexible_date(row_dict.get('data fim', '')),
+                        'descricao': row_dict.get('descrição', '').strip(),
+                        'tipo_aplicacao': row_dict.get('tipo_aplicacao', 'Ambos').strip(),
+                        'preco_promocional_fracao': float(row_dict.get('preço promocional fração', '0').replace(',', '.'))
+                    }
+
+                    id_para_atualizar = None
+                    csv_id_str = row_dict.get('id', '').strip()
+                    if csv_id_str.isdigit():
+                        csv_id = int(csv_id_str)
+                        if csv_id in promocoes_existentes:
+                            id_para_atualizar = csv_id
+
+                    if id_para_atualizar is not None:
+                        self.local_db.atualizar_promocao(id_para_atualizar, **dados_promocao)
+                        atualizadas += 1
+                    else:
+                        self.local_db.adicionar_promocao(**dados_promocao)
                         importadas += 1
-                    except Exception as e:
-                        erros += 1
-                        detalhes_erros.append(f"Linha {i+2}: {e}")
-                    self.progress.emit(int(((i + 1) / total_linhas) * 100))
+                except Exception as e:
+                    erros += 1
+                    detalhes_erros.append(f"Linha {i+2}: {str(e)}")
                 
-                self.local_db.commit_transaction()
+                self.progress.emit(int(((i + 1) / total_linhas) * 100))
+
+            self.local_db.commit_transaction()
         except Exception as e:
             if self.local_db: self.local_db.rollback_transaction()
-            detalhes_erros.append(f"Erro geral: {e}")
+            detalhes_erros.append(f"Erro Crítico na Importação: {str(e)}")
         finally:
             if self.local_db: self.local_db.fechar()
         
-        self.finished.emit(importadas, erros, detalhes_erros)
+        self.finished.emit(importadas, atualizadas, erros, detalhes_erros)
 
 class PromocoesWindow(QWidget):
     def __init__(self, db, theme_colors):
@@ -472,28 +517,36 @@ class PromocoesWindow(QWidget):
     
     def exportar_csv(self):
         try:
+            arquivo, _ = QFileDialog.getSaveFileName(self, "Exportar Promoções", "promocoes.csv", "Arquivos CSV (*.csv)")
+            if not arquivo: return
+
             promocoes = self.db.listar_promocoes()
             if not promocoes:
                 AlertDialog(self, "Exportar CSV", "Não há promoções para exportar.", alert_type='info', theme_colors=self.theme_colors).exec_()
                 return
-                
-            arquivo, _ = QFileDialog.getSaveFileName(self, "Exportar Promoções", "promocoes.csv", "Arquivos CSV (*.csv)")
-            if not arquivo:
-                return
 
             with open(arquivo, 'w', newline='', encoding='utf-8') as csvfile:
-                fieldnames = ['ID', 'Produto', 'Preço Antigo', 'Preço Promocional', 'Taxa de Desconto (%)', 'Data Início', 'Data Fim', 'Descrição']
+                # Adicionamos os novos campos ao cabeçalho
+                fieldnames = [
+                    'id', 'produto', 'preço antigo', 'preço promocional', 
+                    'data início', 'data fim', 'descrição', 'tipo_aplicacao', 
+                    'preço promocional fração'
+                ]
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
-                for promocao in promocoes:
-                    taxa = ((promocao['preco_antigo'] - promocao['preco_promocional']) / promocao['preco_antigo']) * 100 if promocao['preco_antigo'] > 0 else 0
+                
+                for promocao_row in promocoes:
+                    promocao = dict(promocao_row)
                     writer.writerow({
-                        'ID': promocao['id'], 'Produto': promocao['produto_nome'],
-                        'Preço Antigo': f"{promocao['preco_antigo']:.2f}",
-                        'Preço Promocional': f"{promocao['preco_promocional']:.2f}",
-                        'Taxa de Desconto (%)': f"{taxa:.1f}",
-                        'Data Início': promocao['data_inicio'], 'Data Fim': promocao['data_fim'],
-                        'Descrição': promocao.get('descricao', '')
+                        'id': promocao['id'], 
+                        'produto': promocao['produto_nome'],
+                        'preço antigo': f"{promocao.get('preco_antigo', 0):.2f}",
+                        'preço promocional': f"{promocao.get('preco_promocional', 0):.2f}",
+                        'data início': promocao['data_inicio'], 
+                        'data fim': promocao['data_fim'],
+                        'descrição': promocao.get('descricao', ''),
+                        'tipo_aplicacao': promocao.get('tipo_aplicacao', 'Ambos'),
+                        'preço promocional fração': f"{promocao.get('preco_promocional_fracao', 0):.2f}"
                     })
             
             AlertDialog(self, "Sucesso", f"Promoções exportadas para:\n{arquivo}", alert_type='success', theme_colors=self.theme_colors).exec_()
@@ -514,15 +567,35 @@ class PromocoesWindow(QWidget):
         self.import_thread.start()
         self.progress_dialog.exec_()
 
-    def importacao_concluida(self, importadas, erros, detalhes):
+    def importacao_concluida(self, importadas, atualizadas, erros, detalhes):
         self.progress_dialog.close()
         self.atualizar_visualizacao_dados()
-        msg = f"Importação concluída!\n\n- Promoções importadas: {importadas}\n- Linhas com erro: {erros}"
-        if erros > 0:
-            msg += "\n\nPrimeiros erros:\n" + "\n".join(detalhes[:5])
-            AlertDialog(self, "Importação com Erros", msg, alert_type='warning', theme_colors=self.theme_colors).exec_()
+
+        msg = (f"Importação concluída!\n\n"
+               f"✔ Promoções novas criadas: {importadas}\n"
+               f"✔ Promoções existentes atualizadas: {atualizadas}\n"
+               f"❌ Linhas com erro: {erros}")
+               
+        if detalhes:
+            erros_detalhados = "\n\nDetalhes dos problemas:\n" + "\n".join(detalhes[:5])
+            msg += erros_detalhados
+            
+            alert_type = 'warning' if (importadas > 0 or atualizadas > 0) else 'error'
+            title = "Importação Finalizada com Avisos" if alert_type == 'warning' else "Importação Falhou"
+            AlertDialog(self, title, msg, alert_type=alert_type, theme_colors=self.theme_colors).exec_()
         else:
-            AlertDialog(self, "Importação Concluída", msg, alert_type='success', theme_colors=self.theme_colors).exec_()
+            AlertDialog(self, "Importação Concluída com Sucesso", msg, alert_type='success', theme_colors=self.theme_colors).exec_()
+    
+    def selecionar_item_por_id(self, item_id):
+        """Encontra e seleciona um item na tabela com base no seu ID."""
+        for row in range(self.tabela.rowCount()):
+            item = self.tabela.item(row, 0)
+            if item: # Garante que a célula não está vazia
+                id_na_tabela = item.data(Qt.UserRole)
+                if id_na_tabela == item_id:
+                    self.tabela.selectRow(row)
+                    self.tabela.scrollToItem(item, QTableWidget.ScrollHint.PositionAtCenter)
+                    break
 
 class FormularioPromocao(QDialog):
     def __init__(self, db, theme_colors, promocao_id=None, parent=None):
