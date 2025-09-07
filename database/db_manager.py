@@ -2,6 +2,7 @@ import sqlite3
 import os
 import hashlib
 from datetime import datetime, timedelta
+from thefuzz import process
 
 class DatabaseManager:
     def __init__(self, db_file='database/estoque.db'):
@@ -682,12 +683,14 @@ class DatabaseManager:
     def atualizar_estoque_venda(self, produto_id, quantidade_vendida, is_embalagem):
         """
         Atualiza o estoque de um produto após a venda.
+        REMOVIDO COMMIT INTERNO para suportar transações externas.
         Retorna (True, "Mensagem de Sucesso") ou (False, "Mensagem de Erro").
         """
         try:
             produto = self.obter_produto(produto_id)
             if not produto:
-                return False, "Produto não encontrado."
+                # Lança uma exceção para ser capturada pela transação
+                raise ValueError("Produto não encontrado para atualização de estoque.")
 
             if is_embalagem:
                 # Venda de embalagem inteira
@@ -1421,6 +1424,25 @@ class DatabaseManager:
             # Lançar a exceção permite que a transação externa faça o rollback
             raise e
     
+    def listar_movimentos_caixa(self, caixa_id):
+        """
+        Lista todos os movimentos de um caixa específico, ordenados por data.
+        Este método estava faltando e causava o AttributeError.
+        """
+        try:
+            if not self.ensure_connection(): return []
+            self.cursor.execute("""
+                SELECT id, datetime(data_hora, 'localtime') as data_hora, tipo, descricao,
+                       valor, forma_pagamento, referencia_id, tipo_referencia
+                FROM movimentos_caixa
+                WHERE caixa_id = ?
+                ORDER BY data_hora DESC
+            """, (caixa_id,))
+            return [dict(row) for row in self.cursor.fetchall()]
+        except Exception as e:
+            print(f"Erro ao listar movimentos do caixa: {e}")
+            return []
+    
     def listar_movimentos_por_periodo(self, caixa_id, data_inicio, data_fim):
         """
         CORRIGIDO: Também utiliza a conexão principal (self.cursor) para garantir
@@ -1511,62 +1533,70 @@ class DatabaseManager:
 
     def gerar_relatorio_periodo(self, data_inicio, data_fim):
         """
-        CORRIGIDO: Garante que todas as consultas de data usem 'localtime' para
-        consistência com o resto da aplicação e para evitar erros de fuso horário.
+        CORRIGIDO E REDUNDANTE: Gera um relatório de período detalhado, separando
+        o faturamento das vendas de outras movimentações para garantir clareza e
+        consistência nos totais.
         """
         try:
             if not self.ensure_connection():
                 raise Exception("Não foi possível conectar ao banco de dados.")
 
-            conn = self.conn
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+            cursor = self.conn.cursor()
 
-            # Movimentos de caixa
+            # 1. Obter resumo de vendas (Faturamento Bruto) da tabela de vendas
             cursor.execute("""
-                SELECT tipo, SUM(valor) as total
-                FROM movimentos_caixa
-                WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
-                GROUP BY tipo
-            """, (data_inicio, data_fim))
-
-            movimentos_resumo = {'total_entradas': 0, 'total_saidas': 0}
-            for row in cursor.fetchall():
-                if row['tipo'] == 'Entrada':
-                    movimentos_resumo['total_entradas'] = row['total']
-                else:
-                    movimentos_resumo['total_saidas'] = row['total']
-
-            # Vendas
-            cursor.execute("""
-                SELECT COUNT(*) as qtd, SUM(valor_total) as total, SUM(desconto) as descontos
+                SELECT
+                    COUNT(id) as qtd_vendas,
+                    SUM(valor_total) as faturamento_bruto,
+                    SUM(desconto) as total_descontos
                 FROM vendas
-                WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
+                WHERE date(data_hora, 'localtime') BETWEEN ? AND ? AND status = 'Concluída'
             """, (data_inicio, data_fim))
             vendas_resumo = cursor.fetchone()
 
-            # Formas de pagamento
+            faturamento_bruto = vendas_resumo['faturamento_bruto'] if vendas_resumo and vendas_resumo['faturamento_bruto'] is not None else 0
+            qtd_vendas = vendas_resumo['qtd_vendas'] if vendas_resumo else 0
+            total_descontos = vendas_resumo['total_descontos'] if vendas_resumo and vendas_resumo['total_descontos'] is not None else 0
+
+            # 2. Obter resumo detalhado dos movimentos de caixa em uma única consulta
+            cursor.execute("""
+                SELECT
+                    SUM(CASE WHEN tipo = 'Entrada' AND tipo_referencia = 'Venda' THEN valor ELSE 0 END) as faturamento_liquido,
+                    SUM(CASE WHEN tipo = 'Entrada' AND (tipo_referencia IS NULL OR tipo_referencia != 'Venda') THEN valor ELSE 0 END) as outras_entradas,
+                    SUM(CASE WHEN tipo = 'Saída' THEN valor ELSE 0 END) as total_saidas
+                FROM movimentos_caixa
+                WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
+            """, (data_inicio, data_fim))
+            movimentos_resumo = cursor.fetchone()
+
+            faturamento_liquido = movimentos_resumo['faturamento_liquido'] if movimentos_resumo and movimentos_resumo['faturamento_liquido'] is not None else 0
+            outras_entradas = movimentos_resumo['outras_entradas'] if movimentos_resumo and movimentos_resumo['outras_entradas'] is not None else 0
+            total_saidas = movimentos_resumo['total_saidas'] if movimentos_resumo and movimentos_resumo['total_saidas'] is not None else 0
+
+            # 3. Calcular os totais verificáveis
+            total_entradas = faturamento_liquido + outras_entradas
+            saldo_periodo = total_entradas - total_saidas
+
+            # 4. Obter dados detalhados para as tabelas (sem alterações aqui)
             cursor.execute("""
                 SELECT forma_pagamento, SUM(valor_total) as total
                 FROM vendas
-                WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
+                WHERE date(data_hora, 'localtime') BETWEEN ? AND ? AND status = 'Concluída'
                 GROUP BY forma_pagamento
             """, (data_inicio, data_fim))
             pagamentos = {row['forma_pagamento']: row['total'] for row in cursor.fetchall()}
 
-            # Produtos mais vendidos
             cursor.execute("""
                 SELECT p.id, p.nome, SUM(i.quantidade) as quantidade, SUM(i.subtotal) as valor_total
                 FROM itens_venda i
                 JOIN produtos p ON i.produto_id = p.id
                 JOIN vendas v ON i.venda_id = v.id
-                WHERE date(v.data_hora, 'localtime') BETWEEN ? AND ?
+                WHERE date(v.data_hora, 'localtime') BETWEEN ? AND ? AND v.status = 'Concluída'
                 GROUP BY p.id, p.nome
                 ORDER BY quantidade DESC
             """, (data_inicio, data_fim))
             produtos = [dict(row) for row in cursor.fetchall()]
 
-            # Lista de movimentos
             cursor.execute("""
                 SELECT id, datetime(data_hora, 'localtime') as data_hora, tipo, descricao,
                        valor, forma_pagamento, referencia_id, tipo_referencia
@@ -1576,27 +1606,28 @@ class DatabaseManager:
             """, (data_inicio, data_fim))
             movimentos = [dict(row) for row in cursor.fetchall()]
 
-            # Lista de vendas
             cursor.execute("""
                 SELECT v.id, datetime(v.data_hora, 'localtime') as data_hora,
                        COALESCE(c.nome, 'Cliente Não Identificado') as cliente,
                        v.valor_total, v.desconto, v.forma_pagamento
                 FROM vendas v
                 LEFT JOIN clientes c ON v.cliente_id = c.id
-                WHERE date(v.data_hora, 'localtime') BETWEEN ? AND ?
+                WHERE date(v.data_hora, 'localtime') BETWEEN ? AND ? AND v.status = 'Concluída'
                 ORDER BY v.data_hora DESC
             """, (data_inicio, data_fim))
             vendas = [dict(row) for row in cursor.fetchall()]
 
-            # Montar resultado
+            # 5. Montar o resultado final com os novos campos claros e verificáveis
             resultado = {
-                'total_entradas': movimentos_resumo['total_entradas'] or 0,
-                'total_saidas': movimentos_resumo['total_saidas'] or 0,
-                'saldo_periodo': (movimentos_resumo['total_entradas'] or 0) - (movimentos_resumo['total_saidas'] or 0),
-                'qtd_vendas': vendas_resumo['qtd'] if vendas_resumo else 0,
-                'valor_vendas': vendas_resumo['total'] if vendas_resumo else 0,
-                'valor_medio_venda': (vendas_resumo['total'] / vendas_resumo['qtd']) if vendas_resumo and vendas_resumo['qtd'] else 0,
-                'total_descontos': vendas_resumo['descontos'] if vendas_resumo else 0,
+                'faturamento_bruto': faturamento_bruto,
+                'faturamento_liquido': faturamento_liquido,
+                'outras_entradas': outras_entradas,
+                'total_entradas': total_entradas,
+                'total_saidas': total_saidas,
+                'saldo_periodo': saldo_periodo,
+                'qtd_vendas': qtd_vendas,
+                'valor_medio_venda': (faturamento_bruto / qtd_vendas) if qtd_vendas > 0 else 0,
+                'total_descontos': total_descontos,
                 'pagamentos': pagamentos,
                 'produtos_mais_vendidos': produtos,
                 'movimentos': movimentos,
@@ -1693,8 +1724,8 @@ class DatabaseManager:
     
     def obter_dados_dashboard(self, data_inicio, data_fim):
         """
-        VERSÃO COM LÓGICA FINANCEIRA CORRIGIDA: Interpreta corretamente
-        movimentos operacionais vs. de capital para um cálculo preciso de lucro.
+        VERSÃO CORRIGIDA 2.0: Corrige o erro 'sqlite3.Row' object has no attribute 'get'
+        garantindo o tratamento correto do resultado da consulta, mesmo quando vazio.
         """
         try:
             if not self.ensure_connection():
@@ -1702,11 +1733,10 @@ class DatabaseManager:
 
             cursor = self.conn.cursor()
 
-            # 1. LUCRO DAS VENDAS (Custo da Mercadoria Vendida)
-            # Esta parte já está correta e muito bem implementada!
+            # 1. LUCRO BRUTO DAS VENDAS (Receita - Custo do Produto)
             cursor.execute("""
                 SELECT id FROM vendas
-                WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
+                WHERE date(data_hora, 'localtime') BETWEEN ? AND ? AND status = 'Concluída'
             """, (data_inicio, data_fim))
             venda_ids_rows = cursor.fetchall()
             venda_ids = tuple(row['id'] for row in venda_ids_rows) if venda_ids_rows else ()
@@ -1720,7 +1750,7 @@ class DatabaseManager:
                             i.quantidade *
                             CASE
                                 WHEN i.vendido_como = 'Fração' THEN
-                                    COALESCE(p.preco_compra, 0) / p.qtd_por_embalagem
+                                    COALESCE(p.preco_compra, 0) / NULLIF(p.qtd_por_embalagem, 0)
                                 ELSE
                                     COALESCE(p.preco_compra, 0)
                             END
@@ -1729,46 +1759,61 @@ class DatabaseManager:
                     FROM itens_venda i
                     JOIN produtos p ON i.produto_id = p.id
                     WHERE i.venda_id {query_in_ids}
-                    AND p.preco_compra IS NOT NULL AND p.preco_compra > 0 AND p.qtd_por_embalagem > 0
+                    AND p.preco_compra IS NOT NULL AND p.preco_compra > 0
                 """)
                 lucro_resultado = cursor.fetchone()
                 lucro_de_vendas = lucro_resultado['lucro'] if lucro_resultado and lucro_resultado['lucro'] is not None else 0
 
-            # --- LÓGICA FINANCEIRA COM PERDAS ---
+            # 2. CALCULAR O TOTAL DAS TAXAS DE CARTÃO NO PERÍODO
+            total_taxas_cartao = 0
+            if venda_ids:
+                query_in_ids_vendas = f"IN {venda_ids}" if len(venda_ids) > 1 else f"= {venda_ids[0]}"
+                cursor.execute(f"""
+                    SELECT
+                        SUM(v.valor_total - m.valor) as total_taxas
+                    FROM vendas v
+                    JOIN movimentos_caixa m ON v.id = m.referencia_id AND m.tipo_referencia = 'Venda'
+                    WHERE v.id {query_in_ids_vendas}
+                    AND v.forma_pagamento LIKE 'Cartão%'
+                """)
+                taxas_resultado = cursor.fetchone()
+                total_taxas_cartao = taxas_resultado['total_taxas'] if taxas_resultado and taxas_resultado['total_taxas'] is not None else 0
+
+            # 3. LÓGICA FINANCEIRA GERAL (Outras receitas, despesas, perdas)
             cursor.execute("""
                 SELECT
                     SUM(CASE WHEN tipo = 'Entrada' AND tipo_referencia = 'Venda' THEN valor ELSE 0 END) as faturamento_vendas,
-                    SUM(CASE WHEN tipo = 'Entrada' AND tipo_referencia = 'Manual' AND afeta_financeiro = 'Operacional' THEN valor ELSE 0 END) as outras_receitas,
-                    SUM(CASE WHEN tipo = 'Saída' AND tipo_referencia = 'Manual' AND afeta_financeiro = 'Operacional' THEN valor ELSE 0 END) as despesas_operacionais,
-                    
-                    -- ---> NOVA LINHA PARA CALCULAR PERDAS <---
+                    SUM(CASE WHEN tipo = 'Entrada' AND (tipo_referencia IS NULL OR tipo_referencia != 'Venda') THEN valor ELSE 0 END) as outras_receitas,
+                    SUM(CASE WHEN tipo = 'Saída' AND afeta_financeiro = 'Operacional' THEN valor ELSE 0 END) as despesas_operacionais,
                     SUM(CASE WHEN afeta_financeiro = 'Perda' THEN valor ELSE 0 END) as total_perdas
-
                 FROM movimentos_caixa
                 WHERE date(data_hora, 'localtime') BETWEEN ? AND ?
             """, (data_inicio, data_fim))
-
+            
+            # ==================== INÍCIO DA CORREÇÃO ====================
             movimentos_financeiros = cursor.fetchone()
             
-            faturamento_vendas = movimentos_financeiros['faturamento_vendas'] or 0
-            outras_receitas = movimentos_financeiros['outras_receitas'] or 0
-            despesas_operacionais = movimentos_financeiros['despesas_operacionais'] or 0
-            total_perdas = movimentos_financeiros['total_perdas'] or 0 # <--- NOVO VALOR
+            faturamento_vendas = 0
+            outras_receitas = 0
+            despesas_operacionais = 0
+            total_perdas = 0
 
-            # CÁLCULO FINAL CORRETO
+            if movimentos_financeiros:
+                faturamento_vendas = movimentos_financeiros['faturamento_vendas'] or 0
+                outras_receitas = movimentos_financeiros['outras_receitas'] or 0
+                despesas_operacionais = movimentos_financeiros['despesas_operacionais'] or 0
+                total_perdas = movimentos_financeiros['total_perdas'] or 0
+            # ===================== FIM DA CORREÇÃO ======================
+
+            # 4. CÁLCULO FINAL CORRIGIDO
             faturamento_total_periodo = faturamento_vendas + outras_receitas
-            total_perdas = movimentos_financeiros['total_perdas'] or 0
-            lucro_liquido_periodo = lucro_de_vendas + outras_receitas - despesas_operacionais - total_perdas
-
-            # --- INÍCIO DA MODIFICAÇÃO: CÁLCULO DA MARGEM MÉDIA ---
+            lucro_liquido_periodo = lucro_de_vendas + outras_receitas - despesas_operacionais - total_perdas - total_taxas_cartao
             margem_media = (lucro_liquido_periodo / faturamento_total_periodo * 100) if faturamento_total_periodo > 0 else 0
-            # --- FIM DA MODIFICAÇÃO ---
 
-            # --- DADOS PARA GRÁFICOS E CONTAGENS GERAIS ---
+            # --- DADOS PARA GRÁFICOS E CONTAGENS GERAIS (sem alterações) ---
             cursor.execute("SELECT date(data_hora, 'localtime') as data, SUM(valor_total) as valor FROM vendas WHERE date(data_hora, 'localtime') BETWEEN ? AND ? GROUP BY data ORDER BY data", (data_inicio, data_fim))
             vendas_diarias = [dict(row) for row in cursor.fetchall()]
 
-            # Contagens gerais
             cursor.execute("SELECT COUNT(*) FROM produtos")
             total_produtos = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(*) FROM clientes")
@@ -1786,7 +1831,6 @@ class DatabaseManager:
             cursor.execute("SELECT COUNT(*) FROM produtos WHERE date(data_validade) BETWEEN ? AND ?", (hoje, data_limite_30d))
             alert_vencendo_30d = cursor.fetchone()[0]
 
-            # Buscar outros dados (produtos_mais_vendidos, etc.) para garantir que o resultado não seja None
             produtos_mais_vendidos, formas_pagamento, melhores_clientes = [], [], []
             if venda_ids:
                 query_in_ids = f"IN {venda_ids}" if len(venda_ids) > 1 else f"= {venda_ids[0]}"
@@ -1800,8 +1844,8 @@ class DatabaseManager:
             resultado = {
                 'faturamento': faturamento_total_periodo,
                 'lucro': lucro_liquido_periodo,
-                'total_perdas': total_perdas, # <--- ADICIONE ESTA LINHA
-                'margem_lucro_media': margem_media, # <--- ADICIONE ESTA LINHA
+                'total_perdas': total_perdas,
+                'margem_lucro_media': margem_media,
                 'num_vendas': len(venda_ids),
                 'produtos': produtos_mais_vendidos,
                 'pagamentos': formas_pagamento,
@@ -1823,7 +1867,6 @@ class DatabaseManager:
             self.registrar_log('ERROR', 'SISTEMA', 'DB_DASHBOARD_FETCH', str(e))
             return None
     
-    
     # --- Métodos para Configurações do Sistema ---
 
     def obter_configuracao(self, chave, padrao=None):
@@ -1831,6 +1874,19 @@ class DatabaseManager:
         self.cursor.execute("SELECT valor FROM configuracoes WHERE chave = ?", (chave,))
         resultado = self.cursor.fetchone()
         return resultado['valor'] if resultado else padrao
+
+    def obter_informacoes_empresa(self):
+        """Busca todas as informações da empresa salvas na tabela de configurações."""
+        chaves = [
+            'empresa_nome', 'empresa_endereco', 'empresa_telefone',
+            'empresa_email', 'empresa_cnpj'
+        ]
+        info = {}
+        for chave in chaves:
+            # Usa o método obter_configuracao que já existe
+            info[chave] = self.obter_configuracao(chave, "") # Retorna string vazia se não encontrar
+        return info
+
 
     def definir_configuracao(self, chave, valor):
         """Define ou atualiza o valor de uma chave de configuração."""
@@ -1876,3 +1932,65 @@ class DatabaseManager:
         
         self.cursor.execute(query, params)
         return self.cursor.fetchall()
+
+    # db_manager.py - Adicione este método dentro da classe DatabaseManager
+
+    def busca_global(self, termo, limite_por_categoria=7):
+        """
+        Executa uma busca global "fuzzy" (tolerante a erros) em produtos, clientes,
+        fornecedores e promoções.
+
+        Retorna uma lista única de resultados combinados e ordenados por relevância.
+        """
+        resultados_finais = []
+        try:
+            if not self.ensure_connection(): return []
+
+            # --- 1. Buscar um conjunto de candidatos de cada tabela ---
+            # Produtos
+            self.cursor.execute("SELECT id, nome FROM produtos")
+            produtos = [{'id': r['id'], 'nome': r['nome'], 'tipo': 'produto'} for r in self.cursor.fetchall()]
+            
+            # Clientes
+            self.cursor.execute("SELECT id, nome FROM clientes")
+            clientes = [{'id': r['id'], 'nome': r['nome'], 'tipo': 'cliente'} for r in self.cursor.fetchall()]
+
+            # Fornecedores
+            self.cursor.execute("SELECT id, empresa as nome FROM fornecedores")
+            fornecedores = [{'id': r['id'], 'nome': r['nome'], 'tipo': 'fornecedor'} for r in self.cursor.fetchall()]
+
+            # Promoções (com o nome do produto)
+            self.cursor.execute("""
+                SELECT p.id, pr.nome || ' (Promoção)' as nome 
+                FROM promocoes p 
+                JOIN produtos pr ON p.produto_id = pr.id
+            """)
+            promocoes = [{'id': r['id'], 'nome': r['nome'], 'tipo': 'promocao'} for r in self.cursor.fetchall()]
+
+            # --- 2. Juntar todos os candidatos e executar a busca fuzzy ---
+            todos_candidatos = produtos + clientes + fornecedores + promocoes
+            
+            # Extrai os melhores resultados usando a biblioteca thefuzz
+            # O process.extract retorna uma lista de tuplas: (item, score)
+            matches = process.extract(termo, [c['nome'] for c in todos_candidatos], limit=limite_por_categoria * 4)
+
+            # --- 3. Montar a lista final com os dados completos ---
+            for nome, score in matches:
+                if score > 75: # Apenas resultados com mais de 75% de similaridade
+                    # Encontra o item original na lista de candidatos para pegar o id e tipo
+                    for candidato in todos_candidatos:
+                        if candidato['nome'] == nome:
+                            resultados_finais.append({
+                                'id': candidato['id'],
+                                'texto': candidato['nome'],
+                                'tipo': candidato['tipo'],
+                                'score': score
+                            })
+                            todos_candidatos.remove(candidato) # Evitar duplicatas
+                            break
+            
+            return resultados_finais
+
+        except Exception as e:
+            print(f"Erro na busca global fuzzy: {e}")
+            return []

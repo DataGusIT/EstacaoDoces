@@ -115,7 +115,7 @@ class NotificationManager:
             <p class="dica"><b>Dica:</b> Crie promoções, combos ou coloque esses produtos em destaque na loja para acelerar a venda e evitar perdas.</p>
 
             <br>
-            <p>Atenciosamente,<br>Seu Sistema de Gestão de Estoque</p>
+            <p>Atenciosamente,<br>GestorX</p>
         </body>
         </html>
         """

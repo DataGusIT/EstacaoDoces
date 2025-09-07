@@ -10,7 +10,7 @@ import os
 from ui.icon_manager import IconManager
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 from collections import defaultdict
@@ -162,18 +162,22 @@ class AutoPopupComboBox(QComboBox):
         self.showPopup()
 
 class CaixaWindow(QWidget):
-    movimento_manual_registrado = pyqtSignal()
+    venda_finalizada = pyqtSignal()
 
-    def __init__(self, db, theme_colors):
+    movimento_manual_registrado = pyqtSignal()
+    dados_clientes_alterados = pyqtSignal()  # <-- ADICIONE APENAS ESTA LINHA
+
+    def __init__(self, db, theme_colors, settings): # Adicione 'settings'
         super().__init__()
         self.db = db
         self.theme_colors = theme_colors
+        self.settings = settings # Armazene
         self.caixa_atual = None
         self.itens_venda = []
         self.total_venda = 0.0
         self.dados_relatorio_atual = None
 
-        self.logo_path = "assets/img/GestorX (2).png"
+        self.logo_path = "assets/img/Logo2.png" # Caminho fixo do logo
         self.company_info = {
             "nome": "Estação Doces",
             "endereco": "Rua do Comércio, 123 - Centro",
@@ -894,27 +898,36 @@ class CaixaWindow(QWidget):
         
         dialog = DialogFinalizarVenda(self, self.total_venda, taxa_debito, taxa_credito, self.theme_colors)
         
-        if dialog.exec_() == QDialog.Accepted:
-            venda_data = dialog.get_data()
+        if dialog.exec_() != QDialog.Accepted:
+            return
 
-            if venda_data['salvar_taxas']:
-                self.db.definir_configuracao('taxa_cartao_debito', str(venda_data['taxa_debito']))
-                self.db.definir_configuracao('taxa_cartao_credito', str(venda_data['taxa_credito']))
-            
-            total_cliente_paga = max(0, self.total_venda - venda_data['desconto'])
-            taxa_percentual = 0.0
-            if venda_data['forma_pagamento'] == "Cartão de Débito":
-                taxa_percentual = venda_data['taxa_debito']
-            elif venda_data['forma_pagamento'] == "Cartão de Crédito":
-                taxa_percentual = venda_data['taxa_credito']
-            
-            valor_da_taxa = total_cliente_paga * (taxa_percentual / 100.0)
-            valor_para_faturamento = total_cliente_paga - valor_da_taxa
+        venda_data = dialog.get_data()
 
-            if venda_data['forma_pagamento'] == "Dinheiro" and venda_data['valor_recebido'] < total_cliente_paga:
-                AlertDialog(self, "Valor Insuficiente", "O valor recebido é menor que o total a pagar.", 'warning', theme_colors=self.theme_colors).exec_()
-                return
+        # --- Início da Lógica de Cálculo (sem alteração) ---
+        if venda_data['salvar_taxas']:
+            self.db.definir_configuracao('taxa_cartao_debito', str(venda_data['taxa_debito']))
+            self.db.definir_configuracao('taxa_cartao_credito', str(venda_data['taxa_credito']))
+        
+        total_cliente_paga = max(0, self.total_venda - venda_data['desconto'])
+        taxa_percentual = 0.0
+        if venda_data['forma_pagamento'] == "Cartão de Débito":
+            taxa_percentual = venda_data['taxa_debito']
+        elif venda_data['forma_pagamento'] == "Cartão de Crédito":
+            taxa_percentual = venda_data['taxa_credito']
+        
+        valor_da_taxa = total_cliente_paga * (taxa_percentual / 100.0)
+        valor_para_faturamento = total_cliente_paga - valor_da_taxa
 
+        if venda_data['forma_pagamento'] == "Dinheiro" and venda_data['valor_recebido'] < total_cliente_paga:
+            AlertDialog(self, "Valor Insuficiente", "O valor recebido é menor que o total a pagar.", 'warning', theme_colors=self.theme_colors).exec_()
+            return
+        # --- Fim da Lógica de Cálculo ---
+
+        # =================== INÍCIO DA TRANSAÇÃO ATÔMICA ===================
+        try:
+            self.db.begin_transaction()
+
+            # 1. Registrar a Venda
             venda_id = self.db.registrar_venda(
                 cliente_id=self.cb_cliente.currentData(),
                 valor_total=total_cliente_paga,
@@ -923,47 +936,71 @@ class CaixaWindow(QWidget):
                 parcelas=venda_data['parcelas'],
                 observacao=venda_data['observacao'],
                 status="Concluída",
-                operador="Sistema"
+                operador="Sistema"  # Idealmente, seria o usuário logado
             )
-            
-            if venda_id:
-                for item in self.itens_venda:
-                    self.db.atualizar_estoque_venda(item['produto_id'], item['quantidade'], item['is_embalagem'])
-                    vendido_como = 'Embalagem' if item['is_embalagem'] else 'Fração'
-                    self.db.registrar_item_venda(
-                        venda_id, item['produto_id'], item['quantidade'],
-                        item['preco_unitario'], item['subtotal'], vendido_como
-                    )
-                
-                self.db.registrar_movimento_caixa(
-                    self.caixa_atual['id'], "Entrada", f"Venda #{venda_id}", 
-                    valor_para_faturamento,
-                    venda_data['forma_pagamento'], venda_id, "Venda", "Sistema"
-                )
-                
-                saldo_atual = self.db.obter_saldo_atual(self.caixa_atual['id'])
-                self.lbl_saldo.setText(f"Saldo Atual: R$ {saldo_atual:.2f}")
-                
-                troco_final = venda_data['valor_recebido'] - total_cliente_paga
-                msg_sucesso = "Venda finalizada com sucesso!"
-                if venda_data['forma_pagamento'] == "Dinheiro" and troco_final > 0:
-                    msg_sucesso += f"\nTroco: R$ {troco_final:.2f}"
-                
-                AlertDialog(self, "Sucesso", msg_sucesso, 'success', theme_colors=self.theme_colors).exec_()
-                
-                self.itens_venda = []
-                self.atualizar_tabela_itens()
-                self.calcular_total()
-                self.cb_cliente.setCurrentIndex(0)
-                self._atualizar_info_produto_selecionado(None)
+            if not venda_id:
+                raise Exception("Não foi possível obter o ID da venda registrada.")
 
-                # --- CORREÇÃO APLICADA TAMBÉM AQUI ---
-                # As vendas também geram uma movimentação, então a lógica é a mesma.
-                self.filtrar_movimentos()
-                # --- FIM DA CORREÇÃO ---
-                
-            else:
-                AlertDialog(self, "Erro", "Erro ao registrar a venda no banco de dados.", 'error', theme_colors=self.theme_colors).exec_()
+            # 2. Registrar Itens e Atualizar Estoque
+            for item in self.itens_venda:
+                # 2a. Atualiza o estoque (agora sem commit interno)
+                sucesso_estoque, msg_estoque = self.db.atualizar_estoque_venda(
+                    item['produto_id'], item['quantidade'], item['is_embalagem']
+                )
+                if not sucesso_estoque:
+                    raise Exception(msg_estoque) # Propaga o erro do estoque
+
+                # 2b. Registra o item da venda
+                vendido_como = 'Embalagem' if item['is_embalagem'] else 'Fração'
+                sucesso_item = self.db.registrar_item_venda(
+                    venda_id, item['produto_id'], item['quantidade'],
+                    item['preco_unitario'], item['subtotal'], vendido_como
+                )
+                if not sucesso_item:
+                    raise Exception(f"Falha ao registrar o item {item['produto_nome']}.")
+
+            # 3. Registrar Movimento no Caixa
+            movimento_id = self.db.registrar_movimento_caixa(
+                self.caixa_atual['id'], "Entrada", f"Venda #{venda_id}",
+                valor_para_faturamento,
+                venda_data['forma_pagamento'], venda_id, "Venda", "Sistema"
+            )
+            if not movimento_id:
+                raise Exception("Falha ao registrar a entrada no caixa.")
+
+            # 4. Se tudo deu certo, confirma todas as operações
+            self.db.commit_transaction()
+            
+            # --- Lógica de Sucesso (Executada apenas após o commit) ---
+            saldo_atual = self.db.obter_saldo_atual(self.caixa_atual['id'])
+            self.lbl_saldo.setText(f"Saldo Atual: R$ {saldo_atual:.2f}")
+            
+            troco_final = venda_data['valor_recebido'] - total_cliente_paga
+            msg_sucesso = "Venda finalizada com sucesso!"
+            if venda_data['forma_pagamento'] == "Dinheiro" and troco_final > 0:
+                msg_sucesso += f"\nTroco: R$ {troco_final:.2f}"
+            
+            AlertDialog(self, "Sucesso", msg_sucesso, 'success', theme_colors=self.theme_colors).exec_()
+            
+            # Limpa a interface para a próxima venda
+            self.itens_venda = []
+            self.atualizar_tabela_itens()
+            self.calcular_total()
+            self.cb_cliente.setCurrentIndex(0)
+            self._atualizar_info_produto_selecionado(None)
+            self.filtrar_movimentos()
+
+            self.venda_finalizada.emit()
+
+
+        except Exception as e:
+            # 5. Se qualquer etapa falhou, desfaz tudo
+            self.db.rollback_transaction()
+            print(f"ERRO DE TRANSAÇÃO: {e}")
+            AlertDialog(self, "Erro ao Salvar Venda",
+                        f"Ocorreu um erro e a venda não foi salva. Todas as alterações foram desfeitas.\n\nDetalhe: {e}",
+                        'error', theme_colors=self.theme_colors).exec_()
+        # =================== FIM DA TRANSAÇÃO ATÔMICA ===================
 
     def reduzir_estoque_itens(self, venda_id):
         """Reduz o estoque dos itens vendidos considerando fracionamento"""
@@ -1087,36 +1124,77 @@ class CaixaWindow(QWidget):
         ]))
         return kpi_table
 
-    def _gerar_pdf_com_template(self, file_path, report_title, elementos):
-        """Gera um PDF com um cabeçalho e rodapé profissional e estruturado."""
+    # Em estoque_window.py E caixa_window.py
+    # SUBSTITUA este método inteiro em AMBOS os arquivos
+
+    def _gerar_pdf_com_template(self, file_path, report_title, elementos, company_info, custom_logo_path):
         try:
+            left_margin, right_margin, top_margin, bottom_margin = 2*cm, 2*cm, 3.5*cm, 1.5*cm
+
             def header_footer(canvas, doc):
                 canvas.saveState()
-                if os.path.exists(self.logo_path):
-                    canvas.drawImage(self.logo_path, doc.leftMargin, doc.height + doc.topMargin,
-                                     width=120, height=45, preserveAspectRatio=True, mask='auto')
                 
-                canvas.setFont('Helvetica', 9)
-                canvas.drawRightString(doc.width + doc.leftMargin, doc.height + doc.topMargin + 20, self.company_info['nome'])
-                canvas.drawRightString(doc.width + doc.leftMargin, doc.height + doc.topMargin + 5, self.company_info['endereco'])
-                canvas.drawRightString(doc.width + doc.leftMargin, doc.height + doc.topMargin - 10, self.company_info['contato'])
+                # --- INÍCIO DA CORREÇÃO: Lógica de Cabeçalho com Tabela ---
+                
+                # 1. Prepara os elementos para o cabeçalho
+                styles = getSampleStyleSheet()
+                style_info = ParagraphStyle(name='Info', parent=styles['Normal'], alignment=TA_RIGHT, fontSize=9, leading=12)
+                
+                # Elemento 1: Logo do Sistema
+                system_logo_path = "assets/img/Logo2.png"
+                logo_sistema = Image(system_logo_path, width=2.5*cm, height=1.2*cm, kind='proportional') if os.path.exists(system_logo_path) else Spacer(0,0)
+                
+                # Elemento 2: Logo Personalizada
+                logo_cliente = Image(custom_logo_path, width=2.5*cm, height=1.2*cm, kind='proportional') if custom_logo_path and os.path.exists(custom_logo_path) else Spacer(0,0)
 
-                canvas.setStrokeColorRGB(0.9, 0.9, 0.9)
-                canvas.line(doc.leftMargin, doc.height + doc.topMargin - 20, doc.width + doc.leftMargin, doc.height + doc.topMargin - 20)
+                # Elemento 3: Bloco de Informações da Empresa (como Parágrafos)
+                info_elements = []
+                if company_info.get('empresa_nome'):
+                    info_elements.append(Paragraph(company_info['empresa_nome'], style_info))
+                if company_info.get('empresa_endereco'):
+                    info_elements.append(Paragraph(company_info['empresa_endereco'], style_info))
+                if company_info.get('empresa_telefone') or company_info.get('empresa_email'):
+                    contato_str = f"Telefone: {company_info.get('empresa_telefone', '')} | Email: {company_info.get('empresa_email', '')}"
+                    info_elements.append(Paragraph(contato_str, style_info))
+                if company_info.get('empresa_cnpj'):
+                    info_elements.append(Paragraph(f"CNPJ: {company_info.get('empresa_cnpj')}", style_info))
+
+                # 2. Monta a tabela do cabeçalho com 3 colunas
+                header_data = [[logo_sistema, logo_cliente, info_elements]]
                 
+                # A largura total disponível é a largura da página menos as margens
+                available_width = doc.width
+                
+                header_table = Table(header_data, colWidths=[3*cm, 3*cm, available_width - 6*cm])
+                header_table.setStyle(TableStyle([
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), # ALINHAMENTO VERTICAL CENTRALIZADO
+                    ('ALIGN', (0, 0), (1, 0), 'LEFT'),      # Logos alinhadas à esquerda
+                    ('ALIGN', (2, 0), (2, 0), 'RIGHT'),     # Bloco de texto alinhado à direita
+                ]))
+                
+                # 3. Desenha a tabela no canvas
+                w, h = header_table.wrap(doc.width, doc.topMargin)
+                header_table.drawOn(canvas, doc.leftMargin, doc.height + doc.topMargin - h + 0.5*cm) # Ajuste fino da posição vertical
+                
+                # 4. Desenha a linha ABAIXO da tabela
+                line_y = doc.height + doc.topMargin - h
+                canvas.setStrokeColorRGB(0.9, 0.9, 0.9)
+                canvas.line(doc.leftMargin, line_y, doc.width + doc.leftMargin, line_y)
+
+                # --- FIM DA CORREÇÃO ---
+
+                # Rodapé (sem alteração)
                 canvas.setFont('Helvetica-Oblique', 8)
                 canvas.drawRightString(doc.width + doc.leftMargin, doc.bottomMargin - 20, f"Página {canvas.getPageNumber()} | {report_title}")
                 canvas.restoreState()
 
-            doc = SimpleDocTemplate(file_path, pagesize=A4, topMargin=3*cm, bottomMargin=1.5*cm, leftMargin=2*cm, rightMargin=2*cm)
+            doc = SimpleDocTemplate(file_path, pagesize=A4, topMargin=top_margin, bottomMargin=bottom_margin, leftMargin=left_margin, rightMargin=right_margin)
             doc.build(elementos, onFirstPage=header_footer, onLaterPages=header_footer)
             
-            QMessageBox.information(self, "Sucesso", f"Relatório salvo com sucesso em:\n{file_path}")
+            AlertDialog(self, "Sucesso", f"Relatório salvo com sucesso em:\n{file_path}", alert_type='success', theme_colors=self.theme_colors).exec_()
 
-        except FileNotFoundError:
-            QMessageBox.critical(self, "Erro de Logo", f"Arquivo de logo não encontrado em:\n{self.logo_path}")
         except Exception as e:
-            QMessageBox.critical(self, "Erro ao Gerar PDF", f"Ocorreu um erro inesperado: {str(e)}")
+            AlertDialog(self, "Erro ao Gerar PDF", f"Ocorreu um erro inesperado: {str(e)}", alert_type='error', theme_colors=self.theme_colors).exec_()
 
     def gerar_relatorio_fechamento(self, caixa_id):
         detalhes = self.db.obter_detalhes_caixa(caixa_id)
@@ -1186,6 +1264,11 @@ class CaixaWindow(QWidget):
             )
             
             if cliente_id:
+                # --- INÍCIO DA CORREÇÃO ---
+                # Exibe a mensagem de sucesso para o usuário
+                AlertDialog(self, "Sucesso", "Cliente cadastrado com sucesso!", 'success', theme_colors=self.theme_colors).exec_()
+                # --- FIM DA CORREÇÃO ---
+
                 # 5. Atualiza a lista de clientes e seleciona o novo cliente
                 self.carregar_clientes()
                 index = self.cb_cliente.findData(cliente_id)
@@ -1383,16 +1466,13 @@ class CaixaWindow(QWidget):
     # SUBSTITUA O MÉTODO gerar_relatorio INTEIRO PELA VERSÃO ABAIXO
 
     def gerar_relatorio(self):
-        # PASSO 1: Coletar datas e buscar os dados USANDO A NOVA FUNÇÃO
         data_inicio = self.dt_rel_inicio.date().toString("yyyy-MM-dd")
         data_fim = self.dt_rel_fim.date().toString("yyyy-MM-dd")
+
+        # ***** CORREÇÃO PRINCIPAL AQUI *****
+        # Chamada direta para o método correto no DatabaseManager
+        dados = self.db.gerar_relatorio_periodo(data_inicio, data_fim)
         
-        # ***** MUDANÇA PRINCIPAL AQUI *****
-        # A chamada ao método que estava causando o erro
-        dados = self._buscar_dados_relatorio(data_inicio, data_fim)
-        # *********************************
-        
-        # Se não houver dados, limpa a tela e esconde o botão de exportar
         if not dados or not dados.get('vendas'):
             QMessageBox.information(self, "Sem Dados", "Não foram encontradas vendas ou movimentos para o período selecionado.")
             self.btn_exportar_pdf.setVisible(False)
@@ -1401,73 +1481,50 @@ class CaixaWindow(QWidget):
             self.tabela_rel_vendas.setRowCount(0)
             return
             
-        # PASSO 2: Armazenar os dados para uso na exportação
         self.dados_relatorio_atual = dados
         
-        # PASSO 3: Conectar o botão de exportar
         try:
             self.btn_exportar_pdf.clicked.disconnect()
         except TypeError:
-            pass  # Ignora erro se não houver conexão
+            pass
         
         self.btn_exportar_pdf.clicked.connect(
             lambda: self.abrir_dialogo_exportacao(data_inicio, data_fim, self.dados_relatorio_atual)
         )
         
-        # ================================================================= #
-        #       PASSO 4: PREENCHER A INTERFACE GRÁFICA (UI)                 #
-        # ================================================================= #
-
-        # --- 4.1: Preencher a Aba de Resumo Visual ---
+        # Preencher a UI com os dados
         self.preencher_resumo_visual(dados, data_inicio, data_fim)
 
-        # --- 4.2: Preencher a Tabela de Movimentos Detalhados ---
         self.tabela_rel_movimentos.setRowCount(0)
         movimentos = dados.get('movimentos', [])
         for i, movimento in enumerate(movimentos):
             self.tabela_rel_movimentos.insertRow(i)
-            
-            tipo = movimento['tipo']
-            valor = movimento['valor']
-            
-            cor_valor = QColor(self.theme_colors.get('accent_color', '#28a745')) if tipo == "Entrada" else QColor("#dc3545")
+            tipo, valor = movimento['tipo'], movimento['valor']
+            cor_valor = QColor("#28a745") if tipo == "Entrada" else QColor("#dc3545")
             
             self.tabela_rel_movimentos.setItem(i, 0, QTableWidgetItem(str(movimento['id'])))
             self.tabela_rel_movimentos.setItem(i, 1, QTableWidgetItem(movimento['data_hora']))
-            
-            tipo_item = QTableWidgetItem(tipo)
-            tipo_item.setForeground(cor_valor)
+            tipo_item = QTableWidgetItem(tipo); tipo_item.setForeground(cor_valor)
             self.tabela_rel_movimentos.setItem(i, 2, tipo_item)
-            
             self.tabela_rel_movimentos.setItem(i, 3, QTableWidgetItem(movimento['descricao']))
             self.tabela_rel_movimentos.setItem(i, 4, QTableWidgetItem(movimento['forma_pagamento']))
-            
-            valor_item = QTableWidgetItem(f"R$ {valor:.2f}")
-            valor_item.setForeground(cor_valor)
+            valor_item = QTableWidgetItem(f"R$ {valor:.2f}"); valor_item.setForeground(cor_valor)
             valor_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.tabela_rel_movimentos.setItem(i, 5, valor_item)
 
-        # --- 4.3: Preencher a Tabela de Vendas Realizadas ---
         self.tabela_rel_vendas.setRowCount(0)
         vendas = dados.get('vendas', [])
         for i, venda in enumerate(vendas):
             self.tabela_rel_vendas.insertRow(i)
-            
             self.tabela_rel_vendas.setItem(i, 0, QTableWidgetItem(str(venda['id'])))
             self.tabela_rel_vendas.setItem(i, 1, QTableWidgetItem(venda['data_hora']))
             self.tabela_rel_vendas.setItem(i, 2, QTableWidgetItem(venda['cliente']))
-            
-            valor_total_item = QTableWidgetItem(f"R$ {venda['valor_total']:.2f}")
-            valor_total_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            valor_total_item = QTableWidgetItem(f"R$ {venda['valor_total']:.2f}"); valor_total_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.tabela_rel_vendas.setItem(i, 3, valor_total_item)
-
-            desconto_item = QTableWidgetItem(f"R$ {venda['desconto']:.2f}")
-            desconto_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            desconto_item = QTableWidgetItem(f"R$ {venda['desconto']:.2f}"); desconto_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.tabela_rel_vendas.setItem(i, 4, desconto_item)
-
             self.tabela_rel_vendas.setItem(i, 5, QTableWidgetItem(venda['forma_pagamento']))
             
-        # PASSO 5: Tornar o botão de exportar visível
         self.btn_exportar_pdf.setVisible(True)
 
     # --- INÍCIO DO CÓDIGO A SER ADICIONADO ---
@@ -1492,14 +1549,8 @@ class CaixaWindow(QWidget):
 
 
     def preencher_resumo_visual(self, dados, data_inicio, data_fim):
-        """Gera um HTML elaborado para a aba de resumo, herdando as cores do tema."""
+        """Gera um HTML elaborado para a aba de resumo, usando os dados detalhados."""
         
-        # ... (restante do método)
-
-    def preencher_resumo_visual(self, dados, data_inicio, data_fim):
-        """Gera um HTML elaborado para a aba de resumo, herdando as cores do tema."""
-        
-        # Herda as cores do tema da MainWindow
         theme = self.theme_colors
         cor_fundo_body = theme.get('bg_color', '#ffffff')
         cor_fundo_card = theme.get('surface_color', '#f2f2f7')
@@ -1508,66 +1559,26 @@ class CaixaWindow(QWidget):
         cor_subtitulo = theme.get('text_secondary', '#7f8c8d')
         cor_titulo_kpi = theme.get('text_secondary', '#6c757d')
         cor_valor_kpi = theme.get('text_color', '#2c3e50')
-        cor_entrada = "#28a745"  # Verde para consistência
-        cor_saida = "#dc3545"    # Vermelho para consistência
+        cor_entrada = "#28a745"
+        cor_saida = "#dc3545"
         cor_saldo = theme.get('accent_color', '#17a2b8')
         
-        # --- Montagem do HTML ---
         html = f"""
         <html>
         <head>
             <style>
-                body {{ 
-                    font-family: Arial, sans-serif; 
-                    background-color: {cor_fundo_body}; 
-                    color: {cor_titulo_principal};
-                    margin: 0;
-                    padding: 0;
-                }}
+                body {{ font-family: Arial, sans-serif; background-color: {cor_fundo_body}; color: {cor_titulo_principal}; margin: 0; padding: 0; }}
                 .container {{ padding: 25px; }}
                 .header {{ text-align: center; margin-bottom: 30px; }}
                 .header h2 {{ margin: 0; font-size: 24px; }}
                 .header p {{ margin: 5px; color: {cor_subtitulo}; font-size: 14px; }}
-                
-                .kpi-grid {{ 
-                    display: grid; 
-                    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
-                    gap: 20px; 
-                    margin-bottom: 35px; 
-                }}
-                .kpi-card {{ 
-                    background-color: {cor_fundo_card}; 
-                    border: 1px solid {cor_borda}; 
-                    border-left: 5px solid {cor_saldo};
-                    border-radius: 8px; 
-                    padding: 20px; 
-                    text-align: left; 
-                }}
-                .kpi-card .label {{ 
-                    font-size: 12px; 
-                    color: {cor_titulo_kpi}; 
-                    text-transform: uppercase; 
-                    margin-bottom: 8px; 
-                    font-weight: bold;
-                }}
-                .kpi-card .value {{ 
-                    font-size: 28px; 
-                    font-weight: bold; 
-                    color: {cor_valor_kpi}; 
-                }}
-                
-                .section-grid {{
-                    display: grid;
-                    grid-template-columns: 1fr 1fr;
-                    gap: 30px;
-                }}
-                .section h3 {{ 
-                    color: {cor_titulo_principal}; 
-                    border-bottom: 2px solid {cor_borda}; 
-                    padding-bottom: 8px; 
-                    margin-top: 0;
-                }}
-                
+                .kpi-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-bottom: 35px; }}
+                .kpi-card {{ background-color: {cor_fundo_card}; border: 1px solid {cor_borda}; border-left: 5px solid {cor_saldo}; border-radius: 8px; padding: 20px; text-align: left; }}
+                .kpi-card .label {{ font-size: 12px; color: {cor_titulo_kpi}; text-transform: uppercase; margin-bottom: 8px; font-weight: bold; }}
+                .kpi-card .value {{ font-size: 26px; font-weight: bold; color: {cor_valor_kpi}; }}
+                .kpi-card .sub-value {{ font-size: 11px; color: {cor_subtitulo}; margin-top: 5px; }}
+                .section-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }}
+                .section h3 {{ color: {cor_titulo_principal}; border-bottom: 2px solid {cor_borda}; padding-bottom: 8px; margin-top: 0; }}
                 ol, ul {{ padding-left: 20px; }}
                 li {{ margin-bottom: 10px; color: {cor_subtitulo}; }}
                 li b {{ color: {cor_titulo_principal}; }}
@@ -1577,21 +1588,28 @@ class CaixaWindow(QWidget):
             <div class="container">
                 <div class="header">
                     <h2>Resumo Financeiro</h2>
-                    <p>Período de {data_inicio} a {data_fim}</p>
+                    <p>Período de {QDate.fromString(data_inicio, 'yyyy-MM-dd').toString('dd/MM/yyyy')} a {QDate.fromString(data_fim, 'yyyy-MM-dd').toString('dd/MM/yyyy')}</p>
                 </div>
 
                 <div class="kpi-grid">
                     <div class="kpi-card" style="border-left-color: {cor_saldo};">
-                        <div class="label">Faturamento (Vendas)</div>
-                        <div class="value">R$ {dados.get('valor_vendas', 0):.2f}</div>
+                        <div class="label">Faturamento Bruto (Vendas)</div>
+                        <div class="value">R$ {dados.get('faturamento_bruto', 0):.2f}</div>
                     </div>
                     <div class="kpi-card" style="border-left-color: {cor_entrada};">
                         <div class="label">Total de Entradas</div>
                         <div class="value" style="color: {cor_entrada};">R$ {dados.get('total_entradas', 0):.2f}</div>
+                        <div class="sub-value">
+                            (Vendas Líquidas: R$ {dados.get('faturamento_liquido', 0):.2f} + Outras: R$ {dados.get('outras_entradas', 0):.2f})
+                        </div>
                     </div>
                     <div class="kpi-card" style="border-left-color: {cor_saida};">
                         <div class="label">Total de Saídas</div>
                         <div class="value" style="color: {cor_saida};">R$ {dados.get('total_saidas', 0):.2f}</div>
+                    </div>
+                     <div class="kpi-card" style="border-left-color: {cor_saldo};">
+                        <div class="label">Saldo Final do Período</div>
+                        <div class="value">R$ {dados.get('saldo_periodo', 0):.2f}</div>
                     </div>
                 </div>
 
@@ -1610,7 +1628,6 @@ class CaixaWindow(QWidget):
         html += """
                         </ol>
                     </div>
-
                     <div class="section">
                         <h3>Vendas por Pagamento</h3>
                         <ul>
@@ -1632,6 +1649,9 @@ class CaixaWindow(QWidget):
         """
         self.text_resumo.setHtml(html)
 
+    # No arquivo ui/caixa_window.py
+# Encontre o método abrir_dialogo_exportacao e substitua-o por este
+
     def abrir_dialogo_exportacao(self, data_inicio, data_fim, dados):
         """
         Abre o QFileDialog para o usuário escolher onde salvar o PDF.
@@ -1648,91 +1668,94 @@ class CaixaWindow(QWidget):
         )
 
         if caminho_arquivo:
-            # Chama a função que realmente cria o PDF
-            self.exportar_relatorio_pdf(data_inicio, data_fim, dados, caminho_arquivo)
+            # Pega as informações e a logo para passar para o template
+            company_info = self.db.obter_informacoes_empresa()
             
-    def exportar_relatorio_pdf(self, data_inicio, data_fim, dados, file_path):
-        """
-        Gera o conteúdo específico para o relatório financeiro e usa o template padrão.
-        """
-        from reportlab.lib.pagesizes import A4, landscape
-        from reportlab.lib.units import cm
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
+            # --- INÍCIO DA CORREÇÃO ---
+            # Trocamos .value() por .get_value() para usar o método correto da sua classe Settings
+            custom_logo_path = self.settings.get_value("custom_logo_path", "")
+            # --- FIM DA CORREÇÃO ---
 
+            self.exportar_relatorio_pdf(data_inicio, data_fim, dados, caminho_arquivo, company_info, custom_logo_path)
+            
+    def exportar_relatorio_pdf(self, data_inicio, data_fim, dados, file_path, company_info, custom_logo_path):
+        """
+        Gera o conteúdo para o PDF financeiro usando os dados detalhados e o template padrão.
+        """
         styles = getSampleStyleSheet()
+        normal_style_right = ParagraphStyle(name='NormalRight', parent=styles['Normal'], alignment=TA_RIGHT)
         elementos = []
         
-        # --- Título ---
         elementos.append(Paragraph("Relatório Financeiro Detalhado", styles['h1']))
-        elementos.append(Paragraph(f"Período de Análise: {data_inicio} a {data_fim}", styles['Normal']))
+        elementos.append(Paragraph(f"Período de Análise: {QDate.fromString(data_inicio, 'yyyy-MM-dd').toString('dd/MM/yyyy')} a {QDate.fromString(data_fim, 'yyyy-MM-dd').toString('dd/MM/yyyy')}", styles['Normal']))
         elementos.append(Spacer(1, 0.8 * cm))
         
-        # --- KPIs Financeiros ---
-        left_margin = 2*cm
-        right_margin = 2*cm
+        left_margin, right_margin = 2*cm, 2*cm
         doc_width = A4[0] - left_margin - right_margin
 
+        # Cria um parágrafo complexo para o KPI de Entradas
+        entradas_paragraph_text = f"""
+            <font color='green' size='14'><b>R$ {dados.get('total_entradas', 0):.2f}</b></font><br/>
+            <font size='7' color='#36454F'>
+                (Vendas líq.: {dados.get('faturamento_liquido', 0):.2f} + Outras: {dados.get('outras_entradas', 0):.2f})
+            </font>
+        """
+        entradas_paragraph = Paragraph(entradas_paragraph_text, styles['Normal'])
+
         kpi_data = [
-            {'label': 'FATURAMENTO BRUTO', 'value': f"R$ {dados.get('valor_vendas', 0):.2f}"},
-            {'label': 'TOTAL ENTRADAS', 'value': f"<font color='green'>R$ {dados.get('total_entradas', 0):.2f}</font>"},
+            {'label': 'FATURAMENTO BRUTO', 'value': f"R$ {dados.get('faturamento_bruto', 0):.2f}"},
+            {'label': 'TOTAL ENTRADAS', 'value': entradas_paragraph},
             {'label': 'TOTAL SAÍDAS', 'value': f"<font color='red'>R$ {dados.get('total_saidas', 0):.2f}</font>"},
-            {'label': 'SALDO DO PERÍODO', 'value': f"R$ {dados.get('saldo_periodo', 0):.2f}"},
-            {'label': 'TICKET MÉDIO', 'value': f"R$ {dados.get('valor_medio_venda', 0):.2f}"},
+            {'label': 'SALDO DO PERÍODO', 'value': f"R$ {dados.get('saldo_periodo', 0):.2f}"}
         ]
         elementos.append(self._criar_kpi_boxes(kpi_data, doc_width))
         elementos.append(Spacer(1, 1*cm))
 
-        # --- Tabela de Vendas ---
         elementos.append(Paragraph("Vendas Realizadas no Período", styles['h2']))
         vendas_data = [['ID', 'Data/Hora', 'Cliente', 'Valor', 'Desconto', 'Pagamento']]
         for v in dados.get('vendas', []):
             vendas_data.append([
-                v['id'], v['data_hora'], Paragraph(v['cliente'], styles['Normal']),
-                f"R$ {v['valor_total']:.2f}", f"R$ {v['desconto']:.2f}", v['forma_pagamento']
+                v['id'], v['data_hora'].split('.')[0], Paragraph(v['cliente'], styles['Normal']),
+                Paragraph(f"R$ {v['valor_total']:.2f}", normal_style_right),
+                Paragraph(f"R$ {v['desconto']:.2f}", normal_style_right),
+                v['forma_pagamento']
             ])
             
-        tabela_vendas = Table(vendas_data, colWidths=[1.5*cm, 3.5*cm, 4.5*cm, 2.5*cm, 2.5*cm, 3*cm], repeatRows=1)
-        style_vendas = TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#4F81BD")),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        tabela_vendas = Table(vendas_data, colWidths=[1.5*cm, 3.5*cm, 4*cm, 2.5*cm, 2.5*cm, 3.5*cm], repeatRows=1)
+        tabela_vendas.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#4F81BD")), ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'), ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ])
-        tabela_vendas.setStyle(style_vendas)
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12), ('ALIGN', (2, 1), (2, -1), 'LEFT'),
+        ]))
         elementos.append(tabela_vendas)
         elementos.append(Spacer(1, 1*cm))
         
-        # --- Tabela de Movimentos do Caixa ---
         elementos.append(Paragraph("Movimentações Manuais do Caixa", styles['h2']))
         mov_data = [['ID', 'Data/Hora', 'Tipo', 'Descrição', 'Valor']]
-        for m in dados.get('movimentos', []):
-            # Ignorar movimentos que são de Vendas, pois já estão na tabela acima
-            if m.get('tipo_referencia') == 'Venda':
-                continue
+        # Filtra para não incluir vendas, que já estão na tabela acima
+        movimentos_manuais = [m for m in dados.get('movimentos', []) if m.get('tipo_referencia') != 'Venda']
+        for m in movimentos_manuais:
+            valor_p = Paragraph(f"R$ {m['valor']:.2f}", normal_style_right)
             mov_data.append([
-                m['id'], m['data_hora'], m['tipo'], Paragraph(m['descricao'], styles['Normal']), f"R$ {m['valor']:.2f}"
+                m['id'], m['data_hora'].split('.')[0], m['tipo'], Paragraph(m['descricao'], styles['Normal']), valor_p
             ])
             
-        tabela_mov = Table(mov_data, colWidths=[1.5*cm, 3.5*cm, 2*cm, 7.5*cm, 3*cm], repeatRows=1)
+        tabela_mov = Table(mov_data, colWidths=[1.5*cm, 3.5*cm, 2*cm, 7*cm, 3.5*cm], repeatRows=1)
         style_mov = TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#C0504D")), # Vermelho corporativo
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#C0504D")), ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'), ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12), ('ALIGN', (3, 1), (3, -1), 'LEFT'),
         ])
-        # Colorir linhas de entrada/saída
         for i, row in enumerate(mov_data):
-            if i == 0: continue
-            if row[2] == 'Entrada': style_mov.add('TEXTCOLOR', (0, i), (-1, i), colors.green)
-            elif row[2] == 'Saída': style_mov.add('TEXTCOLOR', (0, i), (-1, i), colors.red)
+            if i > 0:
+                cor = colors.green if row[2] == 'Entrada' else colors.red
+                style_mov.add('TEXTCOLOR', (0, i), (-1, i), cor)
         tabela_mov.setStyle(style_mov)
         elementos.append(tabela_mov)
 
-        # Chama a função de template para gerar o PDF
-        self._gerar_pdf_com_template(file_path, "Relatório Financeiro", elementos)
+        self._gerar_pdf_com_template(file_path, "Relatório Financeiro", elementos, company_info, custom_logo_path)
 
 
     # COLE ESTE NOVO MÉTODO COMPLETO DENTRO DA CLASSE CaixaWindow

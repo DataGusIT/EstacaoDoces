@@ -162,9 +162,10 @@ class ThemedProgressDialog(QDialog):
 
 
 class FornecedorCsvImportWorker(QThread):
-    """Executa a importação de CSV de fornecedores em uma thread."""
+    """Executa a importação de CSV de fornecedores em uma thread, com suporte a atualização."""
     progress = pyqtSignal(int)
-    finished = pyqtSignal(int, int, list)
+    # Adicionamos o contador 'atualizados' ao sinal de conclusão
+    finished = pyqtSignal(int, int, int, list)  # importados, atualizados, erros, detalhes
 
     def __init__(self, db_path, file_path):
         super().__init__()
@@ -174,46 +175,82 @@ class FornecedorCsvImportWorker(QThread):
 
     def run(self):
         importados = 0
+        atualizados = 0
         erros = 0
         detalhes_erros = []
         try:
             self.local_db = DatabaseManager(self.db_path)
             
-            with open(self.file_path, 'r', encoding='utf-8') as f:
-                total_linhas = max(1, sum(1 for _ in f) - 1)
+            # Otimização: Carrega IDs de fornecedores existentes para busca rápida
+            fornecedores_existentes = {f['id'] for f in self.local_db.listar_fornecedores()}
 
-            with open(self.file_path, 'r', encoding='utf-8') as csvfile:
-                reader = csv.DictReader(csvfile)
-                self.local_db.begin_transaction()
-                
-                for i, row in enumerate(reader):
-                    try:
-                        if not row.get('empresa', '').strip():
-                            raise ValueError("Nome da empresa é obrigatório.")
-                        
-                        self.local_db.adicionar_fornecedor(
-                            empresa=row.get('empresa', '').strip(),
-                            representante=row.get('representante', '').strip(),
-                            frequencia_compra=row.get('frequencia_compra', '').strip(),
-                            telefone=row.get('telefone', '').strip(),
-                            email=row.get('email', '').strip(),
-                            endereco=row.get('endereco', '').strip(),
-                            contato=row.get('contato', '').strip()
-                        )
+            # Lógica de leitura de arquivo robusta
+            with open(self.file_path, mode='r', encoding='utf-8-sig') as csvfile:
+                leitor = csv.reader(csvfile)
+                try:
+                    todas_as_linhas = list(leitor)
+                except csv.Error as e:
+                    detalhes_erros.append(f"Erro de formatação no CSV: {e}")
+                    self.finished.emit(0, 0, 1, detalhes_erros)
+                    return
+
+            if len(todas_as_linhas) < 2:
+                detalhes_erros.append("Arquivo CSV vazio ou com apenas o cabeçalho.")
+                self.finished.emit(0, 0, 0, detalhes_erros)
+                return
+
+            cabecalho_raw = todas_as_linhas[0]
+            linhas_de_dados = todas_as_linhas[1:]
+            cabecalho = [str(h).lower().strip() for h in cabecalho_raw]
+            total_linhas = len(linhas_de_dados)
+
+            self.local_db.begin_transaction()
+            
+            for i, valores_linha in enumerate(linhas_de_dados):
+                try:
+                    row_dict = dict(zip(cabecalho, valores_linha))
+                    
+                    empresa_nome = row_dict.get('empresa', '').strip()
+                    if not empresa_nome:
+                        raise ValueError("A coluna 'empresa' é obrigatória.")
+                    
+                    dados_fornecedor = {
+                        'empresa': empresa_nome,
+                        'representante': row_dict.get('representante', '').strip(),
+                        'frequencia_compra': row_dict.get('frequencia_compra', '').strip(),
+                        'telefone': row_dict.get('telefone', '').strip(),
+                        'email': row_dict.get('email', '').strip(),
+                        'endereco': row_dict.get('endereco', '').strip(),
+                        'contato': row_dict.get('contato', '').strip()
+                    }
+
+                    id_para_atualizar = None
+                    csv_id_str = row_dict.get('id', '').strip()
+                    if csv_id_str.isdigit():
+                        csv_id = int(csv_id_str)
+                        if csv_id in fornecedores_existentes:
+                            id_para_atualizar = csv_id
+
+                    if id_para_atualizar is not None:
+                        self.local_db.atualizar_fornecedor(id_para_atualizar, **dados_fornecedor)
+                        atualizados += 1
+                    else:
+                        self.local_db.adicionar_fornecedor(**dados_fornecedor)
                         importados += 1
-                    except Exception as e:
-                        erros += 1
-                        detalhes_erros.append(f"Linha {i+2}: {e}")
-                    self.progress.emit(int(((i + 1) / total_linhas) * 100))
+                except Exception as e:
+                    erros += 1
+                    detalhes_erros.append(f"Linha {i+2}: {str(e)}")
                 
-                self.local_db.commit_transaction()
+                self.progress.emit(int(((i + 1) / total_linhas) * 100))
+            
+            self.local_db.commit_transaction()
         except Exception as e:
             if self.local_db: self.local_db.rollback_transaction()
-            detalhes_erros.append(f"Erro geral: {e}")
+            detalhes_erros.append(f"Erro Crítico na Importação: {str(e)}")
         finally:
             if self.local_db: self.local_db.fechar()
         
-        self.finished.emit(importados, erros, detalhes_erros)
+        self.finished.emit(importados, atualizados, erros, detalhes_erros)
 
 class FornecedorWindow(QWidget):
     dados_fornecedores_alterados = pyqtSignal()
@@ -540,17 +577,22 @@ class FornecedorWindow(QWidget):
         self.progress_dialog.exec_()
     
      # NOVO MÉTODO (adicionar abaixo de importar_csv)
-    def importacao_concluida(self, importados, erros, detalhes_erros):
+    def importacao_concluida(self, importados, atualizados, erros, detalhes_erros):
         self.progress_dialog.close()
-        self.carregar_dados() # Recarrega tudo
+        self.carregar_dados() # Recarrega tudo para mostrar as atualizações
         
-        mensagem = f"Importação concluída!\n\n- Fornecedores importados: {importados}\n- Linhas com erro: {erros}"
+        mensagem = (f"Importação concluída!\n\n"
+                    f"✔ Fornecedores novos criados: {importados}\n"
+                    f"✔ Fornecedores existentes atualizados: {atualizados}\n"
+                    f"❌ Linhas com erro: {erros}")
         
-        if erros > 0:
-            mensagem += "\n\n" + "\n".join(detalhes_erros[:5])
-            AlertDialog(self, "Importação com Erros", mensagem, alert_type='warning', theme_colors=self.theme_colors).exec_()
+        if detalhes_erros:
+            mensagem += "\n\nDetalhes dos problemas:\n" + "\n".join(detalhes_erros[:5])
+            alert_type = 'warning' if (importados > 0 or atualizados > 0) else 'error'
+            titulo = "Importação Finalizada com Avisos"
+            AlertDialog(self, titulo, mensagem, alert_type=alert_type, theme_colors=self.theme_colors).exec_()
         else:
-            AlertDialog(self, "Importação Concluída", mensagem, alert_type='success', theme_colors=self.theme_colors).exec_()
+            AlertDialog(self, "Importação Concluída com Sucesso", mensagem, alert_type='success', theme_colors=self.theme_colors).exec_()
 
     # NOVO MÉTODO (adicionar abaixo de importacao_concluida)
     def cancelar_importacao(self):
@@ -571,16 +613,24 @@ class FornecedorWindow(QWidget):
                 return
 
             with open(arquivo, 'w', newline='', encoding='utf-8') as file:
-                fieldnames = ['empresa', 'representante', 'frequencia_compra', 'telefone', 'email', 'endereco', 'contato']
+                # Adicionamos 'id' como o primeiro campo do cabeçalho
+                fieldnames = ['id', 'empresa', 'representante', 'frequencia_compra', 'telefone', 'email', 'endereco', 'contato']
                 writer = csv.DictWriter(file, fieldnames=fieldnames)
                 writer.writeheader()
-                for f in fornecedores:
-                    writer.writerow({k: f.get(k, '') for k in fieldnames})
+                
+                for f_row in fornecedores:
+                    f_dict = dict(f_row)
+                    writer.writerow({k: f_dict.get(k, '') for k in fieldnames})
             
             AlertDialog(self, "Exportação Concluída", f"Fornecedores exportados com sucesso para:\n{arquivo}", alert_type='success', theme_colors=self.theme_colors).exec_()
                 
         except Exception as e:
             AlertDialog(self, "Erro na Exportação", f"Ocorreu um erro ao exportar o arquivo:\n{e}", alert_type='error', theme_colors=self.theme_colors).exec_()
+                
+        except Exception as e:
+            # O erro que você viu será capturado aqui.
+            AlertDialog(self, "Erro na Exportação", f"Ocorreu um erro ao exportar o arquivo:\n{e}", alert_type='error', theme_colors=self.theme_colors).exec_()
+
     
     def verificar_estoque_baixo(self):
         produtos_baixo = self.db.verificar_produtos_estoque_baixo()
@@ -600,6 +650,16 @@ class FornecedorWindow(QWidget):
         dialog = DialogEstoqueBaixo(self.db, produtos_por_fornecedor, self.theme_colors, self.settings, self)
         dialog.exec_()
 
+    def selecionar_item_por_id(self, item_id):
+        """Encontra e seleciona um item na tabela com base no seu ID."""
+        for row in range(self.tabela.rowCount()):
+            item = self.tabela.item(row, 0)
+            if item: # Garante que a célula não está vazia
+                id_na_tabela = item.data(Qt.UserRole)
+                if id_na_tabela == item_id:
+                    self.tabela.selectRow(row)
+                    self.tabela.scrollToItem(item, QTableWidget.ScrollHint.PositionAtCenter)
+                    break
 
 class DialogEstoqueBaixo(QDialog):
     def __init__(self, db, produtos_por_fornecedor, theme_colors, settings, parent=None):

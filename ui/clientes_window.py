@@ -120,9 +120,13 @@ class ThemedProgressDialog(QDialog):
 #       CLASSE WORKER PARA IMPORTAÇÃO DE CSV EM THREAD              #
 # ================================================================= #
 
+# ================================================================= #
+#       CLASSE WORKER (VERSÃO FINAL COM NORMALIZAÇÃO DE CABEÇALHO)  #
+# ================================================================= #
+
 class ClienteCsvImportWorker(QThread):
     progress = pyqtSignal(int)
-    finished = pyqtSignal(int, int, list)
+    finished = pyqtSignal(int, int, int, list)  # importados, atualizados, erros, detalhes
 
     def __init__(self, db_path, file_path):
         super().__init__()
@@ -132,53 +136,94 @@ class ClienteCsvImportWorker(QThread):
 
     def run(self):
         importados = 0
+        atualizados = 0
         erros = 0
         detalhes_erros = []
         try:
             self.local_db = DatabaseManager(self.db_path)
             
-            with open(self.file_path, 'r', encoding='utf-8') as f:
-                total_linhas = max(1, sum(1 for _ in f) - 1)
+            # --- CORREÇÃO PRINCIPAL AQUI ---
+            # Otimização: Carrega clientes existentes usando o método correto do db_manager
+            todos_clientes = self.local_db.listar_clientes() 
+            clientes_por_id = {cliente['id']: cliente for cliente in todos_clientes}
+            clientes_por_email = {str(cliente.get('email', '')).lower(): cliente['id'] for cliente in todos_clientes if cliente and cliente.get('email')}
 
-            with open(self.file_path, 'r', encoding='utf-8') as csvfile:
-                reader = csv.DictReader(csvfile)
-                self.local_db.begin_transaction()
-                
-                for i, row in enumerate(reader):
-                    try:
-                        nome = row.get('nome', '').strip()
-                        if not nome:
-                            raise ValueError("Nome do cliente é obrigatório.")
-                        
-                        data_nascimento = row.get('data_nascimento')
-                        if data_nascimento:
-                             try:
-                                data_nascimento = datetime.strptime(data_nascimento, '%d/%m/%Y').strftime('%Y-%m-%d')
-                             except ValueError:
-                                # Tenta o formato ISO se o primeiro falhar
-                                datetime.strptime(data_nascimento, '%Y-%m-%d')
+            # Lógica de leitura do arquivo (já estava correta na sua versão final)
+            with open(self.file_path, mode='r', encoding='utf-8-sig') as csvfile:
+                leitor = csv.reader(csvfile)
+                try:
+                    todas_as_linhas = list(leitor)
+                except csv.Error as e:
+                    detalhes_erros.append(f"Erro de formatação no CSV: {e}")
+                    self.finished.emit(0, 0, 1, detalhes_erros)
+                    return
 
-                        self.local_db.adicionar_cliente(
-                            nome=nome,
-                            data_nascimento=data_nascimento,
-                            telefone=row.get('telefone', '').strip(),
-                            email=row.get('email', '').strip(),
-                            endereco=row.get('endereco', '').strip()
-                        )
+            if not todas_as_linhas or len(todas_as_linhas) < 2:
+                detalhes_erros.append("O arquivo CSV está vazio ou contém apenas o cabeçalho.")
+                self.finished.emit(0, 0, 0, detalhes_erros)
+                return
+            
+            cabecalho_raw = todas_as_linhas[0]
+            linhas_de_dados = todas_as_linhas[1:]
+            
+            cabecalho = [str(h).lower().strip() for h in cabecalho_raw]
+            total_linhas = len(linhas_de_dados)
+
+            self.local_db.begin_transaction()
+            
+            for i, valores_linha in enumerate(linhas_de_dados):
+                try:
+                    row_dict = dict(zip(cabecalho, valores_linha))
+                    
+                    nome = row_dict.get('nome', '').strip()
+                    if not nome:
+                        raise ValueError("A coluna 'nome' está vazia.")
+                    
+                    email = row_dict.get('email', '').strip()
+                    email_lower = email.lower()
+                    csv_id_str = row_dict.get('id', '').strip()
+
+                    data_nascimento_str = row_dict.get('data_nascimento', '')
+                    data_nascimento_db = None
+                    if data_nascimento_str:
+                        try: data_nascimento_db = datetime.strptime(data_nascimento_str, '%d/%m/%Y').strftime('%Y-%m-%d')
+                        except ValueError: data_nascimento_db = datetime.strptime(data_nascimento_str, '%Y-%m-%d').strftime('%Y-%m-%d')
+                    
+                    dados_cliente = {
+                        'nome': nome, 'data_nascimento': data_nascimento_db,
+                        'telefone': row_dict.get('telefone', '').strip(), 'email': email,
+                        'endereco': row_dict.get('endereco', '').strip()
+                    }
+
+                    id_para_atualizar = None
+                    if csv_id_str.isdigit():
+                        csv_id = int(csv_id_str)
+                        if csv_id in clientes_por_id: id_para_atualizar = csv_id
+
+                    if id_para_atualizar is None and email and email_lower in clientes_por_email:
+                        id_para_atualizar = clientes_por_email[email_lower]
+
+                    if id_para_atualizar is not None:
+                        self.local_db.atualizar_cliente(id_para_atualizar, **dados_cliente)
+                        atualizados += 1
+                    else:
+                        self.local_db.adicionar_cliente(**dados_cliente)
                         importados += 1
-                    except Exception as e:
-                        erros += 1
-                        detalhes_erros.append(f"Linha {i+2}: {e}")
-                    self.progress.emit(int(((i + 1) / total_linhas) * 100))
+                except Exception as e:
+                    erros += 1
+                    detalhes_erros.append(f"Linha {i+2}: {str(e)}")
                 
-                self.local_db.commit_transaction()
+                self.progress.emit(int(((i + 1) / total_linhas) * 100))
+            
+            self.local_db.commit_transaction()
         except Exception as e:
             if self.local_db: self.local_db.rollback_transaction()
-            detalhes_erros.append(f"Erro geral: {e}")
+            # Este erro crítico agora será exibido corretamente na interface
+            detalhes_erros.append(f"Erro Crítico na Importação: {str(e)}")
         finally:
             if self.local_db: self.local_db.fechar()
         
-        self.finished.emit(importados, erros, detalhes_erros)
+        self.finished.emit(importados, atualizados, erros, detalhes_erros)
 
 
 class ClientesWindow(QWidget):
@@ -473,20 +518,43 @@ class ClientesWindow(QWidget):
         self.import_thread.start()
         self.progress_dialog.exec_()
 
-    def importacao_concluida(self, importados, erros, detalhes):
+    def importacao_concluida(self, importados, atualizados, erros, detalhes):
         self.progress_dialog.close()
         self.atualizar_visualizacao_dados()
 
-        if importados > 0:
+        if importados > 0 or atualizados > 0:
             self.dados_clientes_alterados.emit()
 
-        msg = f"Importação concluída!\n\n- Clientes importados: {importados}\n- Linhas com erro: {erros}"
-        if erros > 0:
-            msg += "\n\nPrimeiros erros:\n" + "\n".join(detalhes[:5])
-            AlertDialog(self, "Importação com Erros", msg, alert_type='warning', theme_colors=self.theme_colors).exec_()
+        msg = (f"Importação concluída!\n\n"
+               f"✔ Clientes novos criados: {importados}\n"
+               f"✔ Clientes existentes atualizados: {atualizados}\n"
+               f"❌ Linhas com erro: {erros}")
+               
+        # --- LÓGICA DE FEEDBACK CORRIGIDA ---
+        # Se houver qualquer tipo de detalhe (erros de linha OU erros críticos), exibe a mensagem.
+        if detalhes:
+            erros_detalhados = "\n\nDetalhes dos problemas encontrados:\n" + "\n".join(detalhes[:5])
+            msg += erros_detalhados
+            
+            # Define o tipo de alerta com base no resultado
+            alert_type = 'warning' if (importados > 0 or atualizados > 0) else 'error'
+            title = "Importação Finalizada com Problemas"
+            AlertDialog(self, title, msg, alert_type=alert_type, theme_colors=self.theme_colors).exec_()
         else:
-            AlertDialog(self, "Importação Concluída", msg, alert_type='success', theme_colors=self.theme_colors).exec_()
+            # Apenas se não houver NENHUM detalhe, mostra a mensagem de sucesso puro.
+            AlertDialog(self, "Importação Concluída com Sucesso", msg, alert_type='success', theme_colors=self.theme_colors).exec_()
 
+    
+    def selecionar_item_por_id(self, item_id):
+        """Encontra e seleciona um item na tabela com base no seu ID."""
+        for row in range(self.tabela.rowCount()):
+            item = self.tabela.item(row, 0)
+            if item: # Garante que a célula não está vazia
+                id_na_tabela = item.data(Qt.UserRole)
+                if id_na_tabela == item_id:
+                    self.tabela.selectRow(row)
+                    self.tabela.scrollToItem(item, QTableWidget.ScrollHint.PositionAtCenter)
+                    break
 
 class FormularioCliente(QDialog):
     # 1. Construtor modificado para aceitar theme_colors
