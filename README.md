@@ -155,10 +155,9 @@ Este projeto está licenciado sob uma Licença Proprietária - veja o arquivo [L
 ---
 
 <div align="center">
-  Desenvolvido por Gustavo Moreno e Adiel Salviano  
-  <br>
-  <a href="https://www.linkedin.com/in/gustavomorenoit" target="_blank">
-    🌐 LinkedIn
+  Desenvolvido por Gustavo Moreno  
+  <br><br>
+  <a href="https://www.linkedin.com/in/gustavomoreno05" target="_blank">
+    <img src="https://cdn-icons-png.flaticon.com/512/174/174857.png" width="24" alt="LinkedIn"/> LinkedIn
   </a>
 </div>
-
