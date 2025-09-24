@@ -6,6 +6,10 @@ from PyQt5.QtCore import Qt, QRegExp, QSize, QTimer
 
 from .icon_manager import IconManager
 
+from PyQt5.QtMultimedia import QSoundEffect
+from PyQt5.QtCore import QUrl
+import os
+
 # --- INÍCIO DA ADIÇÃO: CLASSE AlertDialog E DEPENDÊNCIAS ---
 # Adicionamos a classe de diálogo customizada que você criou.
 # Ela será usada para exibir as mensagens de sucesso, erro e aviso.
@@ -13,20 +17,45 @@ from .icon_manager import IconManager
 class AlertDialog(QDialog):
     """Dialog customizado, integrado ao tema e visualmente aprimorado para alertas."""
     
+    # Atributo de classe para carregar o som apenas uma vez (melhora o desempenho)
+    success_sound_player = None
+
     def __init__(self, parent, title, message, alert_type="info", theme_colors=None):
         super().__init__(parent)
+
+        # --- INÍCIO DA LÓGICA DE EFEITO SONORO ---
+        # Neste código, 'info' é o tipo de alerta para sucesso.
+        if alert_type == 'info':
+            # Inicializa o player de som na primeira vez que for necessário
+            if AlertDialog.success_sound_player is None:
+                sound_file_path = "assets/sounds/success.wav"
+                
+                if os.path.exists(sound_file_path):
+                    AlertDialog.success_sound_player = QSoundEffect()
+                    AlertDialog.success_sound_player.setSource(QUrl.fromLocalFile(sound_file_path))
+                    AlertDialog.success_sound_player.setVolume(0.4) # Ajuste o volume (0.0 a 1.0)
+                else:
+                    # Imprime um aviso no console se o arquivo não for encontrado
+                    print(f"Aviso: Arquivo de som de sucesso não encontrado em '{sound_file_path}'")
+                    # Define como False para não tentar carregar novamente
+                    AlertDialog.success_sound_player = False
+
+            # Se o player foi carregado com sucesso, toca o som
+            if AlertDialog.success_sound_player:
+                AlertDialog.success_sound_player.play()
+        # --- FIM DA LÓGICA DE EFEITO SONORO ---
+
         self.alert_type = alert_type
         self.theme_colors = theme_colors or self._get_default_colors()
         self.title_text = title
         
         self.setModal(True)
-        self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint) # Janela sem bordas padrão
-        self.setAttribute(Qt.WA_TranslucentBackground) # Para cantos arredondados
+        self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
 
         self._setup_alert_info()
         self.setup_ui(message)
 
-        # Permitir arrastar a janela
         self.drag_position = None
 
     def mousePressEvent(self, event):
@@ -40,18 +69,15 @@ class AlertDialog(QDialog):
             event.accept()
             
     def _get_default_colors(self):
-        """Fornece cores padrão caso o tema não seja passado."""
         return {
             'bg_color': "#ffffff", 'surface_color': "#f2f2f7", 'text_color': "#000000",
-            'border_color': "#d1d1d6", 'accent_color': "#007AFF"
+            'text_secondary': "#333333", 'border_color': "#d1d1d6", 'accent_color': "#007AFF"
         }
 
     def _setup_alert_info(self):
-        """Define ícone e cor com base no tipo de alerta."""
         alerts = {
             "critical": {"icon": "delete", "color": "#d73a49", "prefix": "Erro"},
             "warning":  {"icon": "estoque_baixo", "color": "#ffc107", "prefix": "Atenção"},
-            # CORREÇÃO: Mapeando 'info' para um ícone e prefixo de 'Sucesso'
             "info":     {"icon": "check", "color": "#28a745", "prefix": "Sucesso"}
         }
         self.alert_info = alerts.get(self.alert_type, alerts["info"])
@@ -68,25 +94,21 @@ class AlertDialog(QDialog):
         self.layout().addWidget(container)
         self.layout().setContentsMargins(0,0,0,0)
 
-        # Cabeçalho
         header = QFrame()
         header.setObjectName("alertHeader")
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(15, 10, 15, 10)
         
-        # Usamos o prefixo definido (Sucesso, Erro, etc.) como o título no cabeçalho
         title_label = QLabel(self.alert_info['prefix'])
         title_label.setObjectName("alertTitle")
         
         header_layout.addWidget(title_label, 1)
 
-        # Corpo
         body = QFrame()
         body.setObjectName("alertBody")
         body_layout = QVBoxLayout(body)
         body_layout.setContentsMargins(20, 15, 20, 20)
         
-        # O título original (ex: "Campo obrigatório") vira um subtítulo no corpo
         subtitle_label = QLabel(self.title_text)
         subtitle_label.setObjectName("alertSubtitle")
 
@@ -161,8 +183,6 @@ class AlertDialog(QDialog):
         """
         self.setStyleSheet(style)
         self.setMinimumWidth(400)
-# --- FIM DA ADIÇÃO ---
-
 
 # --- As classes de widgets temáticos (ThemedLineEdit, etc.) permanecem as mesmas ---
 class ThemedLineEdit(QLineEdit):

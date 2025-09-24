@@ -10,7 +10,6 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLab
 from PyQt5.QtCore import Qt, QDate, QTimer
 from PyQt5.QtGui import QFont
 
-# Usaremos qtawesome para ícones modernos e fáceis de usar
 import qtawesome as qta
 
 # --- Importações e configuração do Matplotlib ---
@@ -21,7 +20,6 @@ from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 import matplotlib.ticker
 import numpy as np
-
 
 class MplCanvas(FigureCanvas):
     """Canvas Matplotlib customizado e ciente do tema."""
@@ -116,7 +114,6 @@ class DashboardWindow(QWidget):
         main_chart_layout.addWidget(self.chart_vendas)
         main_chart_group.setLayout(main_chart_layout)
         
-        # ======================= ALTERAÇÃO DE DESTAQUE AQUI =======================
         # Adiciona os widgets ao layout da esquerda COM fatores de estiramento
         
         # KPIs: Fator 1 -> Cresce um pouco para ter destaque
@@ -127,7 +124,6 @@ class DashboardWindow(QWidget):
         
         # Gráfico: Fator 4 -> Pega a maior parte do espaço vertical extra
         left_layout.addWidget(main_chart_group, 4)
-        # ==========================================================================
         
         splitter.addWidget(left_column_widget)
         
@@ -246,17 +242,7 @@ class DashboardWindow(QWidget):
         # 3. Adicionamos o layout horizontal ao layout vertical
         main_v_layout.addLayout(filter_h_layout)
         
-        # 4. A MÁGICA ACONTECE AQUI: Adicionamos o espaçador flexível.
-        # Ele vai "empurrar" o layout dos filtros para cima, ocupando todo o espaço vertical extra.
-        # main_v_layout.addStretch(1) # <<-- Esta linha foi removida, pois o QGroupBox já faz esse controle.
-                                    # O layout do próprio QGroupBox já será suficiente.
-        
-        # O group.setLayout(main_v_layout) já é feito automaticamente pelo construtor QVBoxLayout(group)
         return group
-
-    # Em dashboard_window.py, na classe DashboardWindow
-
-    # SUBSTITUA ESTE MÉTODO INTEIRO PELA VERSÃO ABAIXO
 
     def _create_kpi_group(self):
         """Cria o QGroupBox para os KPIs em uma grade simétrica de 3x2."""
@@ -538,15 +524,11 @@ class DashboardWindow(QWidget):
         # Força atualização dos ícones
         self.btn_atualizar.setIcon(qta.icon('fa5s.sync-alt', color='white'))
         
-        # ======================= A CORREÇÃO CRÍTICA =========================
         # Força este widget e todos os seus filhos a relerem a folha de estilo,
         # aplicando as regras mais específicas que acabamos de definir.
         self.style().unpolish(self)
         self.style().polish(self)
         self.update()
-        # ====================================================================== q
-
-    # --- Métodos de Lógica (quase inalterados, mas agora atualizam nova UI) ---
     
     def _initial_load(self):
         if self._initialized:
@@ -595,12 +577,10 @@ class DashboardWindow(QWidget):
         
         # Se a data de início ultrapassar a de fim, sincronize-as
         if self.dt_inicio.date() > self.dt_fim.date():
-            # --- CORREÇÃO APLICADA AQUI ---
             # Bloqueia o QDateEdit de destino para evitar uma chamada recursiva a 'data_alterada'
             self.dt_fim.blockSignals(True)
             self.dt_fim.setDate(self.dt_inicio.date())
             self.dt_fim.blockSignals(False)
-            # --- FIM DA CORREÇÃO ---
 
         # Agenda a atualização dos dados uma única vez após todas as lógicas
         self.schedule_update()
@@ -629,15 +609,11 @@ class DashboardWindow(QWidget):
             self.card_vendas.findChild(QLabel, "kpiValue").setText(str(num_vendas_valor))
             self.card_ticket.findChild(QLabel, "kpiValue").setText(f"R$ {ticket_medio:.2f}")
 
-            # --- INÍCIO DA MODIFICAÇÃO: ATUALIZAR O NOVO CARD ---
             self.card_perdas.findChild(QLabel, "kpiValue").setText(f"R$ {dados.get('total_perdas', 0):.2f}")
-            # --- FIM DA MODIFICAÇÃO ---
 
-            # --- INÍCIO DA MODIFICAÇÃO ---
             # Adicione esta linha para preencher o novo card de margem
             margem_valor = dados.get('margem_lucro_media', 0)
             self.card_margem.findChild(QLabel, "kpiValue").setText(f"{margem_valor:.2f}%")
-            # --- FIM DA MODIFICAÇÃO ---
 
             # --- Atualizar Contagens Gerais ---
             self.lbl_total_produtos.setText(f"Produtos: <b>{dados.get('total_produtos', 0)}</b>")
@@ -717,9 +693,7 @@ class DashboardWindow(QWidget):
         self.card_perdas.findChild(QLabel, "kpiValue").setText("R$ 0,00") # <-- Adicionado
         self.card_vendas.findChild(QLabel, "kpiValue").setText("0")
         self.card_ticket.findChild(QLabel, "kpiValue").setText("R$ 0,00")
-        # --- INÍCIO DA MODIFICAÇÃO ---
         self.card_margem.findChild(QLabel, "kpiValue").setText("0.00%") # Zera o novo card
-        # --- FIM DA MODIFICAÇÃO ---
 
         self.tabela_produtos.setRowCount(0)
         self.tabela_pagamentos.setRowCount(0)
@@ -825,6 +799,3 @@ class DashboardWindow(QWidget):
 
         canvas.fig.tight_layout(pad=2.0)
         canvas.draw()
-
-   
-

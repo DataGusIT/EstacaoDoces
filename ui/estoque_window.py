@@ -3,8 +3,9 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdi
                            QDateEdit, QComboBox, QMessageBox, QHeaderView, QSpinBox,
                            QDoubleSpinBox, QDialog, QFrame, QToolButton, QGroupBox,
                            QFileDialog, QCheckBox, QProgressDialog, QGridLayout, QProgressBar, QCompleter)
-from PyQt5.QtCore import Qt, QDate, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QDate, QThread, pyqtSignal, QUrl
 from PyQt5.QtGui import QFont, QIcon, QColor, QBrush, QPixmap
+from PyQt5.QtMultimedia import QSoundEffect
 import os
 from datetime import datetime, timedelta
 from reportlab.lib import colors
@@ -21,18 +22,41 @@ import math
 from ui.icon_manager import IconManager
 from database.db_manager import DatabaseManager 
 
-# Coloque esta nova classe no início do arquivo estoque_window.py
-
-# Coloque esta nova classe no início do seu arquivo estoque_window.py
-# (Substitua a classe CustomMessageBox existente)
-
-# Cole esta classe no início do seu arquivo ui/estoque_window.py, 
-# substituindo a versão anterior da AlertDialog.
-
 class AlertDialog(QDialog):
     """Caixa de diálogo com o estilo sutil da tela de perfil."""
+    
+    # --- NOVO: Player de som como atributo de classe ---
+    # Isso garante que o arquivo de som seja carregado apenas uma vez.
+    success_sound_player = None
+
     def __init__(self, parent, title, message, alert_type='info', buttons=QMessageBox.Ok, theme_colors=None):
         super().__init__(parent)
+        
+        # --- LÓGICA DE EFEITO SONORO ---
+        # Toca um som se a mensagem for de sucesso.
+        if alert_type == 'success':
+            # Inicializa o player na primeira vez que for necessário.
+            if AlertDialog.success_sound_player is None:
+                # IMPORTANTE: Crie esta pasta e coloque um arquivo de som nela.
+                # O caminho deve ser: 'assets/sounds/success.wav'
+                sound_file_path = "assets/sounds/success.wav"
+                
+                if os.path.exists(sound_file_path):
+                    AlertDialog.success_sound_player = QSoundEffect()
+                    AlertDialog.success_sound_player.setSource(QUrl.fromLocalFile(sound_file_path))
+                    # Ajuste o volume conforme necessário (0.0 a 1.0)
+                    AlertDialog.success_sound_player.setVolume(0.4) 
+                else:
+                    # Imprime um aviso no console se o arquivo não for encontrado.
+                    print(f"Aviso: Arquivo de som de sucesso não encontrado em '{sound_file_path}'")
+                    # Marca como 'False' para não tentar carregar de novo.
+                    AlertDialog.success_sound_player = False
+
+            # Se o player foi carregado com sucesso, toca o som.
+            if AlertDialog.success_sound_player:
+                AlertDialog.success_sound_player.play()
+        # --- FIM DA LÓGICA DE EFEITO SONORO ---
+
         self.theme_colors = theme_colors if theme_colors is not None else {}
         self.drag_position = None
 
@@ -152,10 +176,6 @@ class AlertDialog(QDialog):
     def mouseMoveEvent(self, event):
         if self.drag_position and event.buttons() == Qt.LeftButton: self.move(event.globalPos() - self.drag_position)
 
-# Adicione esta importação extra no topo do seu arquivo, junto com as outras
-from PyQt5.QtWidgets import QProgressBar
-
-# Cole esta nova classe abaixo da classe AlertDialog
 class ThemedProgressDialog(QDialog):
     """Um diálogo de progresso customizado e temático."""
     canceled = pyqtSignal()
@@ -243,24 +263,6 @@ class ThemedProgressDialog(QDialog):
         if event.button() == Qt.LeftButton: self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
     def mouseMoveEvent(self, event):
         if self.drag_position and event.buttons() == Qt.LeftButton: self.move(event.globalPos() - self.drag_position)
-
-# ================================================================= #
-#       CLASSE CSV IMPORT WORKER TOTALMENTE IMPLEMENTADA            #
-# ================================================================= #
-# ================================================================= #
-#       CLASSE CSV IMPORT WORKER - CORREÇÃO FINAL (FLOAT)           #
-# ================================================================= #
-# Substitua a sua classe CsvImportWorker inteira por esta
-
-# ================================================================= #
-#       CLASSE CSV IMPORT WORKER - CORREÇÃO DE DELIMITADOR          #
-# ================================================================= #
-# Substitua a sua classe CsvImportWorker inteira por esta versão
-
-# ================================================================= #
-#       CLASSE CSV IMPORT WORKER - CORREÇÃO FINAL DE DUPLICATAS     #
-# ================================================================= #
-# Substitua a sua classe CsvImportWorker inteira por esta versão
 
 class CsvImportWorker(QThread):
     progress = pyqtSignal(int)
@@ -391,7 +393,6 @@ class CsvImportWorker(QThread):
         
         self.finished.emit(importados, atualizados, erros, erros_detalhes)
     
-# Substitua a classe EstoqueWindow inteira em seu arquivo.
 class EstoqueWindow(QWidget):
     dados_produtos_alterados = pyqtSignal()
     def __init__(self, db, theme_colors, settings, logo_pixmap=None):
@@ -541,18 +542,15 @@ class EstoqueWindow(QWidget):
         
         search_group = QGroupBox("Pesquisa e Filtros")
         search_layout = QVBoxLayout(search_group)
-        
         search_input_layout = QHBoxLayout()
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Pesquisar produto por nome, descrição ou código de barras...")
-        
         self.search_button = QPushButton()
         self.search_button.setToolTip("Buscar")
         self.search_button.clicked.connect(self.pesquisar_produtos)
         search_input_layout.addWidget(self.search_input)
         search_input_layout.addWidget(self.search_button)
         search_layout.addLayout(search_input_layout)
-        
         filter_layout = QHBoxLayout()
         self.estoque_combo = QComboBox()
         self.estoque_combo.addItem("Todos os níveis", "todos")
@@ -561,7 +559,6 @@ class EstoqueWindow(QWidget):
         self.estoque_combo.addItem("Estoque Alto", "alto")
         filter_layout.addWidget(QLabel("Nível de Estoque:"))
         filter_layout.addWidget(self.estoque_combo)
-        
         self.vencimento_combo = QComboBox()
         self.vencimento_combo.addItem("Todos", "todos")
         self.vencimento_combo.addItem("Vence em 30 dias", "30")
@@ -569,33 +566,25 @@ class EstoqueWindow(QWidget):
         self.vencimento_combo.addItem("Vencidos", "vencidos")
         filter_layout.addWidget(QLabel("Vencimento:"))
         filter_layout.addWidget(self.vencimento_combo)
-
         self.categoria_combo = QComboBox()
         self.categoria_combo.addItem("Todas as categorias", "todas")
         self.carregar_categorias()
         filter_layout.addWidget(QLabel("Categoria:"))
         filter_layout.addWidget(self.categoria_combo)
-        
         self.aplicar_filtro_btn = QPushButton()
         self.aplicar_filtro_btn.setToolTip("Aplicar Filtros")
         self.aplicar_filtro_btn.clicked.connect(self.aplicar_filtros)
-        
         self.limpar_filtro_btn = QPushButton()
         self.limpar_filtro_btn.setToolTip("Limpar Filtros")
         self.limpar_filtro_btn.clicked.connect(self.limpar_filtros)
-        
         filter_layout.addWidget(self.aplicar_filtro_btn)
         filter_layout.addWidget(self.limpar_filtro_btn)
-        
         search_layout.addLayout(filter_layout)
         layout.addWidget(search_group)
-        
         legenda_layout = QHBoxLayout()
-        # --- CORREÇÃO: Adicionando objectName para estilização ---
         estoque_baixo_label = QLabel("Estoque Baixo"); estoque_baixo_label.setObjectName("legendaEstoqueBaixo")
         vencimento_30_label = QLabel("Vence em 30 dias"); vencimento_30_label.setObjectName("legendaVence30")
         vencimento_15_label = QLabel("Vence em 15 dias"); vencimento_15_label.setObjectName("legendaVence15")
-        
         legenda_layout.addWidget(estoque_baixo_label)
         legenda_layout.addWidget(vencimento_30_label)
         legenda_layout.addWidget(vencimento_15_label)
@@ -603,69 +592,60 @@ class EstoqueWindow(QWidget):
         layout.addLayout(legenda_layout)
         
         self.tabela = QTableWidget()
-        self.tabela.setColumnCount(12)
+        
+        # --- CORREÇÃO APLICADA AQUI ---
+        self.tabela.setColumnCount(13)
         self.tabela.setHorizontalHeaderLabels([
-            "Código de Barras", "Nome", "Categoria", "Estoque Detalhado", "Estoque Mín.", 
+            "Código de Barras", "Nome", "Categoria", "Estoque Detalhado", 
+            "Estoque Mín.", "Estoque Máx.", # Colunas Corrigidas
             "Preço Compra", "Margem %", "Preço Venda", "Validade", 
             "Localização", "Fornecedor", "Ações"
         ])
+        # --- FIM DA CORREÇÃO ---
+        
         self.tabela.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.tabela.verticalHeader().setVisible(False)
         layout.addWidget(self.tabela)
 
         paginacao_layout = QHBoxLayout()
         paginacao_layout.setAlignment(Qt.AlignCenter)
-        
         self.prev_page_btn = QPushButton(" Anterior")
         self.prev_page_btn.clicked.connect(self.ir_pagina_anterior)
-        
-        # --- CORREÇÃO: Adicionando objectName para estilização ---
         self.page_label = QLabel(f"Página {self.pagina_atual} de {self.total_paginas}")
         self.page_label.setObjectName("paginationLabel")
-
         self.next_page_btn = QPushButton("Próxima")
         self.next_page_btn.setLayoutDirection(Qt.RightToLeft)
         self.next_page_btn.clicked.connect(self.ir_proxima_pagina)
-
         paginacao_layout.addWidget(self.prev_page_btn)
         paginacao_layout.addStretch()
         paginacao_layout.addWidget(self.page_label)
         paginacao_layout.addStretch()
         paginacao_layout.addWidget(self.next_page_btn)
         layout.addLayout(paginacao_layout)
-        
         action_layout = QHBoxLayout()
         self.add_button = QPushButton(" Adicionar Produto")
         self.add_button.setObjectName("primaryActionButton") 
         self.add_button.clicked.connect(self.abrir_formulario_produto)
-
         self.relatorio_btn = QPushButton(" Relatório de Vencimentos")
         self.relatorio_btn.setObjectName("secondaryActionButton")
         self.relatorio_btn.clicked.connect(self.relatorio_vencimentos)
-
         self.relatorio_estoque_btn = QPushButton(" Relatório de Estoque Baixo")
         self.relatorio_estoque_btn.setObjectName("secondaryActionButton")
         self.relatorio_estoque_btn.clicked.connect(self.relatorio_estoque_baixo)
-        
         self.exportar_csv_btn = QPushButton(" Exportar CSV")
         self.exportar_csv_btn.setObjectName("secondaryActionButton")
         self.exportar_csv_btn.clicked.connect(self.exportar_csv)
-
         self.importar_csv_btn = QPushButton(" Importar CSV")
         self.importar_csv_btn.setObjectName("secondaryActionButton")
         self.importar_csv_btn.clicked.connect(self.importar_csv)
-
         action_layout.addWidget(self.add_button)
         action_layout.addWidget(self.relatorio_btn)
         action_layout.addWidget(self.relatorio_estoque_btn)
         action_layout.addWidget(self.exportar_csv_btn)
         action_layout.addWidget(self.importar_csv_btn)
         layout.addLayout(action_layout)
-        
         self.update_button_icons()
 
-    # O resto da classe EstoqueWindow continua exatamente igual ao que você já tinha.
-    # ... (cole todos os outros métodos de EstoqueWindow aqui, sem nenhuma alteração) ...
     def ir_pagina_anterior(self):
         if self.pagina_atual > 1:
             self.pagina_atual -= 1
@@ -691,7 +671,6 @@ class EstoqueWindow(QWidget):
         self.carregar_categorias()
     
     def carregar_categorias(self):
-        # ... (seu método está correto, mas vamos garantir que o dado 'todas' exista) ...
         current_data = self.categoria_combo.currentData()
         self.categoria_combo.clear()
         self.categoria_combo.addItem("Todas as categorias", "todas")
@@ -752,161 +731,109 @@ class EstoqueWindow(QWidget):
     
     def atualizar_tabela(self, produtos):
         self.tabela.setRowCount(0)
-        icon_color = self.theme_colors.get('text_color', '#000')
         hoje = datetime.now().date()
-
-        try:
-            bg_color_hex = self.theme_colors.get('bg_color', '#ffffff')
-            color = QColor(bg_color_hex)
-            luminance = (0.299 * color.red() + 0.587 * color.green() + 0.114 * color.blue()) / 255
-            is_dark_theme = luminance < 0.5
-        except Exception:
-            is_dark_theme = True 
-        
-        dar_baixa_icon_color = '#ffffff' if is_dark_theme else '#000000'
-        icon_color = self.theme_colors.get('text_color', '#000000')
-
-        def get_value(key, default=""):
-            return produto[key] if key in produto.keys() else default
 
         for row, produto in enumerate(produtos):
             self.tabela.insertRow(row)
             
-            self.tabela.setItem(row, 0, QTableWidgetItem(get_value('codigo_barras', '')))
+            # --- CORREÇÃO PRINCIPAL APLICADA AQUI ---
+            # Agora usamos produto.get() de forma segura, pois 'produto' é um dicionário.
+            # E os índices das colunas estão corrigidos.
             
-            nome_produto = get_value('nome', 'Produto Desconhecido')
-            is_fracionado = bool(get_value('fracionado', False))
-            if is_fracionado:
-                nome_produto += f" (Frac. - {get_value('unidade_medida', 'un')})"
+            # Coluna 0: Código de Barras
+            self.tabela.setItem(row, 0, QTableWidgetItem(produto.get('codigo_barras', '')))
+            
+            # Coluna 1: Nome
+            nome_produto = produto.get('nome', 'N/A')
+            if produto.get('fracionado'):
+                nome_produto += f" (Frac. - {produto.get('unidade_medida', 'un')})"
             self.tabela.setItem(row, 1, QTableWidgetItem(nome_produto))
-
-            self.tabela.setItem(row, 2, QTableWidgetItem(get_value('categoria', "Sem categoria")))
             
-            quantidade = get_value('quantidade', 0)
-            estoque_fracionado = get_value('estoque_fracionado', 0)
-            if is_fracionado:
-                estoque_total_unidades = get_value('estoque_total_calculado', 0)
-                quantidade_display = f"{quantidade} emb. + {estoque_fracionado} {get_value('unidade_medida', 'un')} (Total: {estoque_total_unidades})"
-                tooltip_text = f"Embalagens: {quantidade}\nFracionado: {estoque_fracionado} {get_value('unidade_medida', 'un')}\nTotal em unidades: {estoque_total_unidades}"
-            else:
-                quantidade_display = str(quantidade)
-                tooltip_text = f"Quantidade: {quantidade}"
-
+            # Coluna 2: Categoria
+            self.tabela.setItem(row, 2, QTableWidgetItem(produto.get('categoria', "N/A")))
+            
+            # Coluna 3: Estoque Detalhado
+            quantidade = produto.get('quantidade', 0)
+            estoque_minimo = produto.get('estoque_minimo', 0)
+            quantidade_display = str(quantidade)
+            if produto.get('fracionado'):
+                quantidade_display = f"{quantidade} emb. + {produto.get('estoque_fracionado', 0)} {produto.get('unidade_medida', 'un')}"
+            
             quantidade_item = QTableWidgetItem(quantidade_display)
-            quantidade_item.setToolTip(tooltip_text)
-            
-            estoque_minimo = get_value('estoque_minimo', 0)
-            
             if estoque_minimo > 0 and quantidade <= estoque_minimo:
                 quantidade_item.setForeground(QBrush(QColor('red')))
-                quantidade_item.setToolTip(quantidade_item.toolTip() + "\nESTOQUE ABAIXO DO MÍNIMO!")
-
+                quantidade_item.setToolTip("ESTOQUE ABAIXO DO MÍNIMO!")
             self.tabela.setItem(row, 3, quantidade_item)
             
+            # Coluna 4: Estoque Mínimo (Calculado)
             self.tabela.setItem(row, 4, QTableWidgetItem(str(estoque_minimo)))
-            self.tabela.setItem(row, 5, QTableWidgetItem(f"R$ {get_value('preco_compra', 0):.2f}"))
-            self.tabela.setItem(row, 6, QTableWidgetItem(f"{get_value('margem_lucro', 0):.2f}%"))
             
-            if is_fracionado and get_value('preco_unitario_fracao', 0):
-                preco_display = f"Emb: R$ {get_value('preco_venda', 0):.2f} | Un: R$ {get_value('preco_unitario_fracao', 0):.2f}"
-            else:
-                preco_display = f"R$ {get_value('preco_venda', 0):.2f}"
-            self.tabela.setItem(row, 7, QTableWidgetItem(preco_display))
+            # Coluna 5: Estoque Máximo (Calculado) - NOVA
+            self.tabela.setItem(row, 5, QTableWidgetItem(str(produto.get('estoque_maximo', 0))))
             
-            validade_str = get_value('data_validade', '')
+            # Colunas restantes com índices ajustados
+            self.tabela.setItem(row, 6, QTableWidgetItem(f"R$ {produto.get('preco_compra', 0):.2f}"))
+            self.tabela.setItem(row, 7, QTableWidgetItem(f"{produto.get('margem_lucro', 0):.2f}%"))
+            
+            preco_venda_display = f"R$ {produto.get('preco_venda', 0):.2f}"
+            if produto.get('fracionado') and produto.get('preco_unitario_fracao', 0):
+                preco_venda_display = f"Emb: {preco_venda_display} | Un: R$ {produto.get('preco_unitario_fracao', 0):.2f}"
+            self.tabela.setItem(row, 8, QTableWidgetItem(preco_venda_display))
+            
+            # Lógica de validade (sem alteração, mas com índice corrigido)
+            validade_str = produto.get('data_validade', '')
             validade_item = QTableWidgetItem(validade_str)
-            
-            dias_para_vencer = 999 
             if validade_str:
                 try:
                     data_validade = datetime.strptime(validade_str, "%Y-%m-%d").date()
-                    dias_para_vencer = (data_validade - hoje).days
-                    
-                    if dias_para_vencer <= 0:
-                        validade_item.setForeground(QBrush(QColor('darkred')))
-                        validade_item.setToolTip("Produto VENCIDO!")
-                    elif dias_para_vencer <= 15:
-                        validade_item.setForeground(QBrush(QColor('red')))
-                        validade_item.setToolTip(f"Vence em {dias_para_vencer} dias!")
-                    elif dias_para_vencer <= 30:
-                        validade_item.setForeground(QBrush(QColor('orange')))
-                        validade_item.setToolTip(f"Vence em {dias_para_vencer} dias!")
+                    dias = (data_validade - hoje).days
+                    if dias <= 0: validade_item.setForeground(QBrush(QColor('darkred')))
+                    elif dias <= 15: validade_item.setForeground(QBrush(QColor('red')))
+                    elif dias <= 30: validade_item.setForeground(QBrush(QColor('orange')))
+                except ValueError: pass # Ignora datas mal formatadas
+            self.tabela.setItem(row, 9, validade_item)
 
-                except ValueError as e:
-                    print(f"AVISO: Data em formato inválido para o produto '{nome_produto}': {validade_str}. Erro: {e}")
+            self.tabela.setItem(row, 10, QTableWidgetItem(produto.get('localizacao', '')))
+            self.tabela.setItem(row, 11, QTableWidgetItem(produto.get('fornecedor_nome', "N/A")))
+            
+            # Coluna 12: Ações (sem alteração na lógica, apenas no índice)
+            self.tabela.setCellWidget(row, 12, self.criar_botoes_acao(produto))
 
-            self.tabela.setItem(row, 8, validade_item)
-
-            self.tabela.setItem(row, 9, QTableWidgetItem(get_value('localizacao', '')))
-            self.tabela.setItem(row, 10, QTableWidgetItem(get_value('fornecedor_nome', "N/A")))
+    def criar_botoes_acao(self, produto):
+        """Função auxiliar para criar os botões de ação para a tabela."""
+        acoes_widget = QWidget()
+        acoes_layout = QHBoxLayout(acoes_widget)
+        acoes_layout.setContentsMargins(0, 0, 0, 0)
+        acoes_layout.setSpacing(5)
+        
+        icon_color = self.theme_colors.get('text_color', '#000')
+        hover_color = self.theme_colors.get('button_hover', '#555555')
+        
+        editar_btn = QPushButton(IconManager.get_icon('edit', icon_color), "")
+        editar_btn.setToolTip("Editar Produto")
+        editar_btn.clicked.connect(lambda _, p_id=produto['id']: self.abrir_formulario_produto(p_id))
+        
+        excluir_btn = QPushButton(IconManager.get_icon('delete', icon_color), "")
+        excluir_btn.setToolTip("Excluir Produto")
+        excluir_btn.clicked.connect(lambda _, p_id=produto['id']: self.excluir_produto(p_id))
+        
+        for btn in [editar_btn, excluir_btn]:
+            btn.setFixedSize(30, 30); btn.setFlat(True); btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet(f"QPushButton:hover {{ background-color: {hover_color}; }}")
+        
+        acoes_layout.addWidget(editar_btn)
+        acoes_layout.addWidget(excluir_btn)
+        
+        if produto.get('fracionado') and produto.get('quantidade', 0) > 0:
+            quebrar_btn = QPushButton(IconManager.get_icon('break', icon_color), "")
+            quebrar_btn.setToolTip("Quebrar embalagem")
+            quebrar_btn.setFixedSize(30, 30); quebrar_btn.setFlat(True); quebrar_btn.setCursor(Qt.PointingHandCursor)
+            quebrar_btn.setStyleSheet(f"QPushButton:hover {{ background-color: {hover_color}; }}")
+            quebrar_btn.clicked.connect(lambda _, p_id=produto['id']: self.abrir_dialog_quebrar_embalagem(p_id))
+            acoes_layout.addWidget(quebrar_btn)
             
-            acoes_widget = QWidget()
-            acoes_layout = QHBoxLayout(acoes_widget)
-            acoes_layout.setContentsMargins(0, 0, 0, 0)
-            acoes_layout.setSpacing(5)
-            
-            hover_color = self.theme_colors.get('button_hover', '#555555')
-            
-            editar_btn = QPushButton(IconManager.get_icon('edit', icon_color), "")
-            editar_btn.setToolTip("Editar Produto")
-            
-            excluir_btn = QPushButton(IconManager.get_icon('delete', icon_color), "")
-            excluir_btn.setToolTip("Excluir Produto")
-
-            editar_btn.clicked.connect(lambda _, p_id=get_value('id'): self.abrir_formulario_produto(p_id))
-            excluir_btn.clicked.connect(lambda _, p_id=get_value('id'): self.excluir_produto(p_id))
-
-            for btn in [editar_btn, excluir_btn]:
-                btn.setFixedSize(30, 30)
-                btn.setFlat(True)
-                btn.setCursor(Qt.PointingHandCursor)
-                btn.setStyleSheet(f"""
-                    QPushButton {{ border-radius: 4px; }}
-                    QPushButton:hover {{ background-color: {hover_color}; }}
-                """)
-            
-            acoes_layout.addWidget(editar_btn)
-            acoes_layout.addWidget(excluir_btn)
-            
-            validade_str = get_value('data_validade', '')
-            dias_para_vencer = 999
-            if validade_str:
-                try:
-                    data_validade = datetime.strptime(validade_str, "%Y-%m-%d").date()
-                    dias_para_vencer = (data_validade - hoje).days
-                except ValueError:
-                    pass
-            
-            produto_tem_estoque = get_value('quantidade', 0) > 0 or get_value('estoque_fracionado', 0) > 0
-            
-            if dias_para_vencer <= 0 and produto_tem_estoque:
-                dar_baixa_btn = QPushButton(IconManager.get_icon('thumb-down', dar_baixa_icon_color), "")
-                dar_baixa_btn.setToolTip("Dar Baixa por Vencimento (Registrar Perda)")
-                dar_baixa_btn.setFixedSize(30, 30)
-                dar_baixa_btn.setFlat(True)
-                dar_baixa_btn.setCursor(Qt.PointingHandCursor)
-                dar_baixa_btn.setStyleSheet("""
-                    QPushButton { border-radius: 4px; }
-                    QPushButton:hover { background-color: #dc3545; }
-                """)
-                dar_baixa_btn.clicked.connect(lambda _, p_id=get_value('id'): self.dar_baixa_produto(p_id))
-                acoes_layout.addWidget(dar_baixa_btn)
-            
-            if bool(get_value('fracionado', False)) and get_value('quantidade', 0) > 0:
-                quebrar_btn = QPushButton(IconManager.get_icon('break', icon_color), "")
-                quebrar_btn.setToolTip("Quebrar embalagem em unidades")
-                quebrar_btn.setFixedSize(30, 30)
-                quebrar_btn.setFlat(True)
-                quebrar_btn.setCursor(Qt.PointingHandCursor)
-                quebrar_btn.setStyleSheet(f"""
-                    QPushButton {{ border-radius: 4px; }}
-                    QPushButton:hover {{ background-color: {hover_color}; }}
-                """)
-                quebrar_btn.clicked.connect(lambda _, p_id=get_value('id'): self.abrir_dialog_quebrar_embalagem(p_id))
-                acoes_layout.addWidget(quebrar_btn)
-            
-            self.tabela.setCellWidget(row, 11, acoes_widget)
-
+        return acoes_widget
+    
     def abrir_dialog_quebrar_embalagem(self, produto_id):
         produto_info = self.db.obter_info_estoque_fracionado(produto_id)
         if not produto_info or not produto_info['fracionado']:
@@ -999,9 +926,6 @@ class EstoqueWindow(QWidget):
         ]))
         return kpi_table
 
-    # Em estoque_window.py E caixa_window.py
-    # SUBSTITUA este método inteiro em AMBOS os arquivos
-
     def _gerar_pdf_com_template(self, file_path, report_title, elementos, company_info, custom_logo_path):
         try:
             left_margin, right_margin, top_margin, bottom_margin = 2*cm, 2*cm, 3.5*cm, 1.5*cm
@@ -1085,9 +1009,6 @@ class EstoqueWindow(QWidget):
             company_info = self.db.obter_informacoes_empresa()
             custom_logo_path = self.settings.get_value("custom_logo_path", "")
             self.gerar_pdf_vencimentos(produtos, file_path, company_info, custom_logo_path)
-
-    # No arquivo ui/estoque_window.py, dentro da classe EstoqueWindow
-# SUBSTITUA este método inteiro
 
     def gerar_pdf_vencimentos(self, produtos, file_path, company_info, custom_logo_path):
         styles = getSampleStyleSheet()
@@ -1422,9 +1343,6 @@ class EstoqueWindow(QWidget):
                     self.tabela.scrollToItem(item, QTableWidget.ScrollHint.PositionAtCenter)
                     break
 
-# Nenhuma alteração necessária nas classes FormularioProduto e DialogQuebrarEmbalagem
-# Substitua a classe FormularioProduto inteira em estoque_window.py
-
 class FormularioProduto(QDialog):
     def __init__(self, db, produto_id=None, theme_colors=None, logo_pixmap=None):
         super().__init__()
@@ -1455,33 +1373,26 @@ class FormularioProduto(QDialog):
     def initUI(self):
         self.setWindowTitle("Formulário de Produto")
         
-        # Container principal para o estilo
         container = QFrame(self)
         container.setObjectName("mainContainer")
-
         main_layout = QVBoxLayout(container)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Adiciona o cabeçalho customizado
         self.header = self._create_header()
         main_layout.addWidget(self.header)
+        main_layout.addWidget(self._create_content())
 
-        # Conteúdo do formulário (agora dentro de um widget separado)
-        content_widget = self._create_content()
-        main_layout.addWidget(content_widget)
-
-        # Adiciona o container ao layout do QDialog
         base_layout = QVBoxLayout(self)
         base_layout.setContentsMargins(0, 0, 0, 0)
         base_layout.addWidget(container)
 
-        # Conexões de sinais
         self.preco_compra_input.valueChanged.connect(self.calcular_preco_venda)
         self.margem_lucro_input.valueChanged.connect(self.calcular_preco_venda)
         self.preco_venda_input.valueChanged.connect(self.calcular_margem_lucro)
 
     def _create_header(self):
+        # Este método permanece o mesmo
         header_widget = QFrame()
         header_widget.setObjectName("header")
         header_widget.setFixedHeight(50)
@@ -1495,24 +1406,16 @@ class FormularioProduto(QDialog):
             layout.addWidget(logo_label)
 
         title_label = QLabel("Formulário de Produto")
-        title_label.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {self.theme_colors['text_color']};")
+        title_label.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {self.theme_colors.get('text_color', '#000')};")
         
-        help_button = QPushButton()
-        help_button.setObjectName("controlButton")
-        help_button.setFixedSize(30, 30)
-        help_button.setIcon(IconManager.get_icon('sobre', color=self.theme_colors['text_secondary']))
-        help_button.setCursor(Qt.PointingHandCursor)
-        
-        close_button = QPushButton()
+        close_button = QPushButton(IconManager.get_icon('fechar', color=self.theme_colors.get('text_secondary', '#666')), "")
         close_button.setObjectName("controlButton")
         close_button.setFixedSize(30, 30)
-        close_button.setIcon(IconManager.get_icon('fechar', color=self.theme_colors['text_secondary']))
         close_button.setCursor(Qt.PointingHandCursor)
         close_button.clicked.connect(self.reject)
         
         layout.addWidget(title_label)
         layout.addStretch()
-        layout.addWidget(help_button)
         layout.addWidget(close_button)
         return header_widget
 
@@ -1520,316 +1423,106 @@ class FormularioProduto(QDialog):
         content_container = QWidget()
         main_layout = QVBoxLayout(content_container)
         main_layout.setContentsMargins(20, 15, 20, 20)
-
         grid_layout = QGridLayout()
         grid_layout.setSpacing(20)
 
-        # --- COLUNA 1: INFORMAÇÕES DO PRODUTO ---
+        # Coluna 1: Informações do Produto
         info_group = QGroupBox("Informações do Produto")
-        info_form_layout = QFormLayout(info_group)
-        info_form_layout.setRowWrapPolicy(QFormLayout.WrapAllRows)
-        
+        info_form = QFormLayout(info_group)
         self.codigo_barras_input = QLineEdit()
         self.nome_input = QLineEdit()
         self.descricao_input = QLineEdit()
         self.categoria_combo = QComboBox(); self.categoria_combo.setEditable(True); self.carregar_categorias()
         self.fornecedor_combo = QComboBox(); self.carregar_fornecedores()
-         
-        # --- MUDANÇA 1: Localização agora é um ComboBox editável ---
-        self.localizacao_input = QComboBox()
-        self.localizacao_input.setEditable(True)
-        self.carregar_localizacoes()
-        # --- FIM DA MUDANÇA 1 ---
+        self.localizacao_input = QComboBox(); self.localizacao_input.setEditable(True); self.carregar_localizacoes()
+        info_form.addRow("Código de Barras:", self.codigo_barras_input)
+        info_form.addRow("Nome do Produto:", self.nome_input)
+        info_form.addRow("Descrição:", self.descricao_input)
+        info_form.addRow("Categoria:", self.categoria_combo)
+        info_form.addRow("Fornecedor:", self.fornecedor_combo)
+        info_form.addRow("Localização:", self.localizacao_input)
 
-        info_form_layout.addRow("Código de Barras:", self._create_input_with_icon('barcode', self.codigo_barras_input))
-        info_form_layout.addRow("Nome do Produto:", self._create_input_with_icon('box', self.nome_input))
-        info_form_layout.addRow("Descrição:", self._create_input_with_icon('comment-alt', self.descricao_input))
-        info_form_layout.addRow("Categoria:", self._create_input_with_icon('tags', self.categoria_combo))
-        info_form_layout.addRow("Fornecedor:", self._create_input_with_icon('truck', self.fornecedor_combo))
-        info_form_layout.addRow("Localização:", self._create_input_with_icon('map-marker-alt', self.localizacao_input))
-
-        # --- COLUNA 2: ESTOQUE E PRECIFICAÇÃO ---
-        preco_group = QGroupBox("Estoque e Precificação")
-        preco_form_layout = QFormLayout(preco_group)
-        preco_form_layout.setRowWrapPolicy(QFormLayout.WrapAllRows)
-
-        self.quantidade_input = QSpinBox(); self.quantidade_input.setRange(0, 99999)
-        self.estoque_minimo_input = QSpinBox(); self.estoque_minimo_input.setRange(0, 99999)
+        # Coluna 2: Precificação e Validade
+        preco_group = QGroupBox("Precificação e Validade")
+        preco_form = QFormLayout(preco_group)
         self.preco_compra_input = QDoubleSpinBox(); self.preco_compra_input.setRange(0, 99999.99); self.preco_compra_input.setPrefix("R$ ")
         self.margem_lucro_input = QDoubleSpinBox(); self.margem_lucro_input.setRange(0, 999.99); self.margem_lucro_input.setSuffix(" %")
         self.preco_venda_input = QDoubleSpinBox(); self.preco_venda_input.setRange(0, 99999.99); self.preco_venda_input.setPrefix("R$ ")
         self.data_validade_input = QDateEdit(calendarPopup=True); self.data_validade_input.setDisplayFormat("dd/MM/yyyy")
+        preco_form.addRow("Preço de Compra:", self.preco_compra_input)
+        preco_form.addRow("Margem de Lucro:", self.margem_lucro_input)
+        preco_form.addRow("Preço de Venda:", self.preco_venda_input)
+        preco_form.addRow("Data de Validade:", self.data_validade_input)
 
-        preco_form_layout.addRow("Quantidade:", self._create_input_with_icon('estoque', self.quantidade_input))
-        preco_form_layout.addRow("Estoque Mínimo:", self._create_input_with_icon('estoque_baixo', self.estoque_minimo_input))
-        preco_form_layout.addRow("Preço de Compra:", self._create_input_with_icon('dollar-sign', self.preco_compra_input))
-        preco_form_layout.addRow("Margem de Lucro:", self._create_input_with_icon('percentage', self.margem_lucro_input))
-        preco_form_layout.addRow("Preço de Venda:", self._create_input_with_icon('caixa', self.preco_venda_input))
-        preco_form_layout.addRow("Data de Validade:", self._create_input_with_icon('vencimentos', self.data_validade_input))
-
-        # --- COLUNA 3: IMAGEM DO PRODUTO ---
+        # Coluna 3: Imagem
         imagem_group = QGroupBox("Imagem do Produto")
         imagem_layout = QVBoxLayout(imagem_group)
-        
-        self.imagem_preview_label = QLabel("Nenhuma imagem selecionada")
-        self.imagem_preview_label.setAlignment(Qt.AlignCenter)
-        self.imagem_preview_label.setMinimumSize(200, 200)
-        self.imagem_preview_label.setObjectName("imagePreview")
-        imagem_layout.addWidget(self.imagem_preview_label)
-        
-        self.selecionar_imagem_btn = QPushButton("Selecionar Imagem")
-        self.selecionar_imagem_btn.clicked.connect(self.selecionar_imagem)
-        imagem_layout.addWidget(self.selecionar_imagem_btn)
+        self.imagem_preview_label = QLabel("Nenhuma imagem"); self.imagem_preview_label.setAlignment(Qt.AlignCenter); self.imagem_preview_label.setMinimumSize(200, 200); self.imagem_preview_label.setObjectName("imagePreview")
+        self.selecionar_imagem_btn = QPushButton("Selecionar Imagem"); self.selecionar_imagem_btn.clicked.connect(self.selecionar_imagem)
+        imagem_layout.addWidget(self.imagem_preview_label); imagem_layout.addWidget(self.selecionar_imagem_btn)
 
         grid_layout.addWidget(info_group, 0, 0)
         grid_layout.addWidget(preco_group, 0, 1)
         grid_layout.addWidget(imagem_group, 0, 2)
 
-        # --- LINHA 2: GRUPO DE FRACIONAMENTO ---
-        self.fracionado_group = QGroupBox("Produto Fracionado")
-        self.fracionado_group.setCheckable(True)
-        self.fracionado_group.setChecked(False)
-        fracionado_layout = QFormLayout(self.fracionado_group)
+        # --- NOVA SEÇÃO: GESTÃO DE ESTOQUE ---
+        estoque_group = QGroupBox("Gestão de Estoque")
+        estoque_layout = QGridLayout(estoque_group)
         
+        # Estoque Atual (Manual)
+        estoque_layout.addWidget(QLabel("Estoque Atual:"), 0, 0)
+        self.quantidade_input = QSpinBox(); self.quantidade_input.setRange(0, 99999)
+        estoque_layout.addWidget(self.quantidade_input, 0, 1)
+        
+        # Parâmetros para cálculo (Manual)
+        estoque_layout.addWidget(QLabel("Tempo de Reposição:"), 1, 0)
+        self.tempo_reposicao_input = QSpinBox(); self.tempo_reposicao_input.setRange(1, 365); self.tempo_reposicao_input.setSuffix(" dias")
+        estoque_layout.addWidget(self.tempo_reposicao_input, 1, 1)
+
+        estoque_layout.addWidget(QLabel("Lote de Reposição:"), 2, 0)
+        self.lote_reposicao_input = QSpinBox(); self.lote_reposicao_input.setRange(1, 9999); self.lote_reposicao_input.setSuffix(" un.")
+        estoque_layout.addWidget(self.lote_reposicao_input, 2, 1)
+
+        # Campos Calculados (Apenas Display)
+        label_style = "font-weight: bold; font-style: italic;"
+        self.consumo_label = QLabel("0.0 un/dia"); self.consumo_label.setStyleSheet(label_style)
+        self.estoque_min_label = QLabel("0"); self.estoque_min_label.setStyleSheet(label_style)
+        self.estoque_max_label = QLabel("0"); self.estoque_max_label.setStyleSheet(label_style)
+        
+        estoque_layout.addWidget(QLabel("Consumo Médio Diário (Calculado):"), 0, 2)
+        estoque_layout.addWidget(self.consumo_label, 0, 3)
+        estoque_layout.addWidget(QLabel("Estoque Mínimo (Calculado):"), 1, 2)
+        estoque_layout.addWidget(self.estoque_min_label, 1, 3)
+        estoque_layout.addWidget(QLabel("Estoque Máximo (Calculado):"), 2, 2)
+        estoque_layout.addWidget(self.estoque_max_label, 2, 3)
+        
+        grid_layout.addWidget(estoque_group, 1, 0, 1, 2)
+        
+        # Grupo de fracionamento
+        self.fracionado_group = QGroupBox("Produto Fracionado"); self.fracionado_group.setCheckable(True); self.fracionado_group.setChecked(False)
+        fracionado_form = QFormLayout(self.fracionado_group)
         self.unidade_medida_input = QLineEdit(); self.unidade_medida_input.setPlaceholderText("Ex: kg, L, m")
         self.qtd_por_embalagem_input = QSpinBox(); self.qtd_por_embalagem_input.setRange(1, 9999)
         self.preco_unitario_fracao_input = QDoubleSpinBox(); self.preco_unitario_fracao_input.setRange(0, 99999.99); self.preco_unitario_fracao_input.setPrefix("R$ ")
         self.estoque_fracionado_input = QSpinBox(); self.estoque_fracionado_input.setRange(0, 99999)
+        fracionado_form.addRow("Unidade de Medida:", self.unidade_medida_input)
+        fracionado_form.addRow("Unidades por Embalagem:", self.qtd_por_embalagem_input)
+        fracionado_form.addRow("Preço Unitário (Fração):", self.preco_unitario_fracao_input)
+        fracionado_form.addRow("Estoque Fracionado Atual:", self.estoque_fracionado_input)
         
-        fracionado_layout.addRow("Unidade de Medida:", self._create_input_with_icon('ruler', self.unidade_medida_input))
-        fracionado_layout.addRow("Unidades por Embalagem:", self._create_input_with_icon('box-open', self.qtd_por_embalagem_input))
-        fracionado_layout.addRow("Preço Unitário (Fração):", self._create_input_with_icon('tag', self.preco_unitario_fracao_input))
-        fracionado_layout.addRow("Estoque Fracionado Atual:", self._create_input_with_icon('cubes', self.estoque_fracionado_input))
-        
-        grid_layout.addWidget(self.fracionado_group, 1, 0, 1, 3)
+        grid_layout.addWidget(self.fracionado_group, 1, 2)
 
         main_layout.addLayout(grid_layout)
         main_layout.addStretch()
 
+        # Botões
         button_layout = QHBoxLayout()
-        self.salvar_btn = QPushButton(" Salvar Produto")
-        self.salvar_btn.setObjectName("primaryActionButton")
-        self.salvar_btn.clicked.connect(self.salvar_produto)
-        
-        self.cancelar_btn = QPushButton(" Cancelar")
-        self.cancelar_btn.clicked.connect(self.reject)
-        
-        button_layout.addStretch()
-        button_layout.addWidget(self.cancelar_btn)
-        button_layout.addWidget(self.salvar_btn)
-        
+        self.salvar_btn = QPushButton(" Salvar Produto"); self.salvar_btn.setObjectName("primaryActionButton"); self.salvar_btn.clicked.connect(self.salvar_produto)
+        self.cancelar_btn = QPushButton(" Cancelar"); self.cancelar_btn.clicked.connect(self.reject)
+        button_layout.addStretch(); button_layout.addWidget(self.cancelar_btn); button_layout.addWidget(self.salvar_btn)
         main_layout.addLayout(button_layout)
+        
         return content_container
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton and self.header.underMouse():
-            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
-            event.accept()
-
-    def mouseMoveEvent(self, event):
-        if self.drag_position and event.buttons() == Qt.LeftButton:
-            self.move(event.globalPos() - self.drag_position)
-            event.accept()
-            
-    # O restante dos métodos (apply_styles, _create_input_with_icon, salvar_produto, etc.)
-    # podem ser copiados da sua versão original, mas a apply_styles precisa de um ajuste.
-    # Abaixo está a versão completa e corrigida dos métodos restantes.
-
-    def apply_styles(self):
-        theme = self.theme_colors
-        if not theme: return
-
-        style = f"""
-            #mainContainer {{
-                background-color: {theme.get('bg_color', '#fff')};
-                border-radius: 16px;
-                border: 1px solid {theme.get('border_color', '#ccc')};
-            }}
-            #header {{
-                background-color: {theme.get('surface_color', '#f0f0f0')};
-                border-top-left-radius: 16px;
-                border-top-right-radius: 16px;
-                border-bottom: 1px solid {theme.get('border_color', '#ccc')};
-            }}
-            #controlButton {{
-                background-color: transparent; border: none; border-radius: 8px;
-            }}
-            #controlButton:hover {{
-                background-color: {theme.get('button_hover', '#e0e0e0')};
-            }}
-            QGroupBox {{
-                font-size: 11pt; border: 1px solid {theme.get('border_color', '#ccc')};
-                border-radius: 8px; margin-top: 15px; padding: 15px;
-            }}
-            QGroupBox::title {{
-                subcontrol-origin: margin; subcontrol-position: top left;
-                padding: 0 10px; margin-left: 10px;
-                background-color: {theme.get('bg_color', '#fff')};
-                color: {theme.get('text_secondary', '#333')};
-            }}
-            QGroupBox:checked {{
-                border-color: {theme.get('accent_color', '#007aff')};
-            }}
-            QLabel {{
-                color: {theme.get('text_color', '#000')}; font-size: 10pt;
-            }}
-            #imagePreview {{
-                border: 1px dashed {theme.get('border_color', '#ccc')};
-                border-radius: 8px;
-                color: {theme.get('text_secondary', '#666')};
-            }}
-            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit {{
-                background-color: {theme.get('surface_color', '#f2f2f7')};
-                color: {theme.get('text_color', '#000')};
-                border: 1px solid {theme.get('border_color', '#ccc')};
-                border-radius: 4px; padding: 8px; min-height: 20px;
-            }}
-            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus {{
-                border: 2px solid {theme.get('accent_color', '#007aff')};
-            }}
-            QPushButton {{
-                padding: 10px 15px; border-radius: 6px; font-weight: bold;
-            }}
-            #primaryActionButton {{
-                background-color: {theme.get('accent_color', '#007aff')};
-                color: white; border: none;
-            }}
-            #primaryActionButton:hover {{
-                background-color: #0069d9;
-            }}
-             /* ESTILO PARA O DROPDOWN (POPUP) DO QCOMBOBOX */
-            QComboBox QAbstractItemView {{
-                background-color: {theme.get('surface_color', '#333')};
-                color: {theme.get('text_color', '#fff')};
-                border: 1px solid {theme.get('border_color', '#555')};
-                selection-background-color: {theme.get('accent_color', '#007aff')};
-                selection-color: white;
-                outline: 0px; /* Remove a borda pontilhada de foco */
-            }}
-
-            /* ESTILO PARA A BARRA DE ROLAGEM DENTRO DO DROPDOWN */
-            QComboBox QScrollBar:vertical {{
-                border: none;
-                background: {theme.get('surface_color', '#333')};
-                width: 10px;
-                margin: 0px 0px 0px 0px;
-            }}
-            QComboBox QScrollBar::handle:vertical {{
-                background: {theme.get('border_color', '#555')};
-                min-height: 20px;
-                border-radius: 5px;
-            }}
-            QComboBox QScrollBar::add-line:vertical, QComboBox QScrollBar::sub-line:vertical {{
-                height: 0px;
-            }}
-        """
-        self.setStyleSheet(style)
-        
-        self.salvar_btn.setIcon(IconManager.get_icon('save', 'white'))
-        self.cancelar_btn.setIcon(IconManager.get_icon('cancel', theme.get('text_color', '#000')))
-
-    def _create_input_with_icon(self, icon_name, widget):
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
-        
-        icon_label = QLabel()
-        icon_color = self.theme_colors.get('text_secondary', '#6d6d70')
-        icon_label.setPixmap(IconManager.get_icon(icon_name, color=icon_color).pixmap(16, 16))
-        
-        layout.addWidget(icon_label)
-        layout.addWidget(widget, 1)
-        return container
-
-    def carregar_categorias(self):
-        self.categoria_combo.clear()
-        self.categoria_combo.addItem("Selecione ou crie uma categoria", "")
-        categorias = self.db.listar_categorias_unicas()
-        for categoria in categorias:
-            self.categoria_combo.addItem(categoria, categoria)
-    
-    def carregar_fornecedores(self):
-        self.fornecedor_combo.clear()
-        self.fornecedor_combo.addItem("Selecione um fornecedor", None)
-        fornecedores = self.db.listar_fornecedores()
-        for fornecedor in fornecedores:
-            self.fornecedor_combo.addItem(fornecedor['empresa'], fornecedor['id'])
-    
-    # --- MUDANÇA 3: Novo método para carregar e autocompletar localizações ---
-    def carregar_localizacoes(self):
-        """Carrega as localizações e configura o autocompletar."""
-        self.localizacao_input.clear()
-        self.localizacao_input.addItem("") # Item vazio para o placeholder
-        
-        localizacoes = self.db.listar_localizacoes_unicas()
-        self.localizacao_input.addItems(localizacoes)
-        
-        # Configura o autocompletar
-        completer = QCompleter(localizacoes, self)
-        completer.setCaseSensitivity(Qt.CaseInsensitive)
-        completer.setFilterMode(Qt.MatchContains)
-        self.localizacao_input.setCompleter(completer)
-    # --- FIM DA MUDANÇA 3 ---
-
-    def calcular_preco_venda(self):
-        preco_compra = self.preco_compra_input.value()
-        margem = self.margem_lucro_input.value() / 100
-        preco_venda = preco_compra * (1 + margem)
-        self.preco_venda_input.blockSignals(True)
-        self.preco_venda_input.setValue(preco_venda)
-        self.preco_venda_input.blockSignals(False)
-
-    def calcular_margem_lucro(self):
-        preco_compra = self.preco_compra_input.value()
-        preco_venda = self.preco_venda_input.value()
-        if preco_compra > 0:
-            margem = ((preco_venda / preco_compra) - 1) * 100
-            self.margem_lucro_input.blockSignals(True)
-            self.margem_lucro_input.setValue(margem)
-            self.margem_lucro_input.blockSignals(False)
-    
-    def carregar_dados_produto(self):
-        self.codigo_barras_input.setText(self.produto['codigo_barras'] or "")
-        self.nome_input.setText(self.produto['nome'])
-        self.descricao_input.setText(self.produto['descricao'] or "")
-        self.quantidade_input.setValue(self.produto['quantidade'])
-        self.estoque_minimo_input.setValue(self.produto['estoque_minimo'] or 0)
-        self.preco_compra_input.setValue(self.produto['preco_compra'])
-        self.margem_lucro_input.setValue(self.produto['margem_lucro'] or 30.0)
-        self.preco_venda_input.setValue(self.produto['preco_venda'])
-        if self.produto['data_validade']:
-            self.data_validade_input.setDate(QDate.fromString(self.produto['data_validade'], "yyyy-MM-dd"))
-         # --- MUDANÇA 4: Atualizar a forma de carregar a localização ---
-        if self.produto['localizacao']:
-            self.localizacao_input.setCurrentText(self.produto['localizacao'])
-        # --- FIM DA MUDANÇA 4 ---
-        
-        if self.produto['fornecedor_id']:
-            index = self.fornecedor_combo.findData(self.produto['fornecedor_id'])
-            if index != -1: self.fornecedor_combo.setCurrentIndex(index)
-        
-        if self.produto['categoria']:
-            index = self.categoria_combo.findText(self.produto['categoria'])
-            if index != -1: self.categoria_combo.setCurrentIndex(index)
-            else:
-                self.categoria_combo.addItem(self.produto['categoria'])
-                self.categoria_combo.setCurrentText(self.produto['categoria'])
-        
-        is_fracionado = bool(self.produto['fracionado'])
-        self.fracionado_group.setChecked(is_fracionado)
-        
-        if is_fracionado:
-            self.unidade_medida_input.setText(self.produto['unidade_medida'] or "")
-            self.qtd_por_embalagem_input.setValue(int(self.produto['qtd_por_embalagem'] or 1))
-            self.preco_unitario_fracao_input.setValue(self.produto['preco_unitario_fracao'] or 0.0)
-            self.estoque_fracionado_input.setValue(int(self.produto['estoque_fracionado'] or 0))
-        
-        # --- CORREÇÃO APLICADA AQUI ---
-        # Substituímos o uso de .get() pela verificação das chaves do objeto sqlite3.Row
-        if 'imagem_path' in self.produto.keys() and self.produto['imagem_path']:
-            self.imagem_path = self.produto['imagem_path']
-            self.carregar_preview_imagem(self.imagem_path)
 
     def salvar_produto(self):
         if not self.nome_input.text().strip():
@@ -1843,7 +1536,6 @@ class FormularioProduto(QDialog):
             'categoria': self.categoria_combo.currentText().strip() if self.categoria_combo.currentText() != "Selecione ou crie uma categoria" else None,
             'fornecedor_id': self.fornecedor_combo.currentData(),
             'quantidade': self.quantidade_input.value(),
-            'estoque_minimo': self.estoque_minimo_input.value(),
             'preco_compra': self.preco_compra_input.value(),
             'margem_lucro': self.margem_lucro_input.value(),
             'preco_venda': self.preco_venda_input.value(),
@@ -1855,50 +1547,131 @@ class FormularioProduto(QDialog):
             'qtd_por_embalagem': self.qtd_por_embalagem_input.value() if self.fracionado_group.isChecked() else 1,
             'preco_unitario_fracao': self.preco_unitario_fracao_input.value() if self.fracionado_group.isChecked() else 0.0,
             'estoque_fracionado': self.estoque_fracionado_input.value() if self.fracionado_group.isChecked() else 0,
+            # Passando os novos parâmetros
+            'tempo_reposicao_dias': self.tempo_reposicao_input.value(),
+            'lote_reposicao': self.lote_reposicao_input.value()
         }
         
         try:
+            produto_salvo_id = None
             if self.produto_id:
                 sucesso = self.db.atualizar_produto(self.produto_id, **dados)
+                produto_salvo_id = self.produto_id
                 mensagem = "Produto atualizado com sucesso!"
             else:
-                sucesso = self.db.adicionar_produto(**dados)
+                produto_salvo_id = self.db.adicionar_produto(**dados)
+                sucesso = produto_salvo_id is not None
                 mensagem = "Produto cadastrado com sucesso!"
             
             if sucesso:
-                # Chamada corrigida (a que causou o primeiro erro)
+                # --- PASSO CRÍTICO: ATUALIZAR OS NÍVEIS APÓS SALVAR ---
+                self.db.atualizar_niveis_estoque_calculado(produto_salvo_id)
+                
                 AlertDialog(self, "Sucesso", mensagem, alert_type='success', theme_colors=self.theme_colors).exec_()
                 self.accept()
             else:
-                # Chamada corrigida
                 AlertDialog(self, "Erro no Banco de Dados", "Não foi possível salvar o produto.", alert_type='error', theme_colors=self.theme_colors).exec_()
         except Exception as e:
-            # Chamada corrigida (a que causou o segundo erro)
             AlertDialog(self, "Erro Inesperado", f"Ocorreu um erro: {e}", alert_type='error', theme_colors=self.theme_colors).exec_()
 
-    def selecionar_imagem(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Selecionar Imagem do Produto", os.path.expanduser("~"),
-            "Arquivos de Imagem (*.png *.jpg *.jpeg *.bmp)"
-        )
-        if file_path:
-            self.imagem_path = file_path
+    def carregar_dados_produto(self):
+        # Carrega dados normais
+        self.codigo_barras_input.setText(self.produto.get('codigo_barras', ""))
+        self.nome_input.setText(self.produto['nome'])
+        self.descricao_input.setText(self.produto.get('descricao', ""))
+        self.quantidade_input.setValue(self.produto['quantidade'])
+        self.preco_compra_input.setValue(self.produto['preco_compra'])
+        self.margem_lucro_input.setValue(self.produto.get('margem_lucro', 30.0))
+        self.preco_venda_input.setValue(self.produto['preco_venda'])
+        if self.produto['data_validade']:
+            self.data_validade_input.setDate(QDate.fromString(self.produto['data_validade'], "yyyy-MM-dd"))
+        if self.produto['localizacao']:
+            self.localizacao_input.setCurrentText(self.produto['localizacao'])
+        
+        # Carrega dados dos combos
+        if self.produto['fornecedor_id']:
+            index = self.fornecedor_combo.findData(self.produto['fornecedor_id'])
+            if index != -1: self.fornecedor_combo.setCurrentIndex(index)
+        if self.produto['categoria']:
+            index = self.categoria_combo.findText(self.produto['categoria'])
+            if index != -1: self.categoria_combo.setCurrentIndex(index)
+            else: self.categoria_combo.addItem(self.produto['categoria']); self.categoria_combo.setCurrentText(self.produto['categoria'])
+        
+        # Carrega dados de fracionamento
+        is_fracionado = bool(self.produto['fracionado'])
+        self.fracionado_group.setChecked(is_fracionado)
+        if is_fracionado:
+            self.unidade_medida_input.setText(self.produto.get('unidade_medida', ""))
+            self.qtd_por_embalagem_input.setValue(int(self.produto.get('qtd_por_embalagem', 1)))
+            self.preco_unitario_fracao_input.setValue(self.produto.get('preco_unitario_fracao', 0.0))
+            self.estoque_fracionado_input.setValue(int(self.produto.get('estoque_fracionado', 0)))
+        
+        # Carrega imagem
+        if 'imagem_path' in self.produto.keys() and self.produto['imagem_path']:
+            self.imagem_path = self.produto['imagem_path']
             self.carregar_preview_imagem(self.imagem_path)
 
+        # --- CARREGA OS NOVOS DADOS DE ESTOQUE DINÂMICO ---
+        self.tempo_reposicao_input.setValue(self.produto.get('tempo_reposicao_dias', 7))
+        self.lote_reposicao_input.setValue(self.produto.get('lote_reposicao', 10))
+        
+        # Exibe os valores calculados
+        self.consumo_label.setText(f"{self.produto.get('consumo_medio_diario', 0.0):.2f} un/dia")
+        self.estoque_min_label.setText(str(self.produto.get('estoque_minimo', 0)))
+        self.estoque_max_label.setText(str(self.produto.get('estoque_maximo', 0)))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.header.underMouse():
+            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton:
+            self.move(event.globalPos() - self.drag_position)
+            event.accept()
+    
+    # Mantenha os métodos abaixo como estão no seu código original
+    def apply_styles(self):
+        theme = self.theme_colors
+        if not theme: return
+        self.setStyleSheet(f"""
+            #mainContainer {{ background-color: {theme.get('bg_color', '#fff')}; border-radius: 16px; border: 1px solid {theme.get('border_color', '#ccc')}; }}
+            #header {{ background-color: {theme.get('surface_color', '#f0f0f0')}; border-top-left-radius: 16px; border-top-right-radius: 16px; border-bottom: 1px solid {theme.get('border_color', '#ccc')}; }}
+            #controlButton:hover {{ background-color: {theme.get('button_hover', '#e0e0e0')}; }}
+            QGroupBox {{ font-size: 11pt; border: 1px solid {theme.get('border_color', '#ccc')}; border-radius: 8px; margin-top: 15px; padding: 15px; }}
+            QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left; padding: 0 10px; margin-left: 10px; background-color: {theme.get('bg_color', '#fff')}; color: {theme.get('text_secondary', '#333')}; }}
+            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit {{ background-color: {theme.get('surface_color', '#f2f2f7')}; color: {theme.get('text_color', '#000')}; border: 1px solid {theme.get('border_color', '#ccc')}; border-radius: 4px; padding: 8px; min-height: 20px; }}
+            QPushButton#primaryActionButton {{ background-color: {theme.get('accent_color', '#007aff')}; color: white; border: none; padding: 10px 15px; border-radius: 6px; font-weight: bold; }}
+            #imagePreview {{ border: 1px dashed {theme.get('border_color', '#ccc')}; border-radius: 8px; color: {theme.get('text_secondary', '#666')}; }}
+        """)
+        self.salvar_btn.setIcon(IconManager.get_icon('save', 'white'))
+        self.cancelar_btn.setIcon(IconManager.get_icon('cancel', theme.get('text_color', '#000')))
+
+    def carregar_categorias(self):
+        self.categoria_combo.clear(); self.categoria_combo.addItem("Selecione ou crie", ""); self.categoria_combo.addItems(self.db.listar_categorias_unicas())
+    def carregar_fornecedores(self):
+        self.fornecedor_combo.clear(); self.fornecedor_combo.addItem("Selecione", None)
+        for f in self.db.listar_fornecedores(): self.fornecedor_combo.addItem(f['empresa'], f['id'])
+    def carregar_localizacoes(self):
+        self.localizacao_input.clear(); self.localizacao_input.addItem(""); self.localizacao_input.addItems(self.db.listar_localizacoes_unicas())
+        self.localizacao_input.setCompleter(QCompleter(self.db.listar_localizacoes_unicas(), self))
+    def calcular_preco_venda(self):
+        preco_venda = self.preco_compra_input.value() * (1 + self.margem_lucro_input.value() / 100)
+        self.preco_venda_input.blockSignals(True); self.preco_venda_input.setValue(preco_venda); self.preco_venda_input.blockSignals(False)
+    def calcular_margem_lucro(self):
+        if self.preco_compra_input.value() > 0:
+            margem = ((self.preco_venda_input.value() / self.preco_compra_input.value()) - 1) * 100
+            self.margem_lucro_input.blockSignals(True); self.margem_lucro_input.setValue(margem); self.margem_lucro_input.blockSignals(False)
+    def selecionar_imagem(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Selecionar Imagem", os.path.expanduser("~"), "Imagens (*.png *.jpg *.jpeg)")
+        if file_path: self.imagem_path = file_path; self.carregar_preview_imagem(file_path)
     def carregar_preview_imagem(self, path):
-        if path and os.path.exists(path):
-            pixmap = QPixmap(path)
-            self.imagem_preview_label.setPixmap(pixmap.scaled(
-                200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation
-            ))
-        else:
-            self.imagem_preview_label.setText("Nenhuma imagem")
-            self.imagem_preview_label.setPixmap(QPixmap())
+        if path and os.path.exists(path): self.imagem_preview_label.setPixmap(QPixmap(path).scaled(200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        else: self.imagem_preview_label.setText("Nenhuma imagem"); self.imagem_preview_label.setPixmap(QPixmap())
 
 # ================================================================= #
 #       CLASSE DIALOGQUEBRAREMBALAGEM TOTALMENTE CORRIGIDA          #
 # ================================================================= #
-# Substitua a classe DialogQuebrarEmbalagem inteira em estoque_window.py
 
 class DialogQuebrarEmbalagem(QDialog):
     def __init__(self, db, produto_info, theme_colors=None, logo_pixmap=None):

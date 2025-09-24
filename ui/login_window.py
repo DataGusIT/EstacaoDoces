@@ -12,8 +12,6 @@ from PyQt5.QtGui import (QIcon, QPixmap, QColor, QFont, QCursor, QPainter,
 from ui.icon_manager import IconManager
 import os
 
-# --- INÍCIO DA ADIÇÃO: CLASSE AlertDialog E DEPENDÊNCIAS ---
-# Adicionamos a classe de diálogo customizada para as mensagens de erro.
 
 class AlertDialog(QDialog):
     """Dialog customizado, integrado ao tema e visualmente aprimorado para alertas."""
@@ -154,8 +152,6 @@ class AlertDialog(QDialog):
         """
         self.setStyleSheet(style)
         self.setMinimumWidth(400)
-# --- FIM DA ADIÇÃO ---
-
 
 #==============================================================================
 # CLASSE DA JANELA DE LOGIN PRINCIPAL
@@ -176,9 +172,6 @@ class LoginWindow(QDialog):
 
         self.init_ui()
         self.load_saved_credentials()
-
-    # ... (métodos showEvent, shake_window, init_ui e outros permanecem os mesmos) ...
-    # ... (vou omitir por brevidade, apenas cole o arquivo inteiro aqui) ...
 
     def init_ui(self):
         self.setMinimumWidth(420)
@@ -311,8 +304,6 @@ class LoginWindow(QDialog):
             # A chamada agora usa o novo método
             self.show_error_message("Falha no Login", "Usuário ou senha incorretos. Verifique e tente novamente.")
 
-    # --- CORREÇÃO APLICADA AQUI ---
-    # Substituímos o QMessageBox pelo AlertDialog.
     def show_error_message(self, title, text, level="warning"):
         """Exibe uma mensagem de erro usando o diálogo customizado."""
         alert_type_map = {
@@ -324,11 +315,7 @@ class LoginWindow(QDialog):
         # Cria e executa o diálogo personalizado, passando as cores do tema
         alert_dialog = AlertDialog(self, title, text, alert_type=alert_type, theme_colors=self.theme_colors)
         alert_dialog.exec_()
-        
-    # --- O RESTANTE DO CÓDIGO PERMANECE O MESMO ---
-    # ... cole aqui o restante dos métodos da sua classe LoginWindow
-    # (get_stylesheet, _create_field_label_with_icon, handle_forgot_password, 
-    #  load_saved_credentials, etc.)
+    
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -476,9 +463,11 @@ class LoginWindow(QDialog):
         self.password_visible = not self.password_visible
         self.senha_edit.setEchoMode(QLineEdit.Normal if self.password_visible else QLineEdit.Password)
         self.update_password_toggle_icon()
+
 #==============================================================================
 # CLASSE DA JANELA DE RECUPERAÇÃO DE SENHA
 #==============================================================================
+
 class PasswordRecoveryDialog(QDialog):
     # Recebe theme_colors
     def __init__(self, db_manager, theme_colors, parent=None):
@@ -531,9 +520,6 @@ class PasswordRecoveryDialog(QDialog):
         self.stacked_widget.addWidget(self._create_step3_widget())
         main_layout.addWidget(self.stacked_widget)
 
-    # ... (o resto da PasswordRecoveryDialog segue a mesma lógica de adaptação) ...
-    # ... (omiti o resto para brevidade, mas você deve adaptar os métodos _create_stepX_widget)
-
     def get_stylesheet(self):
         bg_color = self.theme_colors.get('bg_color', '#ffffff')
         surface_color = self.theme_colors.get('surface_color', '#f5f5f7')
@@ -561,4 +547,3 @@ class PasswordRecoveryDialog(QDialog):
             }}
             #actionButton:hover {{ background-color: #005bb5; }}
         """
-    # Restante da classe PasswordRecoveryDialog...

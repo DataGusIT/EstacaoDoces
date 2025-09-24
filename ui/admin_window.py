@@ -16,11 +16,40 @@ from .icon_manager import IconManager
 from PyQt5.QtWidgets import QFrame, QLineEdit
 from PyQt5.QtCore import Qt
 
+from PyQt5.QtMultimedia import QSoundEffect
+from PyQt5.QtCore import QUrl
+
 # --- CLASSE 1: DIÁLOGO DE ALERTA (ESTILO PERFIL) ---
 class AlertDialog(QDialog):
     """Caixa de diálogo com o estilo sutil da tela de perfil."""
+    
+    # Atributo de classe para carregar o som apenas uma vez e otimizar o desempenho
+    success_sound_player = None
+
     def __init__(self, parent, title, message, alert_type='info', buttons=QMessageBox.Ok, theme_colors=None):
         super().__init__(parent)
+
+        # --- INÍCIO DA LÓGICA DE EFEITO SONORO ---
+        if alert_type == 'success':
+            # Inicializa o player de som na primeira vez que uma mensagem de sucesso é exibida
+            if AlertDialog.success_sound_player is None:
+                sound_file_path = "assets/sounds/success.wav"
+                
+                if os.path.exists(sound_file_path):
+                    AlertDialog.success_sound_player = QSoundEffect()
+                    AlertDialog.success_sound_player.setSource(QUrl.fromLocalFile(sound_file_path))
+                    AlertDialog.success_sound_player.setVolume(0.4) # Ajuste o volume (0.0 a 1.0)
+                else:
+                    # Imprime um aviso no console se o arquivo de som não for encontrado
+                    print(f"Aviso: Arquivo de som de sucesso não encontrado em '{sound_file_path}'")
+                    # Define como False para não tentar carregar novamente
+                    AlertDialog.success_sound_player = False
+
+            # Toca o som se o player foi carregado com sucesso
+            if AlertDialog.success_sound_player:
+                AlertDialog.success_sound_player.play()
+        # --- FIM DA LÓGICA DE EFEITO SONORO ---
+
         self.theme_colors = theme_colors if theme_colors is not None else {}
         self.drag_position = None
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
@@ -67,8 +96,10 @@ class AlertDialog(QDialog):
     def apply_styles(self):
         colors = self.theme_colors
         self.setStyleSheet(f""" #mainContainer {{ background-color: {colors.get('surface_color', '#fff')}; border-radius: 12px; border: 1px solid {colors.get('border_color', '#ccc')}; }} #header {{ border-bottom: 1px solid {colors.get('border_color', '#ccc')}; }} #headerTitleLabel {{ color: {colors.get('text_color', '#000')}; font-weight: bold; }} #subtitleLabel {{ color: {colors.get('text_color', '#000')}; font-size: 14pt; font-weight: bold; }} #messageLabel {{ color: {colors.get('text_secondary', '#333')}; font-size: 11pt; }} #controlButton {{ background: transparent; border: none; border-radius: 14px; }} #controlButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }} QPushButton {{ font-weight: bold; padding: 10px 25px; border-radius: 8px; min-width: 90px;}} #primaryButton {{ background-color: {self.accent_color}; color: white; border: none; }} #secondaryButton {{ background-color: transparent; color: {colors.get('text_color', '#000')}; border: 1px solid {colors.get('border_color', '#ccc')}; }} #secondaryButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }} """)
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton: self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+        
     def mouseMoveEvent(self, event):
         if self.drag_position and event.buttons() == Qt.LeftButton: self.move(event.globalPos() - self.drag_position)
 

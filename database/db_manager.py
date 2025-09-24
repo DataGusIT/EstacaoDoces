@@ -73,7 +73,7 @@ class DatabaseManager:
         return cursor.fetchone()
     
     def criar_tabelas(self):
-        # Tabela de Produtos (com novos campos)
+        # Tabela de Produtos (com novos campos para estoque dinâmico)
         self.cursor.execute('''
         CREATE TABLE IF NOT EXISTS produtos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,7 +81,6 @@ class DatabaseManager:
             nome TEXT NOT NULL,
             descricao TEXT,
             quantidade INTEGER DEFAULT 0,
-            estoque_minimo INTEGER DEFAULT 0,
             preco_compra REAL,
             margem_lucro REAL DEFAULT 30.0,
             preco_venda REAL,
@@ -90,14 +89,26 @@ class DatabaseManager:
             fornecedor_id INTEGER,
             categoria TEXT,
             data_cadastro DATE DEFAULT CURRENT_DATE,
-            imagem_path TEXT, -- <<< ADICIONE ESTA LINHA
+            imagem_path TEXT,
 
-            -- Campos para controle de produtos fracionados
+            -- Campos para produtos fracionados
             fracionado INTEGER DEFAULT 0,
             unidade_medida TEXT DEFAULT 'unidade',
             qtd_por_embalagem REAL DEFAULT 1,
             preco_unitario_fracao REAL,
             estoque_fracionado REAL DEFAULT 0,
+
+            -- ==========================================================
+            -- NOVOS CAMPOS PARA GESTÃO DE ESTOQUE DINÂMICO
+            -- ==========================================================
+            -- Parâmetros (definidos pelo usuário)
+            tempo_reposicao_dias INTEGER DEFAULT 7, -- Lead Time em dias
+            lote_reposicao INTEGER DEFAULT 10,      -- Quantidade padrão de compra
+
+            -- Campos Calculados (atualizados pelo sistema)
+            consumo_medio_diario REAL DEFAULT 0,
+            estoque_minimo INTEGER DEFAULT 0,       -- Agora será calculado
+            estoque_maximo INTEGER DEFAULT 0,
 
             FOREIGN KEY (fornecedor_id) REFERENCES fornecedores (id)
         )
@@ -278,6 +289,70 @@ class DatabaseManager:
 
     # Em db_manager.py, substitua esta função inteira:
 
+    def calcular_consumo_medio_diario(self, produto_id, periodo_dias=90):
+        """
+        Calcula a média de unidades vendidas por dia para um produto.
+        """
+        try:
+            data_inicio = (datetime.now() - timedelta(days=periodo_dias)).strftime('%Y-%m-%d %H:%M:%S')
+            
+            self.cursor.execute("""
+                SELECT SUM(i.quantidade) 
+                FROM itens_venda i
+                JOIN vendas v ON i.venda_id = v.id
+                WHERE i.produto_id = ? AND v.data_hora >= ?
+            """, (produto_id, data_inicio))
+            
+            total_vendido = self.cursor.fetchone()[0]
+            
+            if total_vendido is None:
+                return 0.0
+            
+            # Retorna a média diária
+            return total_vendido / periodo_dias
+        except Exception as e:
+            print(f"Erro ao calcular consumo médio: {e}")
+            return 0.0
+
+    def atualizar_niveis_estoque_calculado(self, produto_id):
+        """
+        Orquestra o cálculo e a atualização dos níveis de estoque dinâmicos.
+        """
+        import math
+        try:
+            produto = self.obter_produto(produto_id)
+            if not produto:
+                return False, "Produto não encontrado."
+
+            # 1. Calcula o consumo médio diário
+            consumo_diario = self.calcular_consumo_medio_diario(produto_id)
+            
+            # 2. Aplica as fórmulas das anotações
+            tempo_reposicao = produto.get('tempo_reposicao_dias', 7)
+            lote_reposicao = produto.get('lote_reposicao', 10)
+            
+            # Estoque Mínimo (Safety Stock)
+            estoque_minimo_calc = math.ceil(consumo_diario * tempo_reposicao)
+            
+            # Estoque Máximo
+            estoque_maximo_calc = estoque_minimo_calc + lote_reposicao
+            
+            # 3. Atualiza o produto no banco de dados
+            self.cursor.execute("""
+                UPDATE produtos SET
+                    consumo_medio_diario = ?,
+                    estoque_minimo = ?,
+                    estoque_maximo = ?
+                WHERE id = ?
+            """, (consumo_diario, estoque_minimo_calc, estoque_maximo_calc, produto_id))
+            
+            self.conn.commit()
+            return True, "Níveis de estoque atualizados com base no consumo."
+        except Exception as e:
+            print(f"Erro ao atualizar níveis de estoque: {e}")
+            self.conn.rollback()
+            return False, f"Erro: {e}"
+        
     def _construir_clausula_where_e_params(self, filtros):
         """
         Helper privado para construir a cláusula WHERE e a lista de parâmetros dinamicamente.
@@ -338,12 +413,10 @@ class DatabaseManager:
 
     def listar_produtos_paginado_e_filtrado(self, filtros, pagina, itens_por_pagina):
         """
-        NOVO MÉTODO OTIMIZADO: Busca produtos com filtros e paginação.
-        Este método substitui listar_produtos, filtrar_produtos e listar_produtos_com_fracionamento.
+        VERSÃO CORRIGIDA: Converte os resultados de sqlite3.Row para dicionários Python.
         """
         offset = (pagina - 1) * itens_por_pagina
         
-        # Query base que já calcula o estoque total para produtos fracionados
         base_query = """
             SELECT p.*, f.empresa as fornecedor_nome,
                 CASE 
@@ -361,7 +434,11 @@ class DatabaseManager:
         params.extend([itens_por_pagina, offset])
         
         self.cursor.execute(query_final, params)
-        return self.cursor.fetchall()
+        
+        # --- CORREÇÃO APLICADA AQUI ---
+        # Converte cada 'row' em um dicionário antes de retornar a lista.
+        return [dict(row) for row in self.cursor.fetchall()]
+
 
     def contar_produtos_filtrados(self, filtros):
         """
@@ -398,79 +475,70 @@ class DatabaseManager:
         self.conn.rollback()
 
     # Métodos para Produtos (atualizados)
-    def adicionar_produto(self, codigo_barras, nome, descricao, quantidade, estoque_minimo,
+    def adicionar_produto(self, codigo_barras, nome, descricao, quantidade, 
             preco_compra, margem_lucro, preco_venda, 
             data_validade, localizacao, fornecedor_id, categoria=None,
-            imagem_path=None, # <<< ADICIONE ESTE PARÂMETRO
-            fracionado=False, unidade_medida="unidade", qtd_por_embalagem=1, 
-            preco_unitario_fracao=None, estoque_fracionado=0):
+            imagem_path=None, fracionado=False, unidade_medida="unidade", 
+            qtd_por_embalagem=1, preco_unitario_fracao=None, estoque_fracionado=0,
+            tempo_reposicao_dias=7, lote_reposicao=10): # NOVOS PARÂMETROS
 
         self.cursor.execute('''
         INSERT INTO produtos (
-            codigo_barras, nome, descricao, quantidade, estoque_minimo,
-            preco_compra, margem_lucro, preco_venda, 
-            data_validade, localizacao, fornecedor_id, categoria, imagem_path, -- <<< ADICIONE AQUI
-            fracionado, unidade_medida, qtd_por_embalagem, preco_unitario_fracao, estoque_fracionado
+            codigo_barras, nome, descricao, quantidade, 
+            preco_compra, margem_lucro, preco_venda, data_validade, localizacao, 
+            fornecedor_id, categoria, imagem_path, fracionado, unidade_medida, 
+            qtd_por_embalagem, preco_unitario_fracao, estoque_fracionado,
+            tempo_reposicao_dias, lote_reposicao -- NOVOS CAMPOS
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) -- <<< ADICIONE UMA '?'
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) -- ATUALIZAR '?'
         ''', (
-            codigo_barras, nome, descricao, quantidade, estoque_minimo,
-            preco_compra, margem_lucro, preco_venda, 
-            data_validade, localizacao, fornecedor_id, categoria, imagem_path, # <<< ADICIONE AQUI
+            codigo_barras, nome, descricao, quantidade, preco_compra, margem_lucro, preco_venda, 
+            data_validade, localizacao, fornecedor_id, categoria, imagem_path, 
             1 if fracionado else 0, unidade_medida, qtd_por_embalagem, 
-            preco_unitario_fracao, estoque_fracionado
+            preco_unitario_fracao, estoque_fracionado,
+            tempo_reposicao_dias, lote_reposicao # NOVOS VALORES
         ))
         self.conn.commit()
         return self.cursor.lastrowid
 
-    def atualizar_produto(self, id, codigo_barras, nome, descricao, quantidade, estoque_minimo,
+    def atualizar_produto(self, id, codigo_barras, nome, descricao, quantidade,
                 preco_compra, margem_lucro, preco_venda,
                 data_validade, localizacao, fornecedor_id, categoria=None,
-                imagem_path=None, # <<< ADICIONE ESTE PARÂMETRO
-                fracionado=False, unidade_medida="unidade", qtd_por_embalagem=1,
-                preco_unitario_fracao=None, estoque_fracionado=0):
-
-            # --- INÍCIO DA CORREÇÃO: Lógica para preservar dados históricos ---
+                imagem_path=None, fracionado=False, unidade_medida="unidade", 
+                qtd_por_embalagem=1, preco_unitario_fracao=None, estoque_fracionado=0,
+                tempo_reposicao_dias=7, lote_reposicao=10): # NOVOS PARÂMETROS
+            
             produto_atual = self.obter_produto(id)
-            if not produto_atual:
-                return False # Produto não existe
+            if not produto_atual: return False
 
             era_fracionado = produto_atual['fracionado'] == 1
             agora_fracionado = fracionado
 
-            # Se o produto ESTAVA marcado como fracionado e AGORA NÃO ESTÁ,
-            # mantemos os dados de fracionamento antigos para não quebrar o cálculo de lucro de vendas passadas.
             if era_fracionado and not agora_fracionado:
                 qtd_por_embalagem_final = produto_atual['qtd_por_embalagem']
                 preco_unitario_fracao_final = produto_atual['preco_unitario_fracao']
                 unidade_medida_final = produto_atual['unidade_medida']
             else:
-                # Caso contrário (produto continua fracionado, continua normal ou está se tornando fracionado),
-                # usamos os novos dados vindos do formulário.
                 qtd_por_embalagem_final = qtd_por_embalagem
                 preco_unitario_fracao_final = preco_unitario_fracao
                 unidade_medida_final = unidade_medida
-            # --- FIM DA CORREÇÃO ---
-
-
+            
+            # Estoque mínimo foi removido dos parâmetros, pois será sempre calculado
             self.cursor.execute('''
             UPDATE produtos
-            SET codigo_barras = ?, nome = ?, descricao = ?, quantidade = ?, estoque_minimo = ?,
+            SET codigo_barras = ?, nome = ?, descricao = ?, quantidade = ?,
                 preco_compra = ?, margem_lucro = ?, preco_venda = ?,
                 data_validade = ?, localizacao = ?, fornecedor_id = ?, categoria = ?,
-                imagem_path = ?,
-                fracionado = ?, unidade_medida = ?, qtd_por_embalagem = ?,
-                preco_unitario_fracao = ?, estoque_fracionado = ?
+                imagem_path = ?, fracionado = ?, unidade_medida = ?, qtd_por_embalagem = ?,
+                preco_unitario_fracao = ?, estoque_fracionado = ?,
+                tempo_reposicao_dias = ?, lote_reposicao = ? -- NOVOS CAMPOS
             WHERE id = ?
             ''', (
-                codigo_barras, nome, descricao, quantidade, estoque_minimo,
-                preco_compra, margem_lucro, preco_venda,
-                data_validade, localizacao, fornecedor_id, categoria,
-                imagem_path,
-                1 if fracionado else 0,
-                # Use as variáveis finais que definimos na lógica acima
-                unidade_medida_final, qtd_por_embalagem_final,
-                preco_unitario_fracao_final, estoque_fracionado, id
+                codigo_barras, nome, descricao, quantidade, preco_compra, margem_lucro, preco_venda,
+                data_validade, localizacao, fornecedor_id, categoria, imagem_path,
+                1 if fracionado else 0, unidade_medida_final, qtd_por_embalagem_final,
+                preco_unitario_fracao_final, estoque_fracionado,
+                tempo_reposicao_dias, lote_reposicao, id # NOVOS VALORES
             ))
             self.conn.commit()
             return self.cursor.rowcount > 0
@@ -480,12 +548,17 @@ class DatabaseManager:
         self.conn.commit()
         return self.cursor.rowcount > 0
 
+    
     def obter_produto(self, id):
+        """
+        VERSÃO CORRIGIDA: Converte o resultado de sqlite3.Row para um dicionário Python.
+        """
         self.cursor.execute('SELECT * FROM produtos WHERE id = ?', (id,))
         resultado = self.cursor.fetchone()
-        # CONVERTE o resultado para um dicionário padrão antes de retornar.
-        # Isso corrige o erro atual e todos os futuros.
+        
+        # --- CORREÇÃO APLICADA AQUI ---
         return dict(resultado) if resultado else None
+
     
     def obter_produto_com_preco_promocional(self, produto_id):
         """
@@ -830,15 +903,23 @@ class DatabaseManager:
             return False
 
     # Métodos para Fornecedores
-    def adicionar_fornecedor(self, empresa, representante, frequencia_compra, telefone, email, endereco, contato):
+    # 1. Método `adicionar_fornecedor` (Corrigido)
+    def adicionar_fornecedor(self, empresa, representante, frequencia_compra, telefone, email, endereco, contato=""):
+        """
+        MODIFICAÇÃO: O parâmetro 'contato' agora é opcional e tem um valor padrão de string vazia.
+        """
         self.cursor.execute('''
         INSERT INTO fornecedores (empresa, representante, frequencia_compra, telefone, email, endereco, contato)
         VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', (empresa, representante, frequencia_compra, telefone, email, endereco, contato))
         self.conn.commit()
         return self.cursor.lastrowid
-    
-    def atualizar_fornecedor(self, id, empresa, representante, frequencia_compra, telefone, email, endereco, contato):
+
+    # 2. Método `atualizar_fornecedor` (Corrigido)
+    def atualizar_fornecedor(self, id, empresa, representante, frequencia_compra, telefone, email, endereco, contato=""):
+        """
+        MODIFICAÇÃO: O parâmetro 'contato' agora é opcional e tem um valor padrão de string vazia.
+        """
         self.cursor.execute('''
         UPDATE fornecedores
         SET empresa = ?, representante = ?, frequencia_compra = ?, telefone = ?, email = ?, endereco = ?, contato = ?
@@ -1027,7 +1108,12 @@ class DatabaseManager:
         params.extend([itens_por_pagina, offset])
         
         self.cursor.execute(query_final, params)
-        return self.cursor.fetchall()
+        
+        # ================================================================= #
+        #       CORREÇÃO PRINCIPAL APLICADA AQUI                          #
+        # ================================================================= #
+        # Converte cada 'sqlite3.Row' em um dicionário Python padrão antes de retornar.
+        return [dict(row) for row in self.cursor.fetchall()]
 
     def contar_clientes_filtrados(self, filtros):
         """
@@ -1722,6 +1808,13 @@ class DatabaseManager:
             print(f"Erro ao registrar perda de produto: {e}")
             return False, f"Erro ao registrar perda: {e}"
     
+    # SUBSTITUA O MÉTODO obter_dados_dashboard INTEIRO PELA VERSÃO ABAIXO
+    # Em db_manager.py, substitua o método inteiro por esta versão corrigida.
+
+    # Em seu arquivo de banco de dados (database.py ou similar)
+
+    # Em seu arquivo de banco de dados (db_manager.py)
+
     def obter_dados_dashboard(self, data_inicio, data_fim):
         """
         VERSÃO CORRIGIDA 2.0: Corrige o erro 'sqlite3.Row' object has no attribute 'get'

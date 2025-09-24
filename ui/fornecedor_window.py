@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdi
                            QPushButton, QTableWidget, QTableWidgetItem, QFormLayout,
                            QMessageBox, QHeaderView, QDialog, QFrame, QComboBox, QFileDialog,
                            QTextEdit, QSpinBox, QCheckBox, QGroupBox, QProgressDialog, QSizePolicy, QProgressBar, QApplication) # QProgressDialog
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, QEvent
 from PyQt5.QtGui import QFont, QIcon,  QColor
 import csv
 import smtplib
@@ -16,11 +16,39 @@ import math # Adicionado para paginação
 from ui.icon_manager import IconManager
 from database.db_manager import DatabaseManager # Importante para a thread
 
-# --- CLASSE 1: DIÁLOGO DE ALERTA (ESTILO PERFIL) ---
+from PyQt5.QtMultimedia import QSoundEffect
+from PyQt5.QtCore import QUrl
+
 class AlertDialog(QDialog):
     """Caixa de diálogo com o estilo sutil da tela de perfil."""
+    
+    # Player de som como atributo de classe para carregar o som apenas uma vez
+    success_sound_player = None
+
     def __init__(self, parent, title, message, alert_type='info', buttons=QMessageBox.Ok, theme_colors=None):
         super().__init__(parent)
+        
+        # --- INÍCIO DA LÓGICA DE EFEITO SONORO ---
+        if alert_type == 'success':
+            # Inicializa o player na primeira vez que for necessário
+            if AlertDialog.success_sound_player is None:
+                # O caminho para o arquivo de som
+                sound_file_path = "assets/sounds/success.wav"
+                
+                if os.path.exists(sound_file_path):
+                    AlertDialog.success_sound_player = QSoundEffect()
+                    AlertDialog.success_sound_player.setSource(QUrl.fromLocalFile(sound_file_path))
+                    AlertDialog.success_sound_player.setVolume(0.4) # Volume de 0.0 a 1.0
+                else:
+                    # Aviso no console caso o arquivo não seja encontrado
+                    print(f"Aviso: Arquivo de som de sucesso não encontrado em '{sound_file_path}'")
+                    AlertDialog.success_sound_player = False # Marca para não tentar carregar de novo
+
+            # Se o player foi carregado com sucesso, toca o som
+            if AlertDialog.success_sound_player:
+                AlertDialog.success_sound_player.play()
+        # --- FIM DA LÓGICA DE EFEITO SONORO ---
+        
         self.theme_colors = theme_colors if theme_colors is not None else {}
         self.drag_position = None
 
@@ -160,7 +188,6 @@ class ThemedProgressDialog(QDialog):
     def mouseMoveEvent(self, event):
         if self.drag_position and event.buttons() == Qt.LeftButton: self.move(event.globalPos() - self.drag_position)
 
-
 class FornecedorCsvImportWorker(QThread):
     """Executa a importação de CSV de fornecedores em uma thread, com suporte a atualização."""
     progress = pyqtSignal(int)
@@ -181,10 +208,8 @@ class FornecedorCsvImportWorker(QThread):
         try:
             self.local_db = DatabaseManager(self.db_path)
             
-            # Otimização: Carrega IDs de fornecedores existentes para busca rápida
             fornecedores_existentes = {f['id'] for f in self.local_db.listar_fornecedores()}
 
-            # Lógica de leitura de arquivo robusta
             with open(self.file_path, mode='r', encoding='utf-8-sig') as csvfile:
                 leitor = csv.reader(csvfile)
                 try:
@@ -214,6 +239,7 @@ class FornecedorCsvImportWorker(QThread):
                     if not empresa_nome:
                         raise ValueError("A coluna 'empresa' é obrigatória.")
                     
+                    # MODIFICAÇÃO: Campo 'contato' removido
                     dados_fornecedor = {
                         'empresa': empresa_nome,
                         'representante': row_dict.get('representante', '').strip(),
@@ -221,7 +247,6 @@ class FornecedorCsvImportWorker(QThread):
                         'telefone': row_dict.get('telefone', '').strip(),
                         'email': row_dict.get('email', '').strip(),
                         'endereco': row_dict.get('endereco', '').strip(),
-                        'contato': row_dict.get('contato', '').strip()
                     }
 
                     id_para_atualizar = None
@@ -266,32 +291,19 @@ class FornecedorWindow(QWidget):
 
         self.initUI()
         self.set_theme(self.theme_colors)
-        # A chamada carregar_dados() é feita dentro de set_theme, então não é necessária aqui.
 
-    # ================================================================= #
-    #       CORREÇÃO PRINCIPAL 1: MÉTODO set_theme REFEITO              #
-    # ================================================================= #
     def set_theme(self, theme_colors):
-        """
-        Atualiza as cores do tema e aplica um stylesheet completo para toda a janela,
-        incluindo componentes aninhados como labels e scrollbars.
-        """
         self.theme_colors = theme_colors
         self.update_button_icons()
 
         style = f"""
-            /* Estilo geral da janela e dos labels */
             QWidget, QLabel {{
                 background-color: transparent;
                 color: {self.theme_colors.get('text_color', '#000')};
             }}
-
-            /* --- CORREÇÃO: Estilo específico para o label de paginação --- */
             #paginationLabel {{
                 font-size: 10pt;
             }}
-
-            /* Cabeçalho da tabela */
             QHeaderView::section {{
                 background-color: {self.theme_colors.get('surface_color', '#e0e0e0')};
                 color: {self.theme_colors.get('text_color', '#000')};
@@ -299,8 +311,6 @@ class FornecedorWindow(QWidget):
                 border: 1px solid {self.theme_colors.get('border_color', '#c0c0c0')};
                 font-weight: bold;
             }}
-
-            /* --- CORREÇÃO: Estilo para a barra de rolagem da tabela --- */
             QTableWidget QScrollBar:vertical {{
                 border: none;
                 background: {self.theme_colors.get('surface_color', '#f0f0f0')};
@@ -319,8 +329,6 @@ class FornecedorWindow(QWidget):
                 height: 0px;
                 width: 0px;
             }}
-
-            /* Botões de ação */
             #primaryActionButton {{
                 background-color: {self.theme_colors.get('accent_color', '#007bff')};
                 color: white; border: none; padding: 10px 15px;
@@ -330,17 +338,14 @@ class FornecedorWindow(QWidget):
         """
         self.setStyleSheet(style)
         
-        # O estilo dos botões secundários é aplicado diretamente para garantir a atualização
         flat_style = self._get_flat_button_style()
         self.importar_csv_btn.setStyleSheet(flat_style)
         self.exportar_csv_btn.setStyleSheet(flat_style)
         self.verificar_estoque_btn.setStyleSheet(flat_style)
-
-        # Recarrega os dados para que os ícones internos da tabela (editar/excluir) sejam redesenhados com a cor certa
+        
         self.carregar_dados()
         
     def _get_flat_button_style(self):
-        """Retorna uma string de estilo CSS para botões secundários."""
         return f"""
             QPushButton {{
                 background-color: {self.theme_colors.get('surface_color', '#fff')};
@@ -357,7 +362,6 @@ class FornecedorWindow(QWidget):
         """
 
     def update_button_icons(self):
-        """Atualiza apenas os ícones dos botões."""
         icon_color = self.theme_colors.get('text_color', '#000')
         self.search_button.setIcon(IconManager.get_icon('search', icon_color))
         self.add_button.setIcon(IconManager.get_icon('add', 'white'))
@@ -389,8 +393,10 @@ class FornecedorWindow(QWidget):
         layout.addWidget(search_group)
 
         self.tabela = QTableWidget()
-        self.tabela.setColumnCount(7)
-        self.tabela.setHorizontalHeaderLabels(["ID", "Empresa", "Representante", "Frequência", "Telefone", "Email", "Ações"])
+        # MODIFICAÇÃO: Aumentado número de colunas para 8
+        self.tabela.setColumnCount(8)
+        # MODIFICAÇÃO: Adicionada a coluna "Endereço"
+        self.tabela.setHorizontalHeaderLabels(["ID", "Empresa", "Representante", "Frequência", "Telefone", "Email", "Endereço", "Ações"])
         self.tabela.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.tabela.verticalHeader().setVisible(False)
         layout.addWidget(self.tabela)
@@ -399,7 +405,6 @@ class FornecedorWindow(QWidget):
         self.prev_page_btn = QPushButton(" Anterior")
         self.prev_page_btn.clicked.connect(self.ir_pagina_anterior)
         
-        # --- CORREÇÃO: Adicionando objectName para estilização ---
         self.page_label = QLabel(f"Página {self.pagina_atual} de {self.total_paginas}")
         self.page_label.setObjectName("paginationLabel")
 
@@ -447,7 +452,7 @@ class FornecedorWindow(QWidget):
     def carregar_dados(self):
         self.pagina_atual = 1
         self.search_input.clear()
-        self.frequencia_filter_combo.setCurrentIndex(0) # Reseta o filtro
+        self.frequencia_filter_combo.setCurrentIndex(0)
         self.atualizar_visualizacao_dados()
 
     def pesquisar_fornecedores(self):
@@ -455,18 +460,14 @@ class FornecedorWindow(QWidget):
         self.atualizar_visualizacao_dados()
         
     def atualizar_visualizacao_dados(self):
-        """Função central que busca, filtra e pagina os dados."""
-        
-        # --- INÍCIO DA MODIFICAÇÃO: Adicionar filtro de frequência aos parâmetros ---
         frequencia_selecionada = self.frequencia_filter_combo.currentText()
         if frequencia_selecionada == "Todas as Frequências":
-            frequencia_selecionada = None # Envia None para o DB se "Todas" for selecionado
+            frequencia_selecionada = None
 
         filtros = {
             'termo_pesquisa': self.search_input.text(),
             'frequencia': frequencia_selecionada 
         }
-        # --- FIM DA MODIFICAÇÃO ---
         
         total_itens = self.db.contar_fornecedores_filtrados(filtros)
         fornecedores = self.db.listar_fornecedores_paginado_e_filtrado(
@@ -484,11 +485,8 @@ class FornecedorWindow(QWidget):
         self.tabela.setRowCount(0)
         icon_color = self.theme_colors.get('text_color', '#000')
 
-        # Dicionário de cores para a frequência
         cores_frequencia = {
-            "Alta": QColor("#28a745"),  # Verde
-            "Média": QColor("#ffc107"), # Amarelo
-            "Baixa": QColor("#dc3545")  # Vermelho
+            "Alta": QColor("#28a745"), "Média": QColor("#ffc107"), "Baixa": QColor("#dc3545")
         }
 
         for row, fornecedor in enumerate(fornecedores):
@@ -497,29 +495,22 @@ class FornecedorWindow(QWidget):
             self.tabela.setItem(row, 1, QTableWidgetItem(fornecedor['empresa']))
             self.tabela.setItem(row, 2, QTableWidgetItem(fornecedor['representante'] or ""))
             
-            # --- INÍCIO DA MODIFICAÇÃO: Aplicar Cor na Frequência ---
             frequencia_texto = fornecedor['frequencia_compra'] or ""
             item_frequencia = QTableWidgetItem(frequencia_texto)
-            
-            # Aplica a cor se a frequência estiver no dicionário
             if frequencia_texto in cores_frequencia:
                 item_frequencia.setForeground(cores_frequencia[frequencia_texto])
-                # Opcional: Deixar a fonte em negrito para destacar
-                font = QFont()
-                font.setBold(True)
+                font = QFont(); font.setBold(True)
                 item_frequencia.setFont(font)
-            
             self.tabela.setItem(row, 3, item_frequencia)
-            # --- FIM DA MODIFICAÇÃO ---
 
             self.tabela.setItem(row, 4, QTableWidgetItem(fornecedor['telefone'] or ""))
             self.tabela.setItem(row, 5, QTableWidgetItem(fornecedor['email'] or ""))
+            # MODIFICAÇÃO: Adicionada a célula de endereço na coluna 6
+            self.tabela.setItem(row, 6, QTableWidgetItem(fornecedor['endereco'] or ""))
 
-            # ... (código das ações continua igual) ...
             acoes_widget = QWidget()
             acoes_layout = QHBoxLayout(acoes_widget)
-            acoes_layout.setContentsMargins(5, 2, 5, 2)
-            acoes_layout.setSpacing(5)
+            acoes_layout.setContentsMargins(5, 2, 5, 2); acoes_layout.setSpacing(5)
 
             editar_btn = QPushButton(IconManager.get_icon('edit', icon_color), " ")
             editar_btn.setToolTip("Editar Fornecedor")
@@ -531,13 +522,12 @@ class FornecedorWindow(QWidget):
             excluir_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
             excluir_btn.clicked.connect(lambda _, f_id=fornecedor['id']: self.excluir_fornecedor(f_id))
 
-            acoes_layout.addWidget(editar_btn)
-            acoes_layout.addWidget(excluir_btn)
-
-            self.tabela.setCellWidget(row, 6, acoes_widget)
+            acoes_layout.addWidget(editar_btn); acoes_layout.addWidget(excluir_btn)
+            
+            # MODIFICAÇÃO: Widget de ações movido para a coluna 7
+            self.tabela.setCellWidget(row, 7, acoes_widget)
     
     def abrir_formulario_fornecedor(self, fornecedor_id=None):
-        # Passe self.theme_colors e self (parent) para o diálogo
         dialog = FormularioFornecedor(self.db, self.theme_colors, fornecedor_id, self)
         if dialog.exec_() == QDialog.Accepted:
             self.atualizar_visualizacao_dados()
@@ -554,19 +544,16 @@ class FornecedorWindow(QWidget):
             else:
                 AlertDialog(self, "Erro", "Não foi possível excluir o fornecedor.", alert_type='error', theme_colors=self.theme_colors).exec_()
 
-    # ... O restante do código de FornecedorWindow permanece o mesmo (importar, exportar, etc.) ...
     def importar_csv(self):
         arquivo, _ = QFileDialog.getOpenFileName(self, "Importar Fornecedores CSV", "", "CSV Files (*.csv)")
-        if not arquivo:
-            return
+        if not arquivo: return
 
         dialog = AlertDialog(self, "Confirmar Importação",
                              "A importação será executada em segundo plano.\nDeseja continuar?",
                              alert_type='question', buttons=QMessageBox.Yes | QMessageBox.No, theme_colors=self.theme_colors)
-        if dialog.exec_() != QMessageBox.Yes:
-            return
+        if dialog.exec_() != QMessageBox.Yes: return
 
-        self.progress_dialog = ThemedProgressDialog(self, "Importando Fornecedores", "Aguarde enquanto os dados são processados...", self.theme_colors)
+        self.progress_dialog = ThemedProgressDialog(self, "Importando Fornecedores", "Aguarde...", self.theme_colors)
         self.progress_dialog.canceled.connect(self.cancelar_importacao)
 
         self.import_thread = FornecedorCsvImportWorker(self.db.db_path, arquivo)
@@ -576,10 +563,9 @@ class FornecedorWindow(QWidget):
         self.import_thread.start()
         self.progress_dialog.exec_()
     
-     # NOVO MÉTODO (adicionar abaixo de importar_csv)
     def importacao_concluida(self, importados, atualizados, erros, detalhes_erros):
         self.progress_dialog.close()
-        self.carregar_dados() # Recarrega tudo para mostrar as atualizações
+        self.carregar_dados()
         
         mensagem = (f"Importação concluída!\n\n"
                     f"✔ Fornecedores novos criados: {importados}\n"
@@ -594,17 +580,14 @@ class FornecedorWindow(QWidget):
         else:
             AlertDialog(self, "Importação Concluída com Sucesso", mensagem, alert_type='success', theme_colors=self.theme_colors).exec_()
 
-    # NOVO MÉTODO (adicionar abaixo de importacao_concluida)
     def cancelar_importacao(self):
         if hasattr(self, 'import_thread') and self.import_thread.isRunning():
             self.import_thread.terminate()
             AlertDialog(self, "Cancelado", "A importação foi cancelada pelo usuário.", alert_type='info', theme_colors=self.theme_colors).exec_()
 
-    
     def exportar_csv(self):
         arquivo, _ = QFileDialog.getSaveFileName(self, "Exportar Fornecedores CSV", f"fornecedores_{datetime.now().strftime('%Y%m%d')}.csv", "CSV Files (*.csv)")
-        if not arquivo:
-            return
+        if not arquivo: return
             
         try:
             fornecedores = self.db.listar_fornecedores()
@@ -613,8 +596,8 @@ class FornecedorWindow(QWidget):
                 return
 
             with open(arquivo, 'w', newline='', encoding='utf-8') as file:
-                # Adicionamos 'id' como o primeiro campo do cabeçalho
-                fieldnames = ['id', 'empresa', 'representante', 'frequencia_compra', 'telefone', 'email', 'endereco', 'contato']
+                # MODIFICAÇÃO: 'contato' removido da lista de campos
+                fieldnames = ['id', 'empresa', 'representante', 'frequencia_compra', 'telefone', 'email', 'endereco']
                 writer = csv.DictWriter(file, fieldnames=fieldnames)
                 writer.writeheader()
                 
@@ -626,17 +609,12 @@ class FornecedorWindow(QWidget):
                 
         except Exception as e:
             AlertDialog(self, "Erro na Exportação", f"Ocorreu um erro ao exportar o arquivo:\n{e}", alert_type='error', theme_colors=self.theme_colors).exec_()
-                
-        except Exception as e:
-            # O erro que você viu será capturado aqui.
-            AlertDialog(self, "Erro na Exportação", f"Ocorreu um erro ao exportar o arquivo:\n{e}", alert_type='error', theme_colors=self.theme_colors).exec_()
 
-    
     def verificar_estoque_baixo(self):
         produtos_baixo = self.db.verificar_produtos_estoque_baixo()
         
         if not produtos_baixo:
-            QMessageBox.information(self, "Estoque OK", "Não há produtos com estoque baixo no momento.")
+            AlertDialog(self, "Estoque OK", "Não há produtos com estoque baixo no momento.", alert_type='info', theme_colors=self.theme_colors).exec_()
             return
         
         produtos_por_fornecedor = {}
@@ -646,20 +624,227 @@ class FornecedorWindow(QWidget):
                 produtos_por_fornecedor[fornecedor_nome] = []
             produtos_por_fornecedor[fornecedor_nome].append(produto)
         
-        # CORREÇÃO: Passe o self.settings para o diálogo
         dialog = DialogEstoqueBaixo(self.db, produtos_por_fornecedor, self.theme_colors, self.settings, self)
         dialog.exec_()
 
     def selecionar_item_por_id(self, item_id):
-        """Encontra e seleciona um item na tabela com base no seu ID."""
         for row in range(self.tabela.rowCount()):
             item = self.tabela.item(row, 0)
-            if item: # Garante que a célula não está vazia
-                id_na_tabela = item.data(Qt.UserRole)
-                if id_na_tabela == item_id:
-                    self.tabela.selectRow(row)
-                    self.tabela.scrollToItem(item, QTableWidget.ScrollHint.PositionAtCenter)
-                    break
+            if item and item.data(Qt.UserRole) == item_id:
+                self.tabela.selectRow(row)
+                self.tabela.scrollToItem(item, QTableWidget.ScrollHint.PositionAtCenter)
+                break
+
+class FormularioFornecedor(QDialog):
+    def __init__(self, db, theme_colors, fornecedor_id=None, parent=None):
+        super().__init__(parent)
+        self.db = db
+        self.theme_colors = theme_colors
+        self.fornecedor_id = fornecedor_id
+        self.fornecedor = None
+        self.drag_position = None # Para arrastar a janela
+
+        # Configurações para janela sem bordas
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(True)
+        
+        if fornecedor_id:
+            self.fornecedor = self.db.obter_fornecedor(fornecedor_id)
+            if not self.fornecedor:
+                AlertDialog(parent, "Erro", "Fornecedor não encontrado!", alert_type='error', theme_colors=theme_colors).exec_()
+                # Adia o fechamento para depois do construtor
+                QApplication.instance().postEvent(self, QEvent.Close())
+                return
+        
+        self.initUI()
+        self.apply_styles()
+
+        if self.fornecedor:
+            self.carregar_dados_fornecedor()
+    
+    def initUI(self):
+        self.setFixedWidth(500)
+        
+        # Estrutura para janela sem bordas
+        main_container = QFrame(self)
+        main_container.setObjectName("mainContainer")
+
+        base_layout = QVBoxLayout(self)
+        base_layout.setContentsMargins(0,0,0,0)
+        base_layout.addWidget(main_container)
+
+        container_layout = QVBoxLayout(main_container)
+        container_layout.setContentsMargins(1, 1, 1, 1)
+        container_layout.setSpacing(0)
+
+        # Cabeçalho customizado
+        header = QFrame()
+        header.setObjectName("header")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(20, 10, 10, 10)
+        
+        title_label = QLabel("Cadastro de Fornecedor")
+        title_label.setObjectName("headerTitleLabel")
+
+        # ================================================================= #
+        #       CORREÇÃO PRINCIPAL APLICADA AQUI                          #
+        # ================================================================= #
+        # Adicionado o segundo argumento "" para o construtor do QPushButton
+        close_button = QPushButton(IconManager.get_icon('fechar', color=self.theme_colors.get('text_secondary', '#666')), "")
+        close_button.setObjectName("controlButton")
+        close_button.setFixedSize(28, 28)
+        close_button.clicked.connect(self.reject)
+
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
+        header_layout.addWidget(close_button)
+        
+        # Corpo do formulário
+        body = QWidget()
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(20, 15, 20, 20)
+        
+        form_group = QGroupBox("Dados do Fornecedor")
+        form_layout = QFormLayout(form_group)
+
+        self.empresa_input = QLineEdit()
+        self.representante_input = QLineEdit()
+        self.frequencia_input = QComboBox()
+        self.frequencia_input.addItems(["Alta", "Média", "Baixa"])
+        self.frequencia_input.setPlaceholderText("Selecione a frequência")
+        self.frequencia_input.setCurrentIndex(-1)
+
+        self.telefone_input = QLineEdit()
+        self.email_input = QLineEdit()
+        self.endereco_input = QLineEdit()
+
+        form_layout.addRow("Empresa (*):", self.empresa_input)
+        form_layout.addRow("Representante:", self.representante_input)
+        form_layout.addRow("Frequência de Compra:", self.frequencia_input)
+        form_layout.addRow("Telefone:", self.telefone_input)
+        form_layout.addRow("Email:", self.email_input)
+        form_layout.addRow("Endereço:", self.endereco_input)
+        layout.addWidget(form_group)
+
+        button_layout = QHBoxLayout()
+        self.salvar_btn = QPushButton(IconManager.get_icon('save', 'white'), " Salvar")
+        self.salvar_btn.setObjectName("primaryButton")
+        self.salvar_btn.clicked.connect(self.salvar_fornecedor)
+
+        self.cancelar_btn = QPushButton(IconManager.get_icon('cancel', self.theme_colors['text_color']), " Cancelar")
+        self.cancelar_btn.setObjectName("secondaryButton")
+        self.cancelar_btn.clicked.connect(self.reject)
+
+        button_layout.addStretch()
+        button_layout.addWidget(self.cancelar_btn)
+        button_layout.addWidget(self.salvar_btn)
+        layout.addLayout(button_layout)
+
+        container_layout.addWidget(header)
+        container_layout.addWidget(body)
+
+    def apply_styles(self):
+        colors = self.theme_colors
+        self.setStyleSheet(f"""
+            #mainContainer {{
+                background-color: {colors['bg_color']};
+                border-radius: 12px;
+                border: 1px solid {colors['border_color']};
+            }}
+            #header {{
+                border-bottom: 1px solid {colors['border_color']};
+            }}
+            #headerTitleLabel {{
+                color: {colors.get('text_color', '#000')};
+                font-weight: bold;
+                font-size: 11pt;
+            }}
+            #controlButton {{ background: transparent; border: none; border-radius: 14px; }}
+            #controlButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }}
+            
+            QGroupBox {{
+                font-weight: bold; color: {colors['text_color']};
+                border: 1px solid {colors['border_color']};
+                border-radius: 6px; margin-top: 10px;
+                padding: 15px 10px 10px 10px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin; subcontrol-position: top left;
+                padding: 0 5px; left: 10px;
+            }}
+            QLabel, QComboBox {{ color: {colors['text_color']}; }}
+            QLineEdit, QComboBox {{
+                background-color: {colors['surface_color']};
+                border: 1px solid {colors['border_color']};
+                padding: 6px; border-radius: 4px;
+            }}
+            QLineEdit:focus, QComboBox:focus {{ border: 1px solid {colors['accent_color']}; }}
+            
+            QPushButton {{ font-weight: bold; padding: 10px 25px; border-radius: 8px; min-width: 90px;}}
+            #primaryButton {{ background-color: {colors['accent_color']}; color: white; border: none; }}
+            #secondaryButton {{
+                background-color: transparent;
+                color: {colors.get('text_color', '#000')};
+                border: 1px solid {colors['border_color']};
+            }}
+            #secondaryButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }}
+        """)
+
+    def carregar_dados_fornecedor(self):
+        self.empresa_input.setText(self.fornecedor['empresa'])
+        self.representante_input.setText(self.fornecedor['representante'] or "")
+        
+        frequencia = self.fornecedor['frequencia_compra']
+        index = self.frequencia_input.findText(frequencia, Qt.MatchFixedString)
+        if index >= 0: self.frequencia_input.setCurrentIndex(index)
+        else: self.frequencia_input.setCurrentIndex(-1)
+        
+        self.telefone_input.setText(self.fornecedor['telefone'] or "")
+        self.email_input.setText(self.fornecedor['email'] or "")
+        self.endereco_input.setText(self.fornecedor['endereco'] or "")
+    
+    def salvar_fornecedor(self):
+        if not self.empresa_input.text().strip():
+            AlertDialog(self, "Campo Obrigatório", "O nome da empresa é obrigatório!", alert_type='warning', theme_colors=self.theme_colors).exec_()
+            return
+        
+        dados = {
+            'empresa': self.empresa_input.text().strip(),
+            'representante': self.representante_input.text().strip(),
+            'frequencia_compra': self.frequencia_input.currentText(),
+            'telefone': self.telefone_input.text().strip(),
+            'email': self.email_input.text().strip(),
+            'endereco': self.endereco_input.text().strip()
+        }
+        
+        try:
+            if self.fornecedor_id:
+                sucesso = self.db.atualizar_fornecedor(self.fornecedor_id, **dados)
+                mensagem = "Fornecedor atualizado com sucesso!"
+            else:
+                sucesso = self.db.adicionar_fornecedor(**dados)
+                mensagem = "Fornecedor cadastrado com sucesso!"
+            
+            if sucesso:
+                AlertDialog(self, "Sucesso", mensagem, alert_type='success', theme_colors=self.theme_colors).exec_()
+                self.accept()
+            else:
+                AlertDialog(self, "Erro", "Não foi possível salvar o fornecedor.", alert_type='error', theme_colors=self.theme_colors).exec_()
+        
+        except Exception as e:
+            AlertDialog(self, "Erro Crítico", f"Ocorreu um erro inesperado ao salvar:\n{e}", alert_type='error', theme_colors=self.theme_colors).exec_()
+
+    # Eventos para mover a janela sem bordas
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton:
+            self.move(event.globalPos() - self.drag_position)
+            event.accept()
 
 class DialogEstoqueBaixo(QDialog):
     def __init__(self, db, produtos_por_fornecedor, theme_colors, settings, parent=None):
@@ -668,17 +853,59 @@ class DialogEstoqueBaixo(QDialog):
         self.produtos_por_fornecedor = produtos_por_fornecedor
         self.theme_colors = theme_colors
         self.settings = settings
+        self.drag_position = None # Para arrastar a janela
+
+        # MODIFICAÇÃO: Configurações para janela sem bordas
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(True)
 
         self.initUI()
-        self.apply_styles() # Aplica os estilos na inicialização
+        self.apply_styles()
         self.popular_tabela_fornecedores()
 
     def initUI(self):
-        self.setWindowTitle("Notificar Fornecedores sobre Estoque Baixo")
+        # MODIFICAÇÃO: Título da janela é definido no cabeçalho customizado
+        # self.setWindowTitle("Notificar Fornecedores sobre Estoque Baixo")
         self.setMinimumSize(900, 750)
         
-        layout = QVBoxLayout(self)
+        # MODIFICAÇÃO: Estrutura para janela sem bordas (container, header, body)
+        main_container = QFrame(self)
+        main_container.setObjectName("mainContainer")
+
+        base_layout = QVBoxLayout(self)
+        base_layout.setContentsMargins(0, 0, 0, 0)
+        base_layout.addWidget(main_container)
+
+        container_layout = QVBoxLayout(main_container)
+        container_layout.setContentsMargins(1, 1, 1, 1) # Borda sutil
+        container_layout.setSpacing(0)
+
+        # Cabeçalho customizado
+        header = QFrame()
+        header.setObjectName("header")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(20, 10, 10, 10)
         
+        title_label = QLabel("Notificar Fornecedores sobre Estoque Baixo")
+        title_label.setObjectName("headerTitleLabel")
+
+        # Corrigido para passar um texto vazio
+        close_button = QPushButton(IconManager.get_icon('fechar', color=self.theme_colors.get('text_secondary', '#666')), "")
+        close_button.setObjectName("controlButton")
+        close_button.setFixedSize(28, 28)
+        close_button.clicked.connect(self.reject)
+
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
+        header_layout.addWidget(close_button)
+        
+        # Corpo do diálogo
+        body = QWidget()
+        layout = QVBoxLayout(body) # Layout principal do conteúdo
+        layout.setContentsMargins(20, 15, 20, 20)
+        
+        # --- O conteúdo original do diálogo vai aqui dentro do 'layout' ---
         fornecedores_group = QGroupBox("1. Selecione os Fornecedores para Notificar")
         fornecedores_layout = QVBoxLayout(fornecedores_group)
         
@@ -741,7 +968,6 @@ Atenciosamente,
 
         email_layout.addRow("Seu Email:", self.email_usuario)
         email_layout.addRow("Sua Senha:", self.email_senha)
-        
         layout.addWidget(email_group)
 
         button_layout = QHBoxLayout()
@@ -758,14 +984,34 @@ Atenciosamente,
         button_layout.addWidget(self.enviar_emails_btn)
         layout.addLayout(button_layout)
 
-    # ================================================================= #
-    #       CORREÇÃO PRINCIPAL 2: MÉTODO apply_styles REFEITO           #
-    # ================================================================= #
+        # Adiciona o cabeçalho e o corpo ao container principal
+        container_layout.addWidget(header)
+        container_layout.addWidget(body)
+
     def apply_styles(self):
-        """Aplica uma folha de estilos completa para o diálogo, incluindo scrollbars."""
+        """Aplica uma folha de estilos completa para o diálogo, incluindo o novo cabeçalho."""
         colors = self.theme_colors
         self.setStyleSheet(f"""
-            QDialog {{ background-color: {colors['bg_color']}; }}
+            /* MODIFICAÇÃO: Estilo do container principal para a janela sem bordas */
+            #mainContainer {{
+                background-color: {colors['bg_color']};
+                border-radius: 12px;
+                border: 1px solid {colors['border_color']};
+            }}
+            /* MODIFICAÇÃO: Estilo do cabeçalho customizado */
+            #header {{
+                border-bottom: 1px solid {colors['border_color']};
+            }}
+            #headerTitleLabel {{
+                color: {colors.get('text_color', '#000')};
+                font-weight: bold;
+                font-size: 11pt;
+            }}
+            #controlButton {{ background: transparent; border: none; border-radius: 14px; }}
+            #controlButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }}
+            
+            /* Estilos existentes */
+            QDialog {{ background-color: transparent; }} /* O fundo do diálogo é transparente */
             QGroupBox, QLabel, QCheckBox {{ color: {colors['text_color']}; }}
             QGroupBox {{ font-weight: bold; border: 1px solid {colors['border_color']}; border-radius: 6px; margin-top: 10px; }}
             QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left; padding: 0 5px; left: 10px; }}
@@ -783,7 +1029,6 @@ Atenciosamente,
             }}
             QLineEdit:focus, QTextEdit:focus {{ border: 1px solid {colors['accent_color']}; }}
             
-            /* --- CORREÇÃO: Estilo para as scrollbars da tabela e da caixa de texto --- */
             QTableWidget QScrollBar:vertical, QTextEdit QScrollBar:vertical {{
                 border: none;
                 background: {colors.get('surface_color', '#f0f0f0')};
@@ -801,12 +1046,15 @@ Atenciosamente,
             QTextEdit QScrollBar::add-line, QTextEdit QScrollBar::sub-line {{
                 height: 0px; width: 0px;
             }}
-            /* --- FIM DA CORREÇÃO --- */
-
-            #primaryButton {{ background-color: {colors['accent_color']}; color: white; border: none; padding: 8px 16px; border-radius: 4px; font-weight: bold; }}
-            #primaryButton:hover {{ background-color: #005bb5; }}
-            #secondaryButton {{ background-color: {colors['surface_color']}; color: {colors['text_color']}; border: 1px solid {colors['border_color']}; padding: 8px 16px; border-radius: 4px; font-weight: bold; }}
-            #secondaryButton:hover {{ border-color: {colors['accent_color']}; }}
+            
+            QPushButton {{ font-weight: bold; padding: 10px 25px; border-radius: 8px; min-width: 90px;}}
+            #primaryButton {{ background-color: {colors['accent_color']}; color: white; border: none; }}
+            #secondaryButton {{
+                background-color: transparent;
+                color: {colors.get('text_color', '#000')};
+                border: 1px solid {colors['border_color']};
+            }}
+            #secondaryButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }}
         """)
         # Atualiza os ícones dos botões
         self.enviar_emails_btn.setIcon(IconManager.get_icon('send', 'white'))
@@ -815,23 +1063,20 @@ Atenciosamente,
     def popular_tabela_fornecedores(self):
         self.tabela_fornecedores.setRowCount(0)
         for i, (fornecedor, produtos) in enumerate(self.produtos_por_fornecedor.items()):
-            if fornecedor == 'Sem fornecedor': continue # Pula produtos sem fornecedor
+            if fornecedor == 'Sem fornecedor': continue
             
             self.tabela_fornecedores.insertRow(i)
             
-            # Checkbox
             checkbox_widget = QWidget()
             checkbox_layout = QHBoxLayout(checkbox_widget)
             checkbox = QCheckBox()
-            checkbox.setChecked(True) # Inicia marcado por padrão
+            checkbox.setChecked(True)
             checkbox_layout.addWidget(checkbox)
             checkbox_layout.setAlignment(Qt.AlignCenter)
             self.tabela_fornecedores.setCellWidget(i, 0, checkbox_widget)
             
-            # Nome do Fornecedor
             self.tabela_fornecedores.setItem(i, 1, QTableWidgetItem(fornecedor))
             
-            # Lista de produtos
             nomes_produtos = [p['nome'] for p in produtos]
             self.tabela_fornecedores.setItem(i, 2, QTableWidgetItem(", ".join(nomes_produtos)))
         
@@ -858,7 +1103,7 @@ Atenciosamente,
 
         progress = ThemedProgressDialog(self, "Enviando E-mails", "Conectando ao servidor...", self.theme_colors)
         progress.show()
-        QApplication.processEvents() # Garante que o diálogo apareça
+        QApplication.processEvents()
 
         try:
             server = smtplib.SMTP(smtp_config['host'], smtp_config['port'])
@@ -892,7 +1137,6 @@ Atenciosamente,
             AlertDialog(self, "Erro de Conexão", f"Não foi possível conectar ou enviar e-mails:\n{e}", alert_type='error', theme_colors=self.theme_colors).exec_()
     
     def obter_email_fornecedor(self, fornecedor_nome):
-        # Este método permanece o mesmo
         try:
             fornecedores = self.db.listar_fornecedores()
             for fornecedor in fornecedores:
@@ -902,171 +1146,13 @@ Atenciosamente,
         except:
             return None
 
-class FormularioFornecedor(QDialog):
-    # 1. Construtor modificado para aceitar theme_colors
-    def __init__(self, db, theme_colors, fornecedor_id=None, parent=None):
-        super().__init__(parent)
-        self.db = db
-        self.theme_colors = theme_colors
-        self.fornecedor_id = fornecedor_id
-        self.fornecedor = None
-        
-        if fornecedor_id:
-            self.fornecedor = self.db.obter_fornecedor(fornecedor_id)
-            if not self.fornecedor:
-                QMessageBox.warning(self, "Erro", "Fornecedor não encontrado!")
-                self.reject()
-        
-        self.initUI()
-        self.apply_styles() # 2. Aplica os estilos do tema
+    # MODIFICAÇÃO: Eventos para mover a janela sem bordas
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+            event.accept()
 
-        if self.fornecedor:
-            self.carregar_dados_fornecedor()
-    
-    def initUI(self):
-        self.setWindowTitle("Cadastro de Fornecedor")
-        self.setFixedWidth(500)
-
-        layout = QVBoxLayout(self)
-        
-        form_group = QGroupBox("Dados do Fornecedor")
-        form_layout = QFormLayout(form_group)
-
-        self.empresa_input = QLineEdit()
-        self.representante_input = QLineEdit()
-        self.frequencia_input = QComboBox()
-        self.frequencia_input.addItems(["", "Alta", "Média", "Baixa"])
-        self.telefone_input = QLineEdit()
-        self.email_input = QLineEdit()
-        self.endereco_input = QLineEdit()
-        self.contato_input = QLineEdit()
-
-        form_layout.addRow("Empresa (*):", self.empresa_input)
-        form_layout.addRow("Representante:", self.representante_input)
-        form_layout.addRow("Frequência de Compra:", self.frequencia_input)
-        form_layout.addRow("Telefone:", self.telefone_input)
-        form_layout.addRow("Email:", self.email_input)
-        form_layout.addRow("Endereço:", self.endereco_input)
-        form_layout.addRow("Contato:", self.contato_input)
-        layout.addWidget(form_group)
-
-        button_layout = QHBoxLayout()
-        # 3. Ícones agora usam as cores do tema
-        self.salvar_btn = QPushButton(IconManager.get_icon('save', 'white'), " Salvar")
-        self.salvar_btn.setObjectName("primaryButton") # Estilo primário
-        self.salvar_btn.clicked.connect(self.salvar_fornecedor)
-
-        self.cancelar_btn = QPushButton(IconManager.get_icon('cancel', self.theme_colors['text_color']), " Cancelar")
-        self.cancelar_btn.setObjectName("secondaryButton") # Estilo secundário
-        self.cancelar_btn.clicked.connect(self.reject)
-
-        button_layout.addStretch()
-        button_layout.addWidget(self.cancelar_btn)
-        button_layout.addWidget(self.salvar_btn)
-        layout.addLayout(button_layout)
-
-    # 4. NOVO MÉTODO para aplicar o estilo do tema
-    def apply_styles(self):
-        colors = self.theme_colors
-        self.setStyleSheet(f"""
-            QDialog {{
-                background-color: {colors['bg_color']};
-            }}
-            QGroupBox {{
-                font-weight: bold;
-                color: {colors['text_color']};
-                border: 1px solid {colors['border_color']};
-                border-radius: 6px;
-                margin-top: 10px;
-            }}
-            QGroupBox::title {{
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 5px;
-                left: 10px;
-            }}
-            QLabel, QComboBox {{
-                color: {colors['text_color']};
-            }}
-            QLineEdit, QComboBox {{
-                background-color: {colors['surface_color']};
-                border: 1px solid {colors['border_color']};
-                padding: 6px;
-                border-radius: 4px;
-            }}
-            QLineEdit:focus, QComboBox:focus {{
-                border: 1px solid {colors['accent_color']};
-            }}
-            /* Botão Primário (Salvar) */
-            #primaryButton {{
-                background-color: {colors['accent_color']};
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }}
-            #primaryButton:hover {{
-                background-color: #005bb5; /* Um tom mais escuro */
-            }}
-            /* Botão Secundário (Cancelar) */
-            #secondaryButton {{
-                background-color: {colors['surface_color']};
-                color: {colors['text_color']};
-                border: 1px solid {colors['border_color']};
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }}
-            #secondaryButton:hover {{
-                border-color: {colors['accent_color']};
-            }}
-        """)
-
-    def carregar_dados_fornecedor(self):
-        """Carrega os dados do fornecedor nos campos do formulário."""
-        self.empresa_input.setText(self.fornecedor['empresa'])
-        self.representante_input.setText(self.fornecedor['representante'] or "")
-        
-        frequencia = self.fornecedor['frequencia_compra']
-        if frequencia:
-            index = self.frequencia_input.findText(frequencia, Qt.MatchFixedString)
-            if index >= 0:
-                self.frequencia_input.setCurrentIndex(index)
-        
-        self.telefone_input.setText(self.fornecedor['telefone'] or "")
-        self.email_input.setText(self.fornecedor['email'] or "")
-        self.endereco_input.setText(self.fornecedor['endereco'] or "")
-        self.contato_input.setText(self.fornecedor['contato'] or "")
-    
-    def salvar_fornecedor(self):
-        if not self.empresa_input.text().strip():
-            AlertDialog(self, "Campo Obrigatório", "O nome da empresa é obrigatório!", alert_type='warning', theme_colors=self.theme_colors).exec_()
-            return
-        
-        dados = {
-            'empresa': self.empresa_input.text().strip(),
-            'representante': self.representante_input.text().strip(),
-            'frequencia_compra': self.frequencia_input.currentText(),
-            'telefone': self.telefone_input.text().strip(),
-            'email': self.email_input.text().strip(),
-            'endereco': self.endereco_input.text().strip(),
-            'contato': self.contato_input.text().strip()
-        }
-        
-        try:
-            if self.fornecedor_id:
-                sucesso = self.db.atualizar_fornecedor(self.fornecedor_id, **dados)
-                mensagem = "Fornecedor atualizado com sucesso!"
-            else:
-                sucesso = self.db.adicionar_fornecedor(**dados)
-                mensagem = "Fornecedor cadastrado com sucesso!"
-            
-            if sucesso:
-                AlertDialog(self, "Sucesso", mensagem, alert_type='success', theme_colors=self.theme_colors).exec_()
-                self.accept()
-            else:
-                AlertDialog(self, "Erro", "Não foi possível salvar o fornecedor.", alert_type='error', theme_colors=self.theme_colors).exec_()
-        
-        except Exception as e:
-            AlertDialog(self, "Erro Crítico", f"Ocorreu um erro inesperado ao salvar:\n{e}", alert_type='error', theme_colors=self.theme_colors).exec_()
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton:
+            self.move(event.globalPos() - self.drag_position)
+            event.accept()

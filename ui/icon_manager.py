@@ -2,7 +2,7 @@
 
 import qtawesome as qta
 import os
-import tempfile # Importe a biblioteca tempfile
+import tempfile
 
 class IconManager:
     """Centraliza a criação de ícones para garantir consistência."""

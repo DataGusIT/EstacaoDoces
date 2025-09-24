@@ -13,15 +13,41 @@ import math
 from ui.icon_manager import IconManager
 from database.db_manager import DatabaseManager
 
-# Adicione estas importações extras no topo do seu arquivo
 from PyQt5.QtWidgets import QProgressBar, QFrame
 from PyQt5.QtCore import Qt
+
+from PyQt5.QtMultimedia import QSoundEffect
+from PyQt5.QtCore import QUrl
 
 # --- CLASSE 1: DIÁLOGO DE ALERTA (ESTILO PERFIL) ---
 class AlertDialog(QDialog):
     """Caixa de diálogo com o estilo sutil da tela de perfil."""
+    
+    # Atributo de classe para garantir que o som seja carregado apenas uma vez
+    success_sound_player = None
+
     def __init__(self, parent, title, message, alert_type='info', buttons=QMessageBox.Ok, theme_colors=None):
         super().__init__(parent)
+        
+        if alert_type == 'success':
+            # Inicializa o player de som na primeira vez que for necessário
+            if AlertDialog.success_sound_player is None:
+                sound_file_path = "assets/sounds/success.wav"
+                
+                if os.path.exists(sound_file_path):
+                    AlertDialog.success_sound_player = QSoundEffect()
+                    AlertDialog.success_sound_player.setSource(QUrl.fromLocalFile(sound_file_path))
+                    AlertDialog.success_sound_player.setVolume(0.4) # Volume de 0.0 a 1.0
+                else:
+                    # Imprime um aviso no console se o arquivo não for encontrado
+                    print(f"Aviso: Arquivo de som de sucesso não encontrado em '{sound_file_path}'")
+                    # Marca como False para não tentar carregar de novo
+                    AlertDialog.success_sound_player = False
+
+            # Toca o som se o player foi carregado com sucesso
+            if AlertDialog.success_sound_player:
+                AlertDialog.success_sound_player.play()
+        
         self.theme_colors = theme_colors if theme_colors is not None else {}
         self.drag_position = None
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
@@ -68,8 +94,10 @@ class AlertDialog(QDialog):
     def apply_styles(self):
         colors = self.theme_colors
         self.setStyleSheet(f""" #mainContainer {{ background-color: {colors.get('surface_color', '#fff')}; border-radius: 12px; border: 1px solid {colors.get('border_color', '#ccc')}; }} #header {{ border-bottom: 1px solid {colors.get('border_color', '#ccc')}; }} #headerTitleLabel {{ color: {colors.get('text_color', '#000')}; font-weight: bold; }} #subtitleLabel {{ color: {colors.get('text_color', '#000')}; font-size: 14pt; font-weight: bold; }} #messageLabel {{ color: {colors.get('text_secondary', '#333')}; font-size: 11pt; }} #controlButton {{ background: transparent; border: none; border-radius: 14px; }} #controlButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }} QPushButton {{ font-weight: bold; padding: 10px 25px; border-radius: 8px; min-width: 90px;}} #primaryButton {{ background-color: {self.accent_color}; color: white; border: none; }} #secondaryButton {{ background-color: transparent; color: {colors.get('text_color', '#000')}; border: 1px solid {colors.get('border_color', '#ccc')}; }} #secondaryButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }} """)
+        
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton: self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+        
     def mouseMoveEvent(self, event):
         if self.drag_position and event.buttons() == Qt.LeftButton: self.move(event.globalPos() - self.drag_position)
 
@@ -116,14 +144,6 @@ class ThemedProgressDialog(QDialog):
     def mouseMoveEvent(self, event):
         if self.drag_position and event.buttons() == Qt.LeftButton: self.move(event.globalPos() - self.drag_position)
 
-# ================================================================= #
-#       CLASSE WORKER PARA IMPORTAÇÃO DE CSV EM THREAD              #
-# ================================================================= #
-
-# ================================================================= #
-#       CLASSE WORKER (VERSÃO FINAL COM NORMALIZAÇÃO DE CABEÇALHO)  #
-# ================================================================= #
-
 class ClienteCsvImportWorker(QThread):
     progress = pyqtSignal(int)
     finished = pyqtSignal(int, int, int, list)  # importados, atualizados, erros, detalhes
@@ -142,7 +162,6 @@ class ClienteCsvImportWorker(QThread):
         try:
             self.local_db = DatabaseManager(self.db_path)
             
-            # --- CORREÇÃO PRINCIPAL AQUI ---
             # Otimização: Carrega clientes existentes usando o método correto do db_manager
             todos_clientes = self.local_db.listar_clientes() 
             clientes_por_id = {cliente['id']: cliente for cliente in todos_clientes}
@@ -225,7 +244,6 @@ class ClienteCsvImportWorker(QThread):
         
         self.finished.emit(importados, atualizados, erros, detalhes_erros)
 
-
 class ClientesWindow(QWidget):
     dados_clientes_alterados = pyqtSignal()
 
@@ -238,32 +256,18 @@ class ClientesWindow(QWidget):
         self.total_paginas = 1
         
         self.initUI()
-        self.set_theme(self.theme_colors) # Aplica o tema e carrega os dados
+        self.set_theme(self.theme_colors)
 
-    # ================================================================= #
-    #       CORREÇÃO PRINCIPAL: MÉTODO set_theme REFEITO                #
-    # ================================================================= #
     def set_theme(self, theme_colors):
-        """
-        Aplica um stylesheet completo e unificado para toda a janela de clientes,
-        garantindo que todos os componentes, incluindo labels e scrollbars, sejam atualizados.
-        """
         self.theme_colors = theme_colors
         self.update_button_icons()
 
         style = f"""
-            /* Estilo geral da janela e labels */
             QWidget, QLabel {{
                 background-color: {self.theme_colors.get('bg_color', '#fff')};
                 color: {self.theme_colors.get('text_color', '#000')};
             }}
-
-            /* --- CORREÇÃO: Estilo específico para o label de paginação --- */
-            #paginationLabel {{
-                font-size: 10pt;
-            }}
-
-            /* Cabeçalho da tabela */
+            #paginationLabel {{ font-size: 10pt; }}
             QHeaderView::section {{
                 background-color: {self.theme_colors.get('surface_color', '#e0e0e0')};
                 color: {self.theme_colors.get('text_color', '#000')};
@@ -271,34 +275,24 @@ class ClientesWindow(QWidget):
                 border: 1px solid {self.theme_colors.get('border_color', '#c0c0c0')};
                 font-weight: bold;
             }}
-
-            /* --- CORREÇÃO: Estilo para a barra de rolagem da tabela --- */
             QTableWidget QScrollBar:vertical {{
-                border: none;
-                background: {self.theme_colors.get('surface_color', '#f0f0f0')};
-                width: 12px;
-                margin: 0px 0px 0px 0px;
+                border: none; background: {self.theme_colors.get('surface_color', '#f0f0f0')};
+                width: 12px; margin: 0px;
             }}
             QTableWidget QScrollBar::handle:vertical {{
                 background: {self.theme_colors.get('border_color', '#cccccc')};
-                min-height: 20px;
-                border-radius: 6px;
+                min-height: 20px; border-radius: 6px;
             }}
             QTableWidget QScrollBar::handle:vertical:hover {{
                 background: {self.theme_colors.get('accent_color', '#007bff')};
             }}
-            QTableWidget QScrollBar::add-line, QTableWidget QScrollBar::sub-line {{
-                height: 0px; width: 0px;
-            }}
-
-            /* Botões de Ação */
+            QTableWidget QScrollBar::add-line, QTableWidget QScrollBar::sub-line {{ height: 0px; width: 0px; }}
             #primaryActionButton {{
                 background-color: {self.theme_colors.get('accent_color', '#007bff')};
                 color: white; border: none; padding: 10px 15px;
                 border-radius: 6px; font-weight: bold;
             }}
             #primaryActionButton:hover {{ background-color: #0069d9; }}
-            
             #secondaryActionButton {{
                 background-color: {self.theme_colors.get('surface_color', '#fff')};
                 color: {self.theme_colors.get('text_color', '#000')};
@@ -311,14 +305,10 @@ class ClientesWindow(QWidget):
             }}
         """
         self.setStyleSheet(style)
-        
-        # Recarrega os dados para que os ícones internos da tabela sejam redesenhados
         self.atualizar_visualizacao_dados()
 
     def update_button_icons(self):
-        """Define ou atualiza os ícones de todos os botões com base no tema."""
         icon_color = self.theme_colors.get('text_color', '#000') 
-        
         self.search_button.setIcon(IconManager.get_icon('search', icon_color))
         self.add_button.setIcon(IconManager.get_icon('add', 'white'))
         self.importar_csv_button.setIcon(IconManager.get_icon('import', icon_color))
@@ -342,8 +332,10 @@ class ClientesWindow(QWidget):
         layout.addWidget(search_group)
 
         self.tabela = QTableWidget()
-        self.tabela.setColumnCount(6)
-        self.tabela.setHorizontalHeaderLabels(["ID", "Nome", "Nascimento (Idade)", "Telefone", "Email", "Ações"])
+        # MODIFICAÇÃO: Aumentado para 7 colunas
+        self.tabela.setColumnCount(7)
+        # MODIFICAÇÃO: Adicionada a coluna "Endereço"
+        self.tabela.setHorizontalHeaderLabels(["ID", "Nome", "Nascimento (Idade)", "Telefone", "Email", "Endereço", "Ações"])
         self.tabela.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.tabela.verticalHeader().setVisible(False)
         layout.addWidget(self.tabela)
@@ -351,11 +343,8 @@ class ClientesWindow(QWidget):
         paginacao_layout = QHBoxLayout()
         self.prev_page_btn = QPushButton(" Anterior")
         self.prev_page_btn.clicked.connect(self.ir_pagina_anterior)
-        
-        # --- CORREÇÃO: Adicionando objectName para estilização ---
         self.page_label = QLabel(f"Página {self.pagina_atual} de {self.total_paginas}")
         self.page_label.setObjectName("paginationLabel")
-
         self.next_page_btn = QPushButton("Próxima ")
         self.next_page_btn.setLayoutDirection(Qt.RightToLeft)
         self.next_page_btn.clicked.connect(self.ir_proxima_pagina)
@@ -370,21 +359,48 @@ class ClientesWindow(QWidget):
         self.add_button = QPushButton(" Adicionar Cliente")
         self.add_button.setObjectName("primaryActionButton")
         self.add_button.clicked.connect(self.abrir_formulario_cliente)
-        
         self.importar_csv_button = QPushButton(" Importar CSV")
-        self.importar_csv_button.setObjectName("secondaryActionButton") # Adicionado
+        self.importar_csv_button.setObjectName("secondaryActionButton")
         self.importar_csv_button.clicked.connect(self.importar_csv)
-        
         self.exportar_csv_button = QPushButton(" Exportar CSV")
-        self.exportar_csv_button.setObjectName("secondaryActionButton") # Adicionado
+        self.exportar_csv_button.setObjectName("secondaryActionButton")
         self.exportar_csv_button.clicked.connect(self.exportar_csv)
-
         action_layout.addWidget(self.add_button)
         action_layout.addWidget(self.importar_csv_button)
         action_layout.addWidget(self.exportar_csv_button)
         layout.addLayout(action_layout)
         
-
+    def atualizar_tabela(self, clientes):
+        self.tabela.setRowCount(0)
+        icon_color = self.theme_colors.get('text_color', '#000')
+        
+        for row, cliente in enumerate(clientes):
+            self.tabela.insertRow(row)
+            self.tabela.setItem(row, 0, QTableWidgetItem(str(cliente['id'])))
+            self.tabela.setItem(row, 1, QTableWidgetItem(cliente['nome']))
+            self.tabela.setItem(row, 2, QTableWidgetItem(self.formatar_data_nascimento(cliente['data_nascimento'])))
+            self.tabela.setItem(row, 3, QTableWidgetItem(cliente['telefone'] or ""))
+            self.tabela.setItem(row, 4, QTableWidgetItem(cliente['email'] or ""))
+            # MODIFICAÇÃO: Adicionada a célula de endereço na coluna 5
+            self.tabela.setItem(row, 5, QTableWidgetItem(cliente.get('endereco', ''))) # .get() para segurança
+            
+            acoes_widget = QWidget()
+            acoes_layout = QHBoxLayout(acoes_widget)
+            acoes_layout.setContentsMargins(5, 2, 5, 2); acoes_layout.setSpacing(5)
+            
+            editar_btn = QPushButton(IconManager.get_icon('edit', icon_color), " ")
+            editar_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
+            editar_btn.clicked.connect(lambda _, c_id=cliente['id']: self.abrir_formulario_cliente(c_id))
+            
+            excluir_btn = QPushButton(IconManager.get_icon('delete', icon_color), " ")
+            excluir_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
+            excluir_btn.clicked.connect(lambda _, c_id=cliente['id']: self.excluir_cliente(c_id))
+            
+            acoes_layout.addWidget(editar_btn); acoes_layout.addWidget(excluir_btn)
+            
+            # MODIFICAÇÃO: Widget de ações movido para a coluna 6
+            self.tabela.setCellWidget(row, 6, acoes_widget)
+            
     def ir_pagina_anterior(self):
         if self.pagina_atual > 1:
             self.pagina_atual -= 1
@@ -417,7 +433,6 @@ class ClientesWindow(QWidget):
         self.next_page_btn.setEnabled(self.pagina_atual < self.total_paginas)
 
     def formatar_data_nascimento(self, data_nascimento):
-        """Formata a data e calcula a idade."""
         if not data_nascimento: return ""
         try:
             data = datetime.strptime(str(data_nascimento), '%Y-%m-%d')
@@ -426,54 +441,17 @@ class ClientesWindow(QWidget):
             return f"{data.strftime('%d/%m/%Y')} ({idade} anos)"
         except (ValueError, TypeError):
             return str(data_nascimento)
-    
-    def atualizar_tabela(self, clientes):
-        """Preenche a tabela com a lista de clientes fornecida."""
-        self.tabela.setRowCount(0)
-        icon_color = self.theme_colors.get('text_color', '#000')
-        
-        for row, cliente in enumerate(clientes):
-            self.tabela.insertRow(row)
-            self.tabela.setItem(row, 0, QTableWidgetItem(str(cliente['id'])))
-            self.tabela.setItem(row, 1, QTableWidgetItem(cliente['nome']))
-            self.tabela.setItem(row, 2, QTableWidgetItem(self.formatar_data_nascimento(cliente['data_nascimento'])))
-            self.tabela.setItem(row, 3, QTableWidgetItem(cliente['telefone'] or ""))
-            self.tabela.setItem(row, 4, QTableWidgetItem(cliente['email'] or ""))
-            
-            # Botões de ação dentro da tabela
-            acoes_widget = QWidget()
-            acoes_layout = QHBoxLayout(acoes_widget)
-            acoes_layout.setContentsMargins(5, 2, 5, 2)
-            acoes_layout.setSpacing(5)
-            
-            editar_btn = QPushButton(IconManager.get_icon('edit', icon_color), " ")
-            editar_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
-            editar_btn.clicked.connect(lambda _, c_id=cliente['id']: self.abrir_formulario_cliente(c_id))
-            
-            excluir_btn = QPushButton(IconManager.get_icon('delete', icon_color), " ")
-            excluir_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
-            excluir_btn.clicked.connect(lambda _, c_id=cliente['id']: self.excluir_cliente(c_id))
-            
-            acoes_layout.addWidget(editar_btn)
-            acoes_layout.addWidget(excluir_btn)
-            self.tabela.setCellWidget(row, 5, acoes_widget)
-            
-    # ... O restante do código (abrir formulário, excluir, importar, exportar) permanece o mesmo ...
+
     def abrir_formulario_cliente(self, cliente_id=None):
-        # Passe self.theme_colors e self (parent) para o diálogo
         dialog = FormularioCliente(self.db, self.theme_colors, cliente_id, self)
-        
-        # O resto do método continua o mesmo
         if dialog.exec_() == QDialog.Accepted:
             self.atualizar_visualizacao_dados()
-            print("DEBUG: Formulário fechado com sucesso. Emitindo sinal 'dados_clientes_alterados'.")
             self.dados_clientes_alterados.emit()
 
     def excluir_cliente(self, cliente_id):
         dialog = AlertDialog(self, "Confirmar Exclusão", 
                              "Tem certeza que deseja excluir este cliente?",
                              alert_type='question', buttons=QMessageBox.Yes | QMessageBox.No, theme_colors=self.theme_colors)
-        
         if dialog.exec_() == QMessageBox.Yes:
             if self.db.excluir_cliente(cliente_id):
                 AlertDialog(self, "Sucesso", "Cliente excluído com sucesso.", alert_type='success', theme_colors=self.theme_colors).exec_()
@@ -521,73 +499,113 @@ class ClientesWindow(QWidget):
     def importacao_concluida(self, importados, atualizados, erros, detalhes):
         self.progress_dialog.close()
         self.atualizar_visualizacao_dados()
-
         if importados > 0 or atualizados > 0:
             self.dados_clientes_alterados.emit()
-
-        msg = (f"Importação concluída!\n\n"
-               f"✔ Clientes novos criados: {importados}\n"
-               f"✔ Clientes existentes atualizados: {atualizados}\n"
-               f"❌ Linhas com erro: {erros}")
-               
-        # --- LÓGICA DE FEEDBACK CORRIGIDA ---
-        # Se houver qualquer tipo de detalhe (erros de linha OU erros críticos), exibe a mensagem.
+        msg = (f"Importação concluída!\n\n✔ Clientes novos: {importados}\n✔ Clientes atualizados: {atualizados}\n❌ Linhas com erro: {erros}")
         if detalhes:
-            erros_detalhados = "\n\nDetalhes dos problemas encontrados:\n" + "\n".join(detalhes[:5])
-            msg += erros_detalhados
-            
-            # Define o tipo de alerta com base no resultado
+            msg += "\n\nDetalhes dos problemas:\n" + "\n".join(detalhes[:5])
             alert_type = 'warning' if (importados > 0 or atualizados > 0) else 'error'
-            title = "Importação Finalizada com Problemas"
+            title = "Importação Finalizada com Avisos"
             AlertDialog(self, title, msg, alert_type=alert_type, theme_colors=self.theme_colors).exec_()
         else:
-            # Apenas se não houver NENHUM detalhe, mostra a mensagem de sucesso puro.
-            AlertDialog(self, "Importação Concluída com Sucesso", msg, alert_type='success', theme_colors=self.theme_colors).exec_()
+            AlertDialog(self, "Importação Concluída", msg, alert_type='success', theme_colors=self.theme_colors).exec_()
 
-    
     def selecionar_item_por_id(self, item_id):
-        """Encontra e seleciona um item na tabela com base no seu ID."""
         for row in range(self.tabela.rowCount()):
             item = self.tabela.item(row, 0)
-            if item: # Garante que a célula não está vazia
-                id_na_tabela = item.data(Qt.UserRole)
-                if id_na_tabela == item_id:
-                    self.tabela.selectRow(row)
-                    self.tabela.scrollToItem(item, QTableWidget.ScrollHint.PositionAtCenter)
-                    break
+            if item and item.data(Qt.UserRole) == item_id:
+                self.tabela.selectRow(row)
+                self.tabela.scrollToItem(item, QTableWidget.ScrollHint.PositionAtCenter)
+                break
 
 class FormularioCliente(QDialog):
-    # 1. Construtor modificado para aceitar theme_colors
     def __init__(self, db, theme_colors, cliente_id=None, parent=None):
         super().__init__(parent)
         self.db = db
-        self.theme_colors = theme_colors # Armazena o tema
+        self.theme_colors = theme_colors
         self.cliente_id = cliente_id
         self.cliente = None
+        self.drag_position = None # Para arrastar a janela
+
+        # MODIFICAÇÃO: Configurações para janela sem bordas
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setModal(True)
         
         if cliente_id:
             self.cliente = self.db.obter_cliente(cliente_id)
             if not self.cliente:
-                QMessageBox.warning(self, "Erro", "Cliente não encontrado!")
+                # Use o AlertDialog para consistência
+                AlertDialog(parent, "Erro", "Cliente não encontrado!", alert_type='error', theme_colors=theme_colors).exec_()
                 self.reject()
+                return
         
         self.initUI()
-        self.apply_styles() # 2. Aplica os estilos do tema
+        self.apply_styles()
         
         if self.cliente:
             self.carregar_dados_cliente()
     
     def initUI(self):
-        self.setWindowTitle("Cadastro de Cliente")
         self.setFixedWidth(500)
-        layout = QVBoxLayout(self)
         
+        # MODIFICAÇÃO: Estrutura principal para janela sem bordas
+        main_container = QFrame(self)
+        main_container.setObjectName("mainContainer")
+
+        base_layout = QVBoxLayout(self)
+        base_layout.setContentsMargins(0, 0, 0, 0)
+        base_layout.addWidget(main_container)
+
+        container_layout = QVBoxLayout(main_container)
+        container_layout.setContentsMargins(1, 1, 1, 1)
+        container_layout.setSpacing(0)
+
+        # --- Cabeçalho Customizado ---
+        header = self._criar_cabecalho()
+        
+        # --- Corpo do Formulário ---
+        body = self._criar_corpo()
+
+        container_layout.addWidget(header)
+        container_layout.addWidget(body)
+
+    def _criar_cabecalho(self):
+        """Cria o widget de cabeçalho da janela."""
+        header = QFrame()
+        header.setObjectName("header")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(20, 10, 10, 10)
+        
+        title_label = QLabel("Cadastro de Cliente")
+        title_label.setObjectName("headerTitleLabel")
+
+        help_button = QPushButton(IconManager.get_icon('ajuda', color=self.theme_colors.get('text_secondary')), "")
+        help_button.setObjectName("controlButton")
+        help_button.setFixedSize(28, 28)
+
+        close_button = QPushButton(IconManager.get_icon('fechar', color=self.theme_colors.get('text_secondary')), "")
+        close_button.setObjectName("controlButton")
+        close_button.setFixedSize(28, 28)
+        close_button.clicked.connect(self.reject)
+
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
+        header_layout.addWidget(help_button)
+        header_layout.addWidget(close_button)
+        return header
+
+    def _criar_corpo(self):
+        """Cria o widget de corpo com todos os campos do formulário."""
+        body = QWidget()
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(20, 15, 20, 20)
+
         form_group = QGroupBox("Dados do Cliente")
         form_layout = QFormLayout(form_group)
         
         self.nome_input = QLineEdit()
         self.data_nascimento_input = QDateEdit(calendarPopup=True)
-        # Define uma data inicial padrão mais realista
         self.data_nascimento_input.setDate(QDate.currentDate().addYears(-18))
         self.data_nascimento_input.setDisplayFormat("dd/MM/yyyy")
 
@@ -603,7 +621,6 @@ class FormularioCliente(QDialog):
         layout.addWidget(form_group)
         
         button_layout = QHBoxLayout()
-        # 3. Ícones agora usam as cores do tema
         self.salvar_btn = QPushButton(IconManager.get_icon('save', 'white'), " Salvar")
         self.salvar_btn.setObjectName("primaryButton")
         self.salvar_btn.clicked.connect(self.salvar_cliente)
@@ -616,87 +633,63 @@ class FormularioCliente(QDialog):
         button_layout.addWidget(self.cancelar_btn)
         button_layout.addWidget(self.salvar_btn)
         layout.addLayout(button_layout)
+        return body
 
-    # 4. NOVO MÉTODO para aplicar o estilo do tema
     def apply_styles(self):
         colors = self.theme_colors
-        # Reutilizamos o mesmo estilo do formulário de fornecedor para manter a consistência
         self.setStyleSheet(f"""
-            QDialog {{
+            #mainContainer {{
                 background-color: {colors['bg_color']};
-            }}
-            QGroupBox {{
-                font-weight: bold;
-                color: {colors['text_color']};
+                border-radius: 12px;
                 border: 1px solid {colors['border_color']};
-                border-radius: 6px;
-                margin-top: 10px;
+            }}
+            #header {{
+                border-bottom: 1px solid {colors['border_color']};
+            }}
+            #headerTitleLabel {{
+                color: {colors.get('text_color', '#000')};
+                font-weight: bold; font-size: 11pt;
+            }}
+            #controlButton {{ background: transparent; border: none; border-radius: 14px; }}
+            #controlButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }}
+            QGroupBox {{
+                font-weight: bold; color: {colors['text_color']};
+                border: 1px solid {colors['border_color']};
+                border-radius: 6px; margin-top: 10px;
+                padding: 15px 10px 10px 10px;
             }}
             QGroupBox::title {{
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 5px;
-                left: 10px;
+                subcontrol-origin: margin; subcontrol-position: top left;
+                padding: 0 5px; left: 10px;
             }}
-            QLabel, QDateEdit {{
-                color: {colors['text_color']};
-            }}
+            QLabel, QDateEdit {{ color: {colors['text_color']}; }}
             QLineEdit, QDateEdit {{
                 background-color: {colors['surface_color']};
                 border: 1px solid {colors['border_color']};
-                padding: 6px;
-                border-radius: 4px;
+                padding: 6px; border-radius: 4px;
             }}
-            QLineEdit:focus, QDateEdit:focus {{
-                border: 1px solid {colors['accent_color']};
-            }}
-            QDateEdit::down-arrow {{
-                /* Você pode adicionar um ícone de seta aqui se desejar */
-                width: 16px;
-                height: 16px;
-            }}
-            QCalendarWidget QWidget {{
-                alternate-background-color: {colors['button_hover']};
-            }}
-            #qt_calendar_navigationbar {{
-                background-color: {colors['surface_color']};
-            }}
-            /* Botão Primário (Salvar) */
-            #primaryButton {{
-                background-color: {colors['accent_color']};
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }}
-            #primaryButton:hover {{
-                background-color: #005bb5;
-            }}
-            /* Botão Secundário (Cancelar) */
+            QLineEdit:focus, QDateEdit:focus {{ border: 1px solid {colors['accent_color']}; }}
+            QCalendarWidget QWidget {{ alternate-background-color: {colors['button_hover']}; }}
+            #qt_calendar_navigationbar {{ background-color: {colors['surface_color']}; }}
+            QPushButton {{ font-weight: bold; padding: 10px 25px; border-radius: 8px; min-width: 90px;}}
+            #primaryButton {{ background-color: {colors['accent_color']}; color: white; border: none; }}
             #secondaryButton {{
-                background-color: {colors['surface_color']};
-                color: {colors['text_color']};
+                background-color: transparent; color: {colors.get('text_color', '#000')};
                 border: 1px solid {colors['border_color']};
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
             }}
-            #secondaryButton:hover {{
-                border-color: {colors['accent_color']};
-            }}
+            #secondaryButton:hover {{ background-color: {colors.get('button_hover', '#eee')}; }}
         """)
 
     def carregar_dados_cliente(self):
         self.nome_input.setText(self.cliente['nome'])
-        if self.cliente['data_nascimento']:
+        if self.cliente.get('data_nascimento'):
             try:
                 data = datetime.strptime(str(self.cliente['data_nascimento']), '%Y-%m-%d')
                 self.data_nascimento_input.setDate(QDate(data.year, data.month, data.day))
             except (ValueError, TypeError): pass
-        self.telefone_input.setText(self.cliente['telefone'] or "")
-        self.email_input.setText(self.cliente['email'] or "")
-        self.endereco_input.setText(self.cliente['endereco'] or "")
+        self.telefone_input.setText(self.cliente.get('telefone', ''))
+        self.email_input.setText(self.cliente.get('email', ''))
+        self.endereco_input.setText(self.cliente.get('endereco', ''))
 
     def salvar_cliente(self):
         nome = self.nome_input.text().strip()
@@ -724,6 +717,17 @@ class FormularioCliente(QDialog):
                 AlertDialog(self, "Sucesso", mensagem, alert_type='success', theme_colors=self.theme_colors).exec_()
                 self.accept()
             else:
-                AlertDialog(self, "Erro", "Não foi possível salvar o cliente no banco de dados.", alert_type='error', theme_colors=self.theme_colors).exec_()
+                AlertDialog(self, "Erro", "Não foi possível salvar o cliente.", alert_type='error', theme_colors=self.theme_colors).exec_()
         except Exception as e:
-            AlertDialog(self, "Erro Crítico", f"Ocorreu um erro inesperado ao salvar:\n{str(e)}", alert_type='error', theme_colors=self.theme_colors).exec_()
+            AlertDialog(self, "Erro Crítico", f"Ocorreu um erro inesperado:\n{str(e)}", alert_type='error', theme_colors=self.theme_colors).exec_()
+
+    # --- Eventos para mover a janela ---
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.drag_position = event.globalPos() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self.drag_position and event.buttons() == Qt.LeftButton:
+            self.move(event.globalPos() - self.drag_position)
+            event.accept()

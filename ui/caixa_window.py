@@ -2,8 +2,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QLab
                             QPushButton, QTableWidget, QTableWidgetItem, QComboBox, QDateEdit,
                             QMessageBox, QDialog, QFormLayout, QTextEdit, QDoubleSpinBox,
                             QSpinBox, QHeaderView, QCheckBox, QGroupBox, QGridLayout, QFrame,
-                            QSplitter, QApplication,  QFileDialog, QMessageBox, QHBoxLayout, QLayout, QRadioButton, QCompleter)
-from PyQt5.QtCore import pyqtSignal, Qt, QDate, QDateTime, QMarginsF 
+                            QSplitter, QApplication,  QFileDialog, QMessageBox, QHBoxLayout, QLayout, QRadioButton, QCompleter, QAbstractSpinBox)
+from PyQt5.QtCore import pyqtSignal, Qt, QDate, QDateTime, QMarginsF, QTimer 
 from PyQt5.QtGui import QIcon, QColor, QFont, QTextDocument, QPageSize, QPageLayout, QIcon, QPixmap
 from PyQt5.QtPrintSupport import QPrinter
 import os
@@ -17,6 +17,9 @@ from collections import defaultdict
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
 
 import datetime
+
+from PyQt5.QtMultimedia import QSoundEffect
+from PyQt5.QtCore import QUrl
 
 # =================================================================================
 #  1. CLASSES BASE PARA JANELAS DE DIÁLOGO TEMÁTICAS (ADICIONADAS AQUI)
@@ -100,8 +103,33 @@ class ThemedDialog(QDialog):
 
 class AlertDialog(ThemedDialog):
     """Substituto para QMessageBox, com o cabeçalho temático."""
+    
+    # Atributo de classe para carregar o som apenas uma vez, otimizando o desempenho
+    success_sound_player = None
+
     def __init__(self, parent, title, message, alert_type='info', buttons=QMessageBox.Ok, theme_colors=None):
         super().__init__(parent, title, theme_colors)
+        
+        # --- INÍCIO DA LÓGICA DE EFEITO SONORO ---
+        if alert_type == 'success':
+            # Inicializa o player de som na primeira vez que uma mensagem de sucesso é mostrada
+            if AlertDialog.success_sound_player is None:
+                sound_file_path = "assets/sounds/success.wav"
+                
+                if os.path.exists(sound_file_path):
+                    AlertDialog.success_sound_player = QSoundEffect()
+                    AlertDialog.success_sound_player.setSource(QUrl.fromLocalFile(sound_file_path))
+                    AlertDialog.success_sound_player.setVolume(0.4) # Ajuste o volume (0.0 a 1.0)
+                else:
+                    # Imprime um aviso útil no console se o arquivo de som não for encontrado
+                    print(f"Aviso: Arquivo de som de sucesso não encontrado em '{sound_file_path}'")
+                    # Define como False para não tentar carregar novamente
+                    AlertDialog.success_sound_player = False
+
+            # Se o player foi carregado com sucesso, toca o som
+            if AlertDialog.success_sound_player:
+                AlertDialog.success_sound_player.play()
+        # --- FIM DA LÓGICA DE EFEITO SONORO ---
         
         type_info = {
             'success':  {'icon': 'check', 'color': '#28a745'},
@@ -165,9 +193,9 @@ class CaixaWindow(QWidget):
     venda_finalizada = pyqtSignal()
 
     movimento_manual_registrado = pyqtSignal()
-    dados_clientes_alterados = pyqtSignal()  # <-- ADICIONE APENAS ESTA LINHA
+    dados_clientes_alterados = pyqtSignal()  
 
-    def __init__(self, db, theme_colors, settings): # Adicione 'settings'
+    def __init__(self, db, theme_colors, settings): 
         super().__init__()
         self.db = db
         self.theme_colors = theme_colors
@@ -188,6 +216,7 @@ class CaixaWindow(QWidget):
         self.verificar_caixa_aberto()
         self.carregar_clientes()
         self.carregar_produtos()
+        self.setup_atalhos_e_foco()
         self.setup_codigo_barras()
 
     def _update_icons(self):
@@ -221,7 +250,7 @@ class CaixaWindow(QWidget):
         if hasattr(self, 'btn_exportar_pdf'):
             self.btn_exportar_pdf.setIcon(IconManager.get_icon('report', color=text_color))
 
-        # ================================================================= #
+    # ================================================================= #
     #       CORREÇÃO PRINCIPAL: MÉTODO set_theme REFEITO                #
     # ================================================================= #
     def set_theme(self, theme_colors):
@@ -313,7 +342,6 @@ class CaixaWindow(QWidget):
         self.verificar_caixa_aberto() # Atualiza as cores do status
         self.update() # Força o redesenho
 
-
     def initUI(self):
         # ... (seu método initUI sem alterações, mas adicionando objectNames) ...
         main_layout = QVBoxLayout(self)
@@ -370,45 +398,76 @@ class CaixaWindow(QWidget):
 
         return container
     
+    # Em CaixaWindow, SUBSTITUA este método
     def setup_vendas_tab(self):
-        # ... (seu método setup_vendas_tab sem alterações, mas adicionando objectNames) ...
-        main_layout = QHBoxLayout(self.tab_vendas); splitter = QSplitter(Qt.Horizontal)
-        left_panel_widget = QWidget(); layout_esquerda = QVBoxLayout(left_panel_widget); layout_esquerda.setContentsMargins(0, 0, 0, 0)
-        frame_info = QFrame(); frame_info.setFrameShape(QFrame.StyledPanel); frame_info_layout = QGridLayout(frame_info)
+        main_layout = QHBoxLayout(self.tab_vendas)
+        splitter = QSplitter(Qt.Horizontal)
+        
+        left_panel_widget = QWidget()
+        layout_esquerda = QVBoxLayout(left_panel_widget)
+        layout_esquerda.setContentsMargins(0, 0, 0, 0)
+
+        frame_info = QFrame(); frame_info.setFrameShape(QFrame.StyledPanel)
+        frame_info_layout = QGridLayout(frame_info)
+        
         frame_info_layout.addWidget(QLabel("Cliente:"), 0, 0)
         self.cb_cliente = QComboBox(); self.cb_cliente.setMinimumWidth(200)
         frame_info_layout.addWidget(self.cb_cliente, 0, 1)
-        self.btn_add_cliente = QPushButton(); self.btn_add_cliente.setFixedSize(30, 30); self.btn_add_cliente.setToolTip("Adicionar Novo Cliente"); self.btn_add_cliente.clicked.connect(self.adicionar_novo_cliente)
+        
+        self.btn_add_cliente = QPushButton(); self.btn_add_cliente.setFixedSize(30, 30)
+        self.btn_add_cliente.setToolTip("Adicionar Novo Cliente"); self.btn_add_cliente.clicked.connect(self.adicionar_novo_cliente)
         frame_info_layout.addWidget(self.btn_add_cliente, 0, 2)
+        
         frame_info_layout.addWidget(QLabel("Produto/Código:"), 1, 0)
-        self.cb_produto = AutoPopupComboBox(); self.cb_produto.setEditable(True); self.cb_produto.lineEdit().returnPressed.connect(self.buscar_produto)
-        frame_info_layout.addWidget(self.cb_produto, 1, 1)
+        self.cb_produto = AutoPopupComboBox(); self.cb_produto.setEditable(True)
+        self.cb_produto.lineEdit().returnPressed.connect(self.buscar_e_adicionar_produto)
+        frame_info_layout.addWidget(self.cb_produto, 1, 1, 1, 2)
+        
         frame_info_layout.addWidget(QLabel("Quantidade:"), 0, 3)
         self.spin_quantidade = QSpinBox(); self.spin_quantidade.setMinimum(1); self.spin_quantidade.setMaximum(9999)
         frame_info_layout.addWidget(self.spin_quantidade, 0, 4)
+        
         frame_info_layout.addWidget(QLabel("Preço Unitário:"), 1, 3)
-        self.spin_preco = QDoubleSpinBox(); self.spin_preco.setMinimum(0); self.spin_preco.setMaximum(999999.99); self.spin_preco.setDecimals(2); self.spin_preco.setSingleStep(0.10); self.spin_preco.setPrefix("R$ ")
+        self.spin_preco = QDoubleSpinBox(); self.spin_preco.setMinimum(0); self.spin_preco.setMaximum(999999.99)
+        self.spin_preco.setDecimals(2); self.spin_preco.setSingleStep(0.10); self.spin_preco.setPrefix("R$ ")
         frame_info_layout.addWidget(self.spin_preco, 1, 4)
+        
         self.btn_adicionar_item = QPushButton(" Adicionar Item"); self.btn_adicionar_item.clicked.connect(self.adicionar_item)
-        frame_info_layout.addWidget(self.btn_adicionar_item, 0, 5, 2, 1)
+        frame_info_layout.addWidget(self.btn_adicionar_item, 0, 5, 2, 1, Qt.AlignVCenter)
         layout_esquerda.addWidget(frame_info)
-        self.tabela_itens = QTableWidget(); self.tabela_itens.setColumnCount(6); self.tabela_itens.setHorizontalHeaderLabels(['Cód.', 'Produto', 'Qtde', 'Preço Unit.', 'Subtotal', ''])
-        self.tabela_itens.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch); self.tabela_itens.setColumnWidth(5, 40)
+        
+        self.tabela_itens = QTableWidget(); self.tabela_itens.setColumnCount(6)
+        self.tabela_itens.setHorizontalHeaderLabels(['Cód.', 'Produto', 'Qtde', 'Preço Unit.', 'Subtotal', ''])
+        self.tabela_itens.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.tabela_itens.setColumnWidth(5, 40)
+        self.tabela_itens.setToolTip("Use a tecla 'Delete' para remover o último item adicionado")
         layout_esquerda.addWidget(self.tabela_itens)
+        
         frame_total = QFrame(); frame_total.setFrameShape(QFrame.StyledPanel); frame_total_layout = QHBoxLayout(frame_total)
-        self.lbl_total = QLabel("Total: R$ 0,00"); self.lbl_total.setObjectName("totalLabel") # Adicionado objectName
+        self.lbl_total = QLabel("Total: R$ 0,00"); self.lbl_total.setObjectName("totalLabel")
         frame_total_layout.addWidget(self.lbl_total); frame_total_layout.addStretch()
-        self.btn_limpar = QPushButton(" Limpar Venda"); self.btn_limpar.setObjectName("warningButton"); self.btn_limpar.clicked.connect(self.limpar_venda)
+        
+        self.btn_limpar = QPushButton(" Limpar Venda"); self.btn_limpar.setObjectName("warningButton")
+        self.btn_limpar.setToolTip("Limpar a venda atual (F11)"); self.btn_limpar.setShortcut("F11")
+        self.btn_limpar.clicked.connect(self.limpar_venda)
         frame_total_layout.addWidget(self.btn_limpar)
-        self.btn_finalizar = QPushButton(" Finalizar Venda"); self.btn_finalizar.setObjectName("successButton"); self.btn_finalizar.clicked.connect(self.finalizar_venda)
+        
+        self.btn_finalizar = QPushButton(" Finalizar Venda"); self.btn_finalizar.setObjectName("successButton")
+        self.btn_finalizar.setToolTip("Finalizar e registrar a venda (F12)"); self.btn_finalizar.setShortcut("F12")
+        self.btn_finalizar.clicked.connect(self.finalizar_venda)
         frame_total_layout.addWidget(self.btn_finalizar)
-        layout_esquerda.addWidget(frame_total); splitter.addWidget(left_panel_widget)
+        layout_esquerda.addWidget(frame_total)
+        
+        splitter.addWidget(left_panel_widget)
+        
         right_panel_widget = QWidget(); layout_direita = QVBoxLayout(right_panel_widget)
-        self.lbl_imagem_produto = QLabel("Selecione um produto para ver a imagem"); self.lbl_imagem_produto.setAlignment(Qt.AlignCenter); self.lbl_imagem_produto.setMinimumSize(250, 250)
+        self.lbl_imagem_produto = QLabel("Selecione um produto para ver a imagem"); self.lbl_imagem_produto.setAlignment(Qt.AlignCenter)
+        self.lbl_imagem_produto.setMinimumSize(250, 250)
         layout_direita.addWidget(self.lbl_imagem_produto, 1)
-        splitter.addWidget(right_panel_widget); splitter.setSizes([700, 300]); main_layout.addWidget(splitter)
+        splitter.addWidget(right_panel_widget)
+        
+        splitter.setSizes([700, 300]); main_layout.addWidget(splitter)
     
-
     def adicionar_item_pelo_codigo(self):
         """Busca um produto pelo código de barras e o adiciona ao carrinho."""
         codigo_ou_nome = self.cb_produto.currentText().strip()
@@ -448,13 +507,11 @@ class CaixaWindow(QWidget):
             produto_data = self.cb_produto.itemData(i)
             if not produto_data: continue
 
-            # --- INÍCIO DA CORREÇÃO ---
             # Agora verifica se o texto corresponde ao código de barras OU ao nome exato
             if (produto_data.get('codigo_barras') == texto_busca or 
                 produto_data.get('nome').lower() == texto_busca.lower()):
                 index_encontrado = i
                 break
-            # --- FIM DA CORREÇÃO ---
         
         if index_encontrado != -1:
             produto_encontrado = self.cb_produto.itemData(index_encontrado)
@@ -740,9 +797,6 @@ class CaixaWindow(QWidget):
             self.lbl_imagem_produto.setText("Produto sem imagem")
 
     def adicionar_item(self):
-        # --- INÍCIO DA CORREÇÃO ---
-        # Agora a função é inteligente. Ela primeiro busca o produto pelo texto
-        # em vez de depender cegamente do índice selecionado.
         texto_busca = self.cb_produto.currentText().strip()
         produto_base = None
 
@@ -750,62 +804,53 @@ class CaixaWindow(QWidget):
             AlertDialog(self, "Ação Necessária", "Selecione ou digite um produto para adicionar.", 'warning', theme_colors=self.theme_colors).exec_()
             return
 
-        # Procura ativamente pelo produto correspondente ao texto
+        # 1. Encontra o produto na lista do combobox
         for i in range(self.cb_produto.count()):
             produto_data = self.cb_produto.itemData(i)
-            if not produto_data: continue
-            
-            if (produto_data.get('codigo_barras') == texto_busca or 
-                produto_data.get('nome').lower() == texto_busca.lower()):
+            if produto_data and (produto_data.get('codigo_barras') == texto_busca or produto_data.get('nome').lower() == texto_busca.lower()):
                 produto_base = produto_data
                 break
                 
         if not produto_base:
-            AlertDialog(self, "Produto não encontrado", 
-                        f"Nenhum produto com o código ou nome '{texto_busca}' foi encontrado.",
-                        alert_type='warning', theme_colors=self.theme_colors).exec_()
+            AlertDialog(self, "Produto não encontrado", f"Nenhum produto com o código ou nome '{texto_busca}' foi encontrado.", 'warning', theme_colors=self.theme_colors).exec_()
             return
-        # --- FIM DA CORREÇÃO ---
 
-        # 2. USA A FUNÇÃO CENTRAL DO DB PARA OBTER O PRODUTO COM O PREÇO FINAL JÁ APLICADO
+        # Atualiza a UI (imagem e preço) imediatamente ao encontrar o produto
+        self._atualizar_info_produto_selecionado(produto_base)
+
+        # 2. Busca dados completos, incluindo preço promocional
         produto_com_preco_final = self.db.obter_produto_com_preco_promocional(produto_base['id'])
         if not produto_com_preco_final:
             QMessageBox.critical(self, "Erro", "Não foi possível obter os dados de preço do produto.")
             return
 
+        # 3. Determina os detalhes da venda (abre diálogo se for fracionado)
         sale_details = None
-        
-        # 3. A lógica de venda agora usa o objeto 'produto_com_preco_final', que contém os preços corretos
         if produto_com_preco_final.get('fracionado'):
-             # CHAMA A NOVA CLASSE DE DIÁLOGO TEMÁTICA
+            # Usa o novo diálogo temático
             dialog = DialogVendaFracionada(self, produto_com_preco_final, self.theme_colors)
             if dialog.exec_() == QDialog.Accepted:
                 sale_details = dialog.get_sale_details()
-            else:
-                return # O usuário cancelou
+            else: 
+                return # O usuário cancelou o diálogo
         else:
-            # Lógica para produtos não fracionados
             quantidade = self.spin_quantidade.value()
             if quantidade > produto_com_preco_final['quantidade']:
                 QMessageBox.warning(self, "Estoque Insuficiente", f"Estoque disponível: {produto_com_preco_final['quantidade']} unidades.")
                 return
-
             sale_details = {
-                "quantidade": quantidade,
-                "preco_unitario": produto_com_preco_final['preco_venda'], # Usa o preço já corrigido
-                "is_embalagem": True,
+                "quantidade": quantidade, 
+                "preco_unitario": produto_com_preco_final['preco_venda'], 
+                "is_embalagem": True, 
                 "produto_nome": produto_com_preco_final['nome']
             }
 
-        if not sale_details:
-            return
+        if not sale_details: return
 
+        # 4. Adiciona o item ao carrinho de vendas
         item_carrinho = {
             'produto_id': produto_com_preco_final['id'],
-            # --- INÍCIO DA CORREÇÃO 2 ---
-            # Adicionamos o código de barras ao item do carrinho
             'codigo_barras': produto_com_preco_final.get('codigo_barras', 'N/A'),
-            # --- FIM DA CORREÇÃO 2 ---
             'produto_nome': sale_details['produto_nome'],
             'quantidade': sale_details['quantidade'],
             'preco_unitario': sale_details['preco_unitario'],
@@ -817,11 +862,11 @@ class CaixaWindow(QWidget):
         self.atualizar_tabela_itens()
         self.calcular_total()
         
-        # Limpa os campos para a próxima adição
+        # 5. Limpa os campos para a próxima inserção
         self.cb_produto.setCurrentText("")
         self.spin_quantidade.setValue(1)
-        self.spin_preco.setValue(0)
-        self.cb_produto.setFocus()
+        self.cb_produto.lineEdit().setFocus()
+        self.cb_produto.lineEdit().selectAll()
     
     def atualizar_tabela_itens(self):
         self.tabela_itens.setRowCount(0)
@@ -829,10 +874,8 @@ class CaixaWindow(QWidget):
         for i, item in enumerate(self.itens_venda):
             self.tabela_itens.insertRow(i)
             
-            # --- INÍCIO DA CORREÇÃO 3 ---
             # Alterado para exibir o 'codigo_barras' em vez do 'produto_id'
             self.tabela_itens.setItem(i, 0, QTableWidgetItem(str(item['codigo_barras'])))
-            # --- FIM DA CORREÇÃO 3 ---
             
             self.tabela_itens.setItem(i, 1, QTableWidgetItem(item['produto_nome']))
             
@@ -855,16 +898,12 @@ class CaixaWindow(QWidget):
             self.tabela_itens.setCellWidget(i, 5, btn_remover)
     
     def remover_item(self, row):
+        """Remove um item específico da venda (usado pelo botão na tabela)."""
         if 0 <= row < len(self.itens_venda):
             del self.itens_venda[row]
             self.atualizar_tabela_itens()
             self.calcular_total()
-
-            # --- INÍCIO DA CORREÇÃO ---
-            # Ao remover um item, limpa a imagem e o preço, pois o contexto
-            # do último produto selecionado foi perdido.
             self._atualizar_info_produto_selecionado(None)
-            # --- FIM DA CORREÇÃO ---
             
     def calcular_total(self):
         self.total_venda = sum(item['subtotal'] for item in self.itens_venda)
@@ -884,6 +923,59 @@ class CaixaWindow(QWidget):
                 # Define o texto inicial novamente
                 self.lbl_imagem_produto.setText("Selecione um produto para ver a imagem")
     
+    def setup_atalhos_e_foco(self):
+        """Configura o foco inicial e os atalhos de teclado da janela."""
+        # Usamos QTimer.singleShot(0, ...) para garantir que o comando de foco
+        # seja executado DEPOIS que a janela estiver totalmente carregada e visível.
+        # Isso resolve o problema do cursor não aparecer.
+        QTimer.singleShot(0, self.cb_produto.lineEdit().setFocus)
+
+    def buscar_e_adicionar_produto(self):
+        """Busca um produto e o adiciona ao carrinho, ideal para leitores de código de barras."""
+        texto_busca = self.cb_produto.currentText().strip()
+        if not texto_busca: return
+
+        index_encontrado = -1
+        for i in range(self.cb_produto.count()):
+            produto_data = self.cb_produto.itemData(i)
+            if produto_data and (produto_data.get('codigo_barras') == texto_busca or produto_data.get('nome').lower() == texto_busca.lower()):
+                index_encontrado = i
+                break
+        
+        if index_encontrado != -1:
+            self.cb_produto.setCurrentIndex(index_encontrado)
+            self.adicionar_item()
+        else:
+            AlertDialog(self, "Produto não encontrado", f"Nenhum produto com o código ou nome '{texto_busca}' foi encontrado.", 'warning', theme_colors=self.theme_colors).exec_()
+            self.cb_produto.lineEdit().setFocus()
+            self.cb_produto.lineEdit().selectAll()
+
+    def keyPressEvent(self, event):
+        """Captura a tecla 'Delete' para remover o último item adicionado."""
+        # Se a tecla Delete for pressionada, remove o ÚLTIMO item adicionado
+        # sem necessidade de selecionar na tabela.
+        if event.key() == Qt.Key_Delete:
+            if self.itens_venda: # Verifica se há itens no carrinho
+                
+                # Pede confirmação para evitar remoção acidental
+                ultimo_item_nome = self.itens_venda[-1]['produto_nome']
+                confirma = AlertDialog(self, "Confirmar Remoção",
+                                           f"Deseja remover o último item adicionado ({ultimo_item_nome})?",
+                                           'question', 
+                                           QMessageBox.Yes | QMessageBox.No, 
+                                           self.theme_colors).exec_()
+
+                if confirma == QMessageBox.Yes:
+                    self.itens_venda.pop() # Remove o último item da lista
+                    self.atualizar_tabela_itens()
+                    self.calcular_total()
+                    self._atualizar_info_produto_selecionado(None)
+            
+            return # Impede que o evento continue a ser processado
+
+        # Para qualquer outra tecla, usa o comportamento padrão
+        super().keyPressEvent(event)
+
     def finalizar_venda(self):
         if not self.caixa_atual:
             AlertDialog(self, "Caixa Fechado", "Abra o caixa antes de realizar vendas", 'warning', theme_colors=self.theme_colors).exec_()
@@ -903,7 +995,6 @@ class CaixaWindow(QWidget):
 
         venda_data = dialog.get_data()
 
-        # --- Início da Lógica de Cálculo (sem alteração) ---
         if venda_data['salvar_taxas']:
             self.db.definir_configuracao('taxa_cartao_debito', str(venda_data['taxa_debito']))
             self.db.definir_configuracao('taxa_cartao_credito', str(venda_data['taxa_credito']))
@@ -921,13 +1012,10 @@ class CaixaWindow(QWidget):
         if venda_data['forma_pagamento'] == "Dinheiro" and venda_data['valor_recebido'] < total_cliente_paga:
             AlertDialog(self, "Valor Insuficiente", "O valor recebido é menor que o total a pagar.", 'warning', theme_colors=self.theme_colors).exec_()
             return
-        # --- Fim da Lógica de Cálculo ---
 
-        # =================== INÍCIO DA TRANSAÇÃO ATÔMICA ===================
         try:
             self.db.begin_transaction()
 
-            # 1. Registrar a Venda
             venda_id = self.db.registrar_venda(
                 cliente_id=self.cb_cliente.currentData(),
                 valor_total=total_cliente_paga,
@@ -936,21 +1024,18 @@ class CaixaWindow(QWidget):
                 parcelas=venda_data['parcelas'],
                 observacao=venda_data['observacao'],
                 status="Concluída",
-                operador="Sistema"  # Idealmente, seria o usuário logado
+                operador="Sistema"
             )
             if not venda_id:
                 raise Exception("Não foi possível obter o ID da venda registrada.")
 
-            # 2. Registrar Itens e Atualizar Estoque
             for item in self.itens_venda:
-                # 2a. Atualiza o estoque (agora sem commit interno)
                 sucesso_estoque, msg_estoque = self.db.atualizar_estoque_venda(
                     item['produto_id'], item['quantidade'], item['is_embalagem']
                 )
                 if not sucesso_estoque:
-                    raise Exception(msg_estoque) # Propaga o erro do estoque
+                    raise Exception(msg_estoque)
 
-                # 2b. Registra o item da venda
                 vendido_como = 'Embalagem' if item['is_embalagem'] else 'Fração'
                 sucesso_item = self.db.registrar_item_venda(
                     venda_id, item['produto_id'], item['quantidade'],
@@ -959,7 +1044,6 @@ class CaixaWindow(QWidget):
                 if not sucesso_item:
                     raise Exception(f"Falha ao registrar o item {item['produto_nome']}.")
 
-            # 3. Registrar Movimento no Caixa
             movimento_id = self.db.registrar_movimento_caixa(
                 self.caixa_atual['id'], "Entrada", f"Venda #{venda_id}",
                 valor_para_faturamento,
@@ -968,10 +1052,31 @@ class CaixaWindow(QWidget):
             if not movimento_id:
                 raise Exception("Falha ao registrar a entrada no caixa.")
 
-            # 4. Se tudo deu certo, confirma todas as operações
             self.db.commit_transaction()
             
-            # --- Lógica de Sucesso (Executada apenas após o commit) ---
+            # ================================================================= #
+            #       CORREÇÃO CRÍTICA APLICADA AQUI                              #
+            # ================================================================= #
+            # Após a venda ser salva com sucesso (commit), o sistema agora dispara
+            # o recálculo dos níveis de estoque para cada produto que foi vendido.
+            try:
+                # Pega os IDs únicos dos produtos na venda para evitar recálculos repetidos
+                produtos_vendidos_ids = {item['produto_id'] for item in self.itens_venda}
+                
+                for produto_id in produtos_vendidos_ids:
+                    # Chama a função do db_manager para recalcular e salvar os novos níveis
+                    self.db.atualizar_niveis_estoque_calculado(produto_id)
+                
+                # Log opcional para depuração (visível no console)
+                print(f"Níveis de estoque dinâmico recalculados para os produtos: {produtos_vendidos_ids}")
+            except Exception as e:
+                # Mesmo que o recálculo falhe, a venda já foi salva.
+                # Apenas registramos o erro no console para depuração, sem interromper o fluxo.
+                print(f"AVISO: A venda foi salva, mas ocorreu um erro ao recalcular os níveis de estoque: {e}")
+            # ================================================================= #
+            #       FIM DA CORREÇÃO                                             #
+            # ================================================================= #
+            
             saldo_atual = self.db.obter_saldo_atual(self.caixa_atual['id'])
             self.lbl_saldo.setText(f"Saldo Atual: R$ {saldo_atual:.2f}")
             
@@ -982,25 +1087,20 @@ class CaixaWindow(QWidget):
             
             AlertDialog(self, "Sucesso", msg_sucesso, 'success', theme_colors=self.theme_colors).exec_()
             
-            # Limpa a interface para a próxima venda
             self.itens_venda = []
             self.atualizar_tabela_itens()
             self.calcular_total()
             self.cb_cliente.setCurrentIndex(0)
             self._atualizar_info_produto_selecionado(None)
             self.filtrar_movimentos()
-
             self.venda_finalizada.emit()
 
-
         except Exception as e:
-            # 5. Se qualquer etapa falhou, desfaz tudo
             self.db.rollback_transaction()
             print(f"ERRO DE TRANSAÇÃO: {e}")
             AlertDialog(self, "Erro ao Salvar Venda",
                         f"Ocorreu um erro e a venda não foi salva. Todas as alterações foram desfeitas.\n\nDetalhe: {e}",
                         'error', theme_colors=self.theme_colors).exec_()
-        # =================== FIM DA TRANSAÇÃO ATÔMICA ===================
 
     def reduzir_estoque_itens(self, venda_id):
         """Reduz o estoque dos itens vendidos considerando fracionamento"""
@@ -1031,9 +1131,9 @@ class CaixaWindow(QWidget):
             dados = dialog.get_data()
             saldo_inicial = dados['saldo_inicial']
             observacao = dados['observacao']
-            
-            usuario_logado = "Sistema" # Você pode adaptar para pegar o usuário real
-            
+
+            usuario_logado = "Sistema" # Adaptar para pegar o usuário real
+
             caixa_id = self.db.abrir_caixa(saldo_inicial, usuario_logado, observacao)
             if caixa_id:
                 self.verificar_caixa_aberto()
@@ -1088,7 +1188,7 @@ class CaixaWindow(QWidget):
                     AlertDialog(self, "Erro", "Erro ao fechar o caixa no banco de dados.", 'error', theme_colors=self.theme_colors).exec_()
 
     # ===================================================================== #
-    #       FUNÇÕES AUXILIARES DE RELATÓRIO (COPIADAS DE ESTOQUE)         #
+    #       FUNÇÕES AUXILIARES DE RELATÓRIO (COPIADAS DE ESTOQUE)           #
     # ===================================================================== #
 
     def _criar_kpi_boxes(self, kpi_data, doc_width):
@@ -1124,18 +1224,13 @@ class CaixaWindow(QWidget):
         ]))
         return kpi_table
 
-    # Em estoque_window.py E caixa_window.py
-    # SUBSTITUA este método inteiro em AMBOS os arquivos
-
     def _gerar_pdf_com_template(self, file_path, report_title, elementos, company_info, custom_logo_path):
         try:
             left_margin, right_margin, top_margin, bottom_margin = 2*cm, 2*cm, 3.5*cm, 1.5*cm
 
             def header_footer(canvas, doc):
                 canvas.saveState()
-                
-                # --- INÍCIO DA CORREÇÃO: Lógica de Cabeçalho com Tabela ---
-                
+                                
                 # 1. Prepara os elementos para o cabeçalho
                 styles = getSampleStyleSheet()
                 style_info = ParagraphStyle(name='Info', parent=styles['Normal'], alignment=TA_RIGHT, fontSize=9, leading=12)
@@ -1180,8 +1275,6 @@ class CaixaWindow(QWidget):
                 line_y = doc.height + doc.topMargin - h
                 canvas.setStrokeColorRGB(0.9, 0.9, 0.9)
                 canvas.line(doc.leftMargin, line_y, doc.width + doc.leftMargin, line_y)
-
-                # --- FIM DA CORREÇÃO ---
 
                 # Rodapé (sem alteração)
                 canvas.setFont('Helvetica-Oblique', 8)
@@ -1264,10 +1357,8 @@ class CaixaWindow(QWidget):
             )
             
             if cliente_id:
-                # --- INÍCIO DA CORREÇÃO ---
                 # Exibe a mensagem de sucesso para o usuário
                 AlertDialog(self, "Sucesso", "Cliente cadastrado com sucesso!", 'success', theme_colors=self.theme_colors).exec_()
-                # --- FIM DA CORREÇÃO ---
 
                 # 5. Atualiza a lista de clientes e seleciona o novo cliente
                 self.carregar_clientes()
@@ -1433,11 +1524,9 @@ class CaixaWindow(QWidget):
             saldo_atual = self.db.obter_saldo_atual(self.caixa_atual['id'])
             self.lbl_saldo.setText(f"Saldo Atual: R$ {saldo_atual:.2f}")
             
-            # --- CORREÇÃO APLICADA AQUI ---
             # Trocamos carregar_movimentos() por filtrar_movimentos() para que o filtro
             # de período seja respeitado ao atualizar a tabela.
             self.filtrar_movimentos() 
-            # --- FIM DA CORREÇÃO ---
 
             self.movimento_manual_registrado.emit()
             AlertDialog(self, "Sucesso", f"{tipo} registrada com sucesso!", 'success', theme_colors=self.theme_colors).exec_()
@@ -1463,7 +1552,6 @@ class CaixaWindow(QWidget):
         self.dt_rel_inicio.setEnabled(personalizado)
         self.dt_rel_fim.setEnabled(personalizado)
 
-    # SUBSTITUA O MÉTODO gerar_relatorio INTEIRO PELA VERSÃO ABAIXO
 
     def gerar_relatorio(self):
         data_inicio = self.dt_rel_inicio.date().toString("yyyy-MM-dd")
@@ -2086,78 +2174,202 @@ class DialogNovoMovimento(ThemedDialog):
 # ================================================================= #
 #       NOVA CLASSE: DialogVendaFracionada                          #
 # ================================================================= #
+# ================================================================= #
+#       VERSÃO APRIMORADA: DialogVendaFracionada (Substitua a antiga)
+# ================================================================= #
 class DialogVendaFracionada(ThemedDialog):
     def __init__(self, parent, produto, theme_colors):
+        # Herda o cabeçalho e o estilo base da sua ThemedDialog
         super().__init__(parent, "Opção de Venda", theme_colors)
         self.produto = produto
         self.sale_details = None
-        self.setFixedWidth(400)
         
-        # UI
-        form_layout = QFormLayout()
-        titulo = QLabel(f"<b>{produto['nome']}</b>"); titulo.setAlignment(Qt.AlignCenter)
-        self.content_layout.addWidget(titulo)
-        self.radio_embalagem = QRadioButton("Vender Embalagem Inteira")
-        self.radio_unidade = QRadioButton("Vender Unidade Avulsa")
+        # Aumento significativo do tamanho padrão do diálogo
+        self.setMinimumSize(450, 380)
+
+        # --- Estrutura da Interface ---
+        
+        # O content_layout já vem da classe ThemedDialog
+        self.content_layout.setSpacing(15) # Espaçamento entre os widgets
+
+        # 1. Título do Produto
+        self.title_label = QLabel(f"{produto['nome']}")
+        self.title_label.setObjectName("productTitle") # ID para estilização
+        self.content_layout.addWidget(self.title_label, 0, Qt.AlignCenter)
+
+        # 2. Grupo para Seleção do Tipo de Venda
+        type_group = QGroupBox("1. Escolha o Tipo de Venda")
+        type_layout = QHBoxLayout(type_group)
+        type_layout.setContentsMargins(10, 15, 10, 15)
+        
+        self.radio_embalagem = QRadioButton("Vender Embalagem")
+        self.radio_unidade = QRadioButton("Vender Unidade")
         self.radio_embalagem.toggled.connect(self.update_info)
-        btn_group_layout = QHBoxLayout(); btn_group_layout.addWidget(self.radio_embalagem); btn_group_layout.addWidget(self.radio_unidade)
-        form_layout.addRow("Tipo de Venda:", btn_group_layout)
-        self.lbl_info_preco = QLabel(); self.lbl_info_estoque = QLabel()
-        form_layout.addRow("Preço Unitário:", self.lbl_info_preco)
-        form_layout.addRow("Estoque Disponível:", self.lbl_info_estoque)
-        self.spin_quantidade = QDoubleSpinBox(); self.spin_quantidade.setSingleStep(1)
-        form_layout.addRow("Quantidade:", self.spin_quantidade)
-        self.content_layout.addLayout(form_layout)
         
-        # Botões
+        type_layout.addWidget(self.radio_embalagem)
+        type_layout.addWidget(self.radio_unidade)
+        self.content_layout.addWidget(type_group)
+
+        # 3. Grupo para os Detalhes da Venda
+        details_group = QGroupBox("2. Defina os Detalhes")
+        details_layout = QFormLayout(details_group)
+        details_layout.setLabelAlignment(Qt.AlignRight)
+        details_layout.setContentsMargins(10, 15, 10, 15)
+        details_layout.setSpacing(12)
+
+        self.lbl_info_preco = QLabel()
+        self.lbl_info_estoque = QLabel()
+        self.spin_quantidade = QSpinBox() # Alterado para QSpinBox para evitar decimais
+        self.spin_quantidade.setButtonSymbols(QAbstractSpinBox.PlusMinus)
+
+        details_layout.addRow("Preço Unitário:", self.lbl_info_preco)
+        details_layout.addRow("Estoque Disponível:", self.lbl_info_estoque)
+        details_layout.addRow("Quantidade:", self.spin_quantidade)
+        self.content_layout.addWidget(details_group)
+
+        # Adiciona um espaçador para empurrar os botões para baixo
+        self.content_layout.addStretch(1)
+
+        # 4. Botões de Ação
         button_box = QHBoxLayout()
-        self.confirmar_btn = QPushButton("Confirmar"); self.confirmar_btn.setObjectName("primaryButton"); self.confirmar_btn.clicked.connect(self.confirmar)
-        cancelar_btn = QPushButton("Cancelar"); cancelar_btn.setObjectName("secondaryButton"); cancelar_btn.clicked.connect(self.reject)
-        button_box.addStretch(); button_box.addWidget(cancelar_btn); button_box.addWidget(self.confirmar_btn)
+        self.confirmar_btn = QPushButton("Confirmar")
+        self.confirmar_btn.setObjectName("primaryButton")
+        self.confirmar_btn.clicked.connect(self.confirmar)
+        
+        cancelar_btn = QPushButton("Cancelar")
+        cancelar_btn.setObjectName("secondaryButton")
+        cancelar_btn.clicked.connect(self.reject)
+        
+        button_box.addStretch()
+        button_box.addWidget(cancelar_btn)
+        button_box.addWidget(self.confirmar_btn)
         self.content_layout.addLayout(button_box)
 
-        if self.produto.get('quantidade', 0) > 0: self.radio_embalagem.setChecked(True)
-        else: self.radio_unidade.setChecked(True)
+        # --- Lógica de Inicialização ---
+        if self.produto.get('quantidade', 0) > 0:
+            self.radio_embalagem.setChecked(True)
+        else:
+            self.radio_unidade.setChecked(True)
         
         self.apply_styles()
 
     def apply_styles(self):
+        """Aplica uma folha de estilos (QSS) muito mais detalhada para um visual aprimorado."""
         theme = self.theme_colors
         self.setStyleSheet(self.styleSheet() + f"""
-            QLabel, QRadioButton {{ color: {theme.get('text_color')}; }}
-            QDoubleSpinBox {{ background-color: {theme.get('surface_color')}; color: {theme.get('text_color')}; border: 1px solid {theme.get('border_color')}; padding: 6px; border-radius: 4px; }}
-            #primaryButton {{ background-color: {theme.get('accent_color')}; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-weight: bold; }}
-            #secondaryButton {{ background-color: transparent; color: {theme.get('text_color')}; border: 1px solid {theme.get('border_color')}; padding: 8px 16px; border-radius: 6px; font-weight: bold; }}
+            /* Título do Produto */
+            #productTitle {{
+                font-size: 14pt;
+                font-weight: bold;
+                color: {theme.get('accent_color', '#007AFF')};
+                padding-bottom: 10px;
+                border-bottom: 1px solid {theme.get('border_color')};
+                margin-bottom: 10px;
+            }}
+
+            /* Estilo dos Grupos (QGroupBox) */
+            QGroupBox {{
+                font-size: 10pt;
+                font-weight: bold;
+                color: {theme.get('text_secondary')};
+                border: 1px solid {theme.get('border_color')};
+                border-radius: 6px;
+                margin-top: 10px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 5px;
+                left: 10px;
+            }}
+
+            /* Rótulos e Radio Buttons */
+            QLabel, QRadioButton {{
+                color: {theme.get('text_color')};
+                font-size: 11pt;
+            }}
+            QRadioButton::indicator {{ width: 18px; height: 18px; }}
+
+            /* Campo de Quantidade (QSpinBox) */
+            QSpinBox {{
+                background-color: {theme.get('surface_color')};
+                color: {theme.get('text_color')};
+                border: 1px solid {theme.get('border_color')};
+                padding: 8px;
+                border-radius: 4px;
+                font-size: 11pt;
+                font-weight: bold;
+            }}
+
+            /* Botões de Ação */
+            QPushButton {{
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 10pt;
+            }}
+            #primaryButton {{
+                background-color: {theme.get('accent_color')};
+                color: white;
+                border: none;
+            }}
+            #secondaryButton {{
+                background-color: transparent;
+                color: {theme.get('text_color')};
+                border: 1px solid {theme.get('border_color')};
+            }}
+            #secondaryButton:hover {{
+                background-color: {theme.get('button_hover')};
+            }}
         """)
 
     def update_info(self):
+        """Atualiza os campos de preço, estoque e quantidade com base na seleção."""
         if self.radio_embalagem.isChecked():
-            self.spin_quantidade.setDecimals(0); self.spin_quantidade.setMinimum(1); self.spin_quantidade.setValue(1)
-            self.lbl_info_preco.setText(f"R$ {self.produto['preco_venda']:.2f}")
-            estoque_embalagem = int(self.produto.get('quantidade', 0))
-            self.lbl_info_estoque.setText(f"{estoque_embalagem} embalagens"); self.spin_quantidade.setMaximum(estoque_embalagem)
+            self.spin_quantidade.setMinimum(1)
+            self.spin_quantidade.setValue(1)
+            preco_formatado = f"<b>R$ {self.produto['preco_venda']:.2f}</b>"
+            self.lbl_info_preco.setText(preco_formatado)
+            
+            estoque = int(self.produto.get('quantidade', 0))
+            estoque_formatado = f"<b>{estoque}</b> embalagens"
+            self.lbl_info_estoque.setText(estoque_formatado)
+            self.spin_quantidade.setMaximum(estoque)
         else:
-            self.spin_quantidade.setDecimals(0); self.spin_quantidade.setMinimum(1); self.spin_quantidade.setValue(1)
-            self.lbl_info_preco.setText(f"R$ {self.produto['preco_unitario_fracao']:.2f}")
-            estoque_disponivel = int(self.produto.get('estoque_fracionado', 0))
-            self.lbl_info_estoque.setText(f"{estoque_disponivel} {self.produto['unidade_medida']}"); self.spin_quantidade.setMaximum(estoque_disponivel)
+            self.spin_quantidade.setMinimum(1)
+            self.spin_quantidade.setValue(1)
+            preco_formatado = f"<b>R$ {self.produto['preco_unitario_fracao']:.2f}</b>"
+            self.lbl_info_preco.setText(preco_formatado)
+
+            estoque = int(self.produto.get('estoque_fracionado', 0))
+            estoque_formatado = f"<b>{estoque}</b> {self.produto['unidade_medida']}"
+            self.lbl_info_estoque.setText(estoque_formatado)
+            self.spin_quantidade.setMaximum(estoque)
 
     def confirmar(self):
-        if self.spin_quantidade.value() <= 0 or self.spin_quantidade.value() > self.spin_quantidade.maximum():
-            AlertDialog(self, "Estoque Inválido", "A quantidade excede o estoque disponível.", 'warning', self.theme_colors).exec_()
+        """Valida e confirma a seleção do usuário."""
+        quantidade = self.spin_quantidade.value()
+        if quantidade <= 0 or quantidade > self.spin_quantidade.maximum():
+            AlertDialog(self, "Estoque ou Quantidade Inválida",
+                        "A quantidade solicitada é inválida ou excede o estoque disponível.",
+                        'warning', self.theme_colors).exec_()
             return
+        
         is_embalagem = self.radio_embalagem.isChecked()
+        preco_unitario = self.produto['preco_venda'] if is_embalagem else self.produto['preco_unitario_fracao']
+        unidade_nome = 'emb.' if is_embalagem else self.produto['unidade_medida']
+        
         self.sale_details = {
-            "quantidade": self.spin_quantidade.value(),
-            "preco_unitario": self.produto['preco_venda'] if is_embalagem else self.produto['preco_unitario_fracao'],
+            "quantidade": quantidade,
+            "preco_unitario": preco_unitario,
             "is_embalagem": is_embalagem,
-            "produto_nome": f"{self.produto['nome']} ({'emb.' if is_embalagem else self.produto['unidade_medida']})"
+            "produto_nome": f"{self.produto['nome']} ({unidade_nome})"
         }
         self.accept()
 
-    def get_sale_details(self): return self.sale_details
-
-# Adicione esta classe ao seu arquivo ui/caixa_window.py
+    def get_sale_details(self):
+        """Retorna os detalhes da venda após a confirmação."""
+        return self.sale_details
 
 class DialogFinalizarVenda(ThemedDialog):
     def __init__(self, parent, total_venda, taxa_debito, taxa_credito, theme_colors):
@@ -2197,9 +2409,7 @@ class DialogFinalizarVenda(ThemedDialog):
         self.lbl_valor_recebido_text = QLabel("Valor Recebido:")
         self.spin_valor_recebido = QDoubleSpinBox(); self.spin_valor_recebido.setPrefix("R$ "); self.spin_valor_recebido.setMaximum(999999.99)
         
-        # ================================================================= #
-        #       CORREÇÃO APLICADA AQUI                                      #
-        # ================================================================= #
+        # --- MELHORIA APLICADA ---
         # Define o valor inicial do campo "Valor Recebido" como o total da venda.
         self.spin_valor_recebido.setValue(self.total_venda_bruta)
 
@@ -2230,6 +2440,10 @@ class DialogFinalizarVenda(ThemedDialog):
         button_layout = QHBoxLayout()
         self.confirmar_btn = QPushButton("Confirmar Venda"); self.confirmar_btn.setObjectName("primaryButton")
         self.confirmar_btn.clicked.connect(self.accept)
+        # --- MELHORIA APLICADA ---
+        # Torna este o botão padrão, acionado pela tecla Enter.
+        self.confirmar_btn.setDefault(True)
+        
         self.cancelar_btn = QPushButton("Cancelar"); self.cancelar_btn.setObjectName("secondaryButton")
         self.cancelar_btn.clicked.connect(self.reject)
         button_layout.addStretch(); button_layout.addWidget(self.cancelar_btn); button_layout.addWidget(self.confirmar_btn)
@@ -2290,7 +2504,6 @@ class DialogFinalizarVenda(ThemedDialog):
             "parcelas": self.spin_parcelas.value(),
             "observacao": self.text_observacao.toPlainText()
         }
-# Adicione esta classe ao seu arquivo ui/caixa_window.py
 
 class DialogAdicionarCliente(ThemedDialog):
     def __init__(self, parent, theme_colors):
