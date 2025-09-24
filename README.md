@@ -1,44 +1,44 @@
-# Sistema de Controle de Estoque para Bomboniere
+# GestorX - Sistema de Gestão Empresarial
 
-> Sistema completo de gestão de estoque desenvolvido em Python com interface gráfica moderna
+> Sistema de gestão para desktop, focado em pequenos e médios negócios. Desenvolvido em Python como um projeto piloto acadêmico, baseado nas necessidades de um cliente real.
 
-[![Status](https://img.shields.io/badge/Status-Finalizado-success)](https://github.com/seu-usuario/bomboniere-estoque)
+[![Status](https://img.shields.io/badge/Status-Desenvolvimento-success)](https://github.com/seu-usuario/gestorx)
 [![Python](https://img.shields.io/badge/Python-3.8+-3776AB)](https://python.org/)
 [![PyQt5](https://img.shields.io/badge/PyQt5-Interface-41CD52)](https://pypi.org/project/PyQt5/)
 [![License](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
 
-## Sobre
+## Sobre o Projeto
 
-Sistema completo de controle de estoque focado em pequenas empresas como bombonieres, lojas de conveniência e mercadinhos. Desenvolvido com Python e PyQt5, oferece uma interface intuitiva e funcionalidades robustas para gestão empresarial.
+O **GestorX** é uma aplicação desktop completa para gestão empresarial, ideal para pequenos e médios comércios. O sistema nasceu de um projeto piloto universitário, onde tivemos a oportunidade de trabalhar com um cliente real e desenvolver uma solução sob medida para suas dores e necessidades operacionais.
 
-## Funcionalidades
+Com uma interface gráfica moderna e intuitiva construída em Python e PyQt5, o GestorX centraliza as operações mais importantes de um negócio em um único lugar.
 
-### 📦 Gestão de Produtos
-- Cadastro completo com validação de data de validade
-- Controle de entradas e saídas de estoque
-- Organização por categorias
-- Alertas para produtos vencidos ou com estoque baixo
+## ✨ Funcionalidades
+
+### 📊 Painel de Controle (Dashboard)
+- Visão geral com gráficos e indicadores de performance.
+- Resumo de vendas diárias, fluxo de caixa e produtos mais vendidos.
+- Alertas de estoque baixo e outras notificações importantes.
+
+### 📦 Ponto de Venda (PDV) e Estoque
+- **PDV:** Interface rápida e otimizada para registro de vendas.
+- **Controle de Estoque:** Cadastro de produtos, controle de entradas e saídas e ajuste de inventário.
+- **Movimentações:** Histórico detalhado de todas as operações de estoque.
 
 ### 👥 Gestão de Relacionamentos
-- Cadastro de clientes com histórico de compras
-- Gerenciamento de fornecedores
-- Sistema de promoções com prazo de validade
+- Cadastro completo de clientes e fornecedores.
+- Histórico de compras por cliente.
+- **Sistema de Promoções:** Crie promoções com regras e prazo de validade.
 
-### 📊 Relatórios e Analytics
-- Relatórios em PDF e Excel
-- Painel com gráficos de vendas
-- Análise de produtos mais vendidos
-- Controle de estoques críticos
+### 💰 Financeiro e Relatórios
+- **Relatórios de Caixa:** Acompanhe o fluxo de caixa, lucros e despesas.
+- Geração de relatórios em PDF e Excel para análise aprofundada.
+- Análise de performance de vendas por período.
 
-### 🔐 Controle de Acesso
-- Sistema de login com níveis de permissão
-- Perfis de administrador e operador
-- Backup automático de dados
-
-### 🔍 Recursos Avançados
-- Busca inteligente com filtros
-- Notificações visuais e sonoras
-- Interface responsiva e personalizável
+### 🔐 Administração e Segurança
+- **Controle de Usuários:** Sistema de login com perfis (Administrador e Operador).
+- **Notificações por E-mail:** Envio automático de resumos diários ou alertas críticos.
+- Backup automático e manual do banco de dados para garantir a segurança dos dados.
 
 ## Tecnologias
 
