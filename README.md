@@ -158,6 +158,6 @@ Este projeto está licenciado sob uma Licença Proprietária - veja o arquivo [L
   Desenvolvido por Gustavo Moreno  
   <br><br>
   <a href="https://www.linkedin.com/in/gustavomoreno05" target="_blank">
-    <img src="https://cdn-icons-png.flaticon.com/512/174/174857.png" width="24" alt="LinkedIn"/> LinkedIn
+    <img src="https://cdn-icons-png.flaticon.com/512/174/174857.png" width="24" alt="LinkedIn"/>
   </a>
 </div>
