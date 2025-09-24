@@ -98,7 +98,7 @@ O executável será gerado na pasta `dist/`.
 ### Primeiro Acesso
 
 1. Execute o sistema
-2. Crie um usuário administrador
+2. Por padrão as credenciais são 'admin' e 'admin123'
 3. Configure as categorias de produtos
 4. Cadastre fornecedores e produtos iniciais
 
@@ -108,20 +108,6 @@ O executável será gerado na pasta `dist/`.
 2. **Vendas**: Lance saídas do estoque
 3. **Relatórios**: Acompanhe performance através dos dashboards
 4. **Manutenção**: Configure alertas e faça backups regulares
-
-## Screenshots
-
-```
-[Interface Principal]     [Cadastro de Produtos]     [Relatórios]
-┌─────────────────┐      ┌─────────────────┐        ┌─────────────────┐
-│ 📊 Dashboard    │      │ 📦 Produto      │        │ 📈 Vendas       │
-│ ├ Vendas Hoje   │      │ ├ Nome          │        │ ├ Período       │
-│ ├ Estoque Baixo │      │ ├ Categoria     │        │ ├ Gráficos      │
-│ └ Alertas       │      │ └ Validade      │        │ └ Exportar      │
-└─────────────────┘      └─────────────────┘        └─────────────────┘
-```
-
-## Configuração
 
 ### Banco de Dados
 
@@ -143,21 +129,6 @@ Contribuições são bem-vindas! Para contribuir:
 4. Push para a branch (`git push origin feature/nova-funcionalidade`)
 5. Abra um Pull Request
 
-### Diretrizes de Desenvolvimento
-
-- Siga o padrão PEP 8 para código Python
-- Documente novas funcionalidades
-- Teste todas as mudanças antes do commit
-- Use mensagens de commit descritivas
-
-## Roadmap
-
-- [ ] Integração com APIs de pagamento
-- [ ] Módulo de vendas online
-- [ ] Aplicativo mobile complementar
-- [ ] Sincronização na nuvem
-- [ ] Relatórios avançados com BI
-
 ## FAQ
 
 **P: O sistema funciona offline?**
@@ -173,9 +144,7 @@ R: Não há limite técnico, apenas de hardware disponível.
 
 Para suporte técnico ou dúvidas:
 
-- **Issues**: [GitHub Issues](https://github.com/seu-usuario/bomboniere-estoque/issues)
-- **Email**: [g.moreno.souza05@gmail.com](mailto:g.moreno.souza05@gmail.com)
-- **Documentação**: [Wiki do Projeto](https://github.com/seu-usuario/bomboniere-estoque/wiki)
+- **Email**: [g.moreno.souza05@gmail.com](mailto:g.moreno.souza05@gmail.com)  
 
 ## Licença
 
@@ -186,5 +155,10 @@ Este projeto está licenciado sob uma Licença Proprietária - veja o arquivo [L
 ---
 
 <div align="center">
-  Desenvolvido por Gustavo Moreno
+  Desenvolvido por Gustavo Moreno e Adiel Salviano  
+  <br>
+  <a href="https://www.linkedin.com/in/gustavomorenoit" target="_blank">
+    🌐 LinkedIn
+  </a>
 </div>
+
