@@ -13,6 +13,12 @@ O **GestorX** é uma aplicação desktop completa para gestão empresarial, idea
 
 Com uma interface gráfica moderna e intuitiva construída em Python e PyQt5, o GestorX centraliza as operações mais importantes de um negócio em um único lugar.
 
+## 🖼️ Demonstração Visual
+
+| Dashboard | Controle de Estoque | Ponto de Venda (PDV) |
+| :---: | :---: | :---: |
+| ![Dashboard do GestorX](link-para-sua-imagem-do-dashboard-aqui) | ![Tela de Estoque](link-para-sua-imagem-do-estoque-aqui) | ![Tela do PDV](link-para-sua-imagem-do-pdv-aqui) |
+
 ## ✨ Funcionalidades
 
 ### 📊 Painel de Controle (Dashboard)
@@ -158,6 +164,6 @@ Este projeto está licenciado sob uma Licença Proprietária - veja o arquivo [L
   Desenvolvido por Gustavo Moreno  
   <br><br>
   <a href="https://www.linkedin.com/in/gustavomoreno05" target="_blank">
-    <img src="https://cdn-icons-png.flaticon.com/512/174/174857.png" width="24" alt="LinkedIn"/>
+    <img src="https://cdn-icons-png.flaticon.com/512/174/174/174857.png" width="24" alt="LinkedIn"/>
   </a>
 </div>
