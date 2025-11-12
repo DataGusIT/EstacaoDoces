@@ -17,7 +17,7 @@ Com uma interface gráfica moderna e intuitiva construída em Python e PyQt5, o 
 
 | Dashboard | Controle de Estoque | Ponto de Venda (PDV) |
 | :---: | :---: | :---: |
-| <img width="1918" height="1021" alt="Image" src="https://github.com/user-attachments/assets/df01dfaa-14fe-4339-9fd1-1fe2c8f41d2c" /> | <img width="1919" height="1022" alt="Image" src="https://github.com/user-attachments/assets/ce5b3cb9-d20f-47b0-a12c-fb229b6310d3" /> | ![Tela do PDV](link-para-sua-imagem-do-pdv-aqui) |
+| <img width="1918" height="1021" alt="Image" src="https://github.com/user-attachments/assets/df01dfaa-14fe-4339-9fd1-1fe2c8f41d2c" /> | <img width="1919" height="1022" alt="Image" src="https://github.com/user-attachments/assets/ce5b3cb9-d20f-47b0-a12c-fb229b6310d3" /> | <img width="1919" height="1022" alt="Image" src="https://github.com/user-attachments/assets/89af5c59-e089-47e1-966c-0e3a2115d70f" />|
 
 ## ✨ Funcionalidades
 
