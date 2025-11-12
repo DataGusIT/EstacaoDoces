@@ -17,7 +17,7 @@ Com uma interface gráfica moderna e intuitiva construída em Python e PyQt5, o 
 
 | Dashboard | Controle de Estoque | Ponto de Venda (PDV) |
 | :---: | :---: | :---: |
-| ![Dashboard do GestorX](link-para-sua-imagem-do-dashboard-aqui) | ![Tela de Estoque](link-para-sua-imagem-do-estoque-aqui) | ![Tela do PDV](link-para-sua-imagem-do-pdv-aqui) |
+| <img width="1918" height="1021" alt="Image" src="https://github.com/user-attachments/assets/df01dfaa-14fe-4339-9fd1-1fe2c8f41d2c" /> | ![Tela de Estoque](link-para-sua-imagem-do-estoque-aqui) | ![Tela do PDV](link-para-sua-imagem-do-pdv-aqui) |
 
 ## ✨ Funcionalidades
 
